@@ -1,4 +1,4 @@
-# Tripute MVP
+# Tripable MVP
 
 Collaborative trip planning MVP for groups to collect ideas, vote, and generate a shared itinerary.
 
