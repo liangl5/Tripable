@@ -8,6 +8,10 @@ function getUserId() {
   return generated;
 }
 
+export function getCurrentUserId() {
+  return getUserId();
+}
+
 function getUserName() {
   const stored = localStorage.getItem("tripute_user_name");
   if (stored) return stored;
@@ -72,8 +76,15 @@ export const api = {
   getTrips: () => apiFetch("/trips"),
   getTrip: (tripId) => apiFetch(`/trips/${tripId}`),
   createTrip: (payload) => apiFetch("/trips", { method: "POST", body: JSON.stringify(payload) }),
+  deleteTrip: (tripId) => apiFetch(`/trips/${tripId}`, { method: "DELETE" }),
   updateTripDates: (tripId, payload) =>
     apiFetch(`/trips/${tripId}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  updateTripLeaders: (tripId, payload) =>
+    apiFetch(`/trips/${tripId}/leaders`, { method: "PUT", body: JSON.stringify(payload) }),
+  updateTripSurveyDates: (tripId, payload) =>
+    apiFetch(`/trips/${tripId}/survey-dates`, { method: "PUT", body: JSON.stringify(payload) }),
+  updateTripAvailability: (tripId, payload) =>
+    apiFetch(`/trips/${tripId}/availability`, { method: "PUT", body: JSON.stringify(payload) }),
   joinTrip: (tripId) => apiFetch(`/trips/${tripId}/join`, { method: "POST" }),
   getIdeas: (tripId) => apiFetch(`/trips/${tripId}/ideas`),
   createIdea: (tripId, payload) => apiFetch(`/trips/${tripId}/ideas`, { method: "POST", body: JSON.stringify(payload) }),
