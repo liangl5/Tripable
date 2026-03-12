@@ -2,18 +2,15 @@
   "name": "tripute",
   "private": true,
   "workspaces": [
-    "client",
-    "server"
+    "client"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev --workspace client\" \"npm run dev --workspace server\"",
-    "build": "npm run build --workspace client",
-    "start": "npm run start --workspace server"
-  },
-  "devDependencies": {
-    "concurrently": "^8.2.2"
+    "dev": "npm run dev --workspace client",
+    "build": "npm run build --workspace client"
   },
   "dependencies": {
+    "@supabase/auth-helpers-react": "^0.15.0",
+    "@supabase/auth-ui-react": "^0.4.7",
     "@supabase/supabase-js": "^2.99.1"
   }
 }

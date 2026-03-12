@@ -178,7 +178,7 @@ export const useTripStore = create((set, get) => ({
     try {
       const updated = await api.voteIdea(ideaId, value);
       set((state) => ({
-        ideas: state.ideas.map((idea) => (idea.id === updated.id ? updated : idea))
+        ideas: state.ideas.map((idea) => (idea.id === updated.id ? { ...idea, ...updated } : idea))
       }));
     } catch (error) {
       set({ ideas: previous, error: error.message });

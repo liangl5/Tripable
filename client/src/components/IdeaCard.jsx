@@ -1,4 +1,5 @@
 import VoteButtons from "./VoteButtons.jsx";
+import { formatRelativeTime } from "../lib/timeFormat.js";
 
 export default function IdeaCard({ idea, onVote }) {
   return (
@@ -21,7 +22,10 @@ export default function IdeaCard({ idea, onVote }) {
         </div>
         <VoteButtons score={idea.voteScore} userVote={idea.userVote} onVote={onVote} />
       </div>
-      <p className="mt-4 text-xs text-slate-400">Submitted by {idea.submittedBy}</p>
+      <div className="mt-4 flex items-center justify-between">
+        <p className="text-xs text-slate-400">Submitted by {idea.submittedBy}</p>
+        <p className="text-xs text-slate-400">{formatRelativeTime(idea.createdAt)}</p>
+      </div>
     </div>
   );
 }

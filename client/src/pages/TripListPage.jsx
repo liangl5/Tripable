@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import TripList from "../components/TripList.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
+import { useSession } from "../App";
 import { getCurrentUserId } from "../lib/api.js";
 
 export default function TripListPage() {
+  const navigate = useNavigate();
+  const session = useSession();
   const trips = useTripStore((state) => state.trips);
   const loadTrips = useTripStore((state) => state.loadTrips);
   const deleteTrip = useTripStore((state) => state.deleteTrip);
@@ -14,8 +17,12 @@ export default function TripListPage() {
   const [deletingTripId, setDeletingTripId] = useState(null);
 
   useEffect(() => {
+    if (!session) {
+      navigate("/auth");
+      return;
+    }
     loadTrips();
-  }, [loadTrips]);
+  }, [loadTrips, session, navigate]);
 
   const currentUserId = getCurrentUserId();
   const tripsWithOwnership = useMemo(

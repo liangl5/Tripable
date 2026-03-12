@@ -1,6 +1,18 @@
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { useSession } from "../App";
 
 export default function CTA() {
+  const navigate = useNavigate();
+  const session = useSession();
+
+  const handlePlanTrip = () => {
+    if (session) {
+      navigate("/trips/new");
+    } else {
+      navigate("/auth");
+    }
+  };
+
   return (
     <section className="px-5 py-16 sm:px-6 lg:px-8 lg:py-24">
       <div className="mx-auto max-w-6xl overflow-hidden rounded-[2.25rem] bg-[#4C6FFF] px-8 py-14 text-center shadow-card sm:px-12">
@@ -8,12 +20,12 @@ export default function CTA() {
         <h2 className="mx-auto mt-4 max-w-3xl text-3xl font-bold tracking-tight text-white sm:text-5xl">
           Make planning the beginning of the trip.
         </h2>
-        <Link
-          to="/trips/new"
+        <button
+          onClick={handlePlanTrip}
           className="mt-8 inline-flex rounded-full bg-white px-7 py-4 text-base font-semibold text-[#4C6FFF] shadow-soft transition hover:bg-slate-100"
         >
           Plan trip
-        </Link>
+        </button>
       </div>
     </section>
   );

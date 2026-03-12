@@ -36,3 +36,8 @@ Client runs on `http://localhost:5173` and API on `http://localhost:3001`.
 4. Everyone adds ideas
 5. Everyone votes
 6. Generate the itinerary
+
+
+## Possible technical
+1. Cloudflare / Captcha for new users
+2. Personal profile page (hold statistics, allows users to edit profiles, add names->refer to name in trips)

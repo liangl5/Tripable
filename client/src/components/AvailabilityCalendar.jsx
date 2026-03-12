@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import AvailabilityDetails from "./AvailabilityDetails.jsx";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -116,6 +117,7 @@ export default function AvailabilityCalendar({
   const [isSavingSurveyDates, setIsSavingSurveyDates] = useState(false);
   const [dirtyAvailability, setDirtyAvailability] = useState(false);
   const [localMessage, setLocalMessage] = useState("");
+  const [showDetailedView, setShowDetailedView] = useState(false);
 
   const displayedMonth = useMemo(() => dateFromMonthKey(displayedMonthKey), [displayedMonthKey]);
   const draftSurveyDates = useMemo(
@@ -268,13 +270,28 @@ export default function AvailabilityCalendar({
             onClick={() => {
               setMode("group");
               setEditSurveyDates(false);
+              setShowDetailedView(false);
             }}
             className={classNames(
               "rounded-full px-4 py-2 text-xs font-semibold transition",
-              mode === "group" ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
+              mode === "group" && !showDetailedView ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
             )}
           >
             See group availability
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode("group");
+              setEditSurveyDates(false);
+              setShowDetailedView(true);
+            }}
+            className={classNames(
+              "rounded-full px-4 py-2 text-xs font-semibold transition",
+              showDetailedView ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
+            )}
+          >
+            View member breakdown
           </button>
           {isViewerOwner ? (
             <button
@@ -303,7 +320,7 @@ export default function AvailabilityCalendar({
               type="date"
               value={surveyRange.start}
               onChange={(event) => handleSurveyRangeChange("start", event.target.value)}
-              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-normal text-ink"
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-normal text-ink appearance-none"
             />
             <span className="text-xs font-normal text-slate-500">{formatDateInputLabel(surveyRange.start)}</span>
           </label>
@@ -314,7 +331,7 @@ export default function AvailabilityCalendar({
               value={surveyRange.end}
               min={surveyRange.start || undefined}
               onChange={(event) => handleSurveyRangeChange("end", event.target.value)}
-              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-normal text-ink"
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-normal text-ink appearance-none"
             />
             <span className="text-xs font-normal text-slate-500">{formatDateInputLabel(surveyRange.end)}</span>
           </label>
@@ -423,24 +440,16 @@ export default function AvailabilityCalendar({
                   <span className="text-sm font-semibold">{date.getDate()}</span>
                   {editSurveyDates ? (
                     inSurvey ? (
-                      <span className="absolute bottom-2 left-2 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold text-[#2C8B44]">
-                        Open
-                      </span>
+                      <span className="absolute bottom-1 right-1 h-2 w-2 rounded-full bg-[#6BCB77]" aria-label="Open" />
                     ) : null
                   ) : mode === "group" ? (
                     inSurvey ? (
-                      <span className="absolute bottom-2 left-2 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold text-slate-600">
-                        {overlap} free
-                      </span>
+                      <span className="absolute bottom-1 right-1 h-2 w-2 rounded-full bg-[#6BCB77]" aria-label="Members available" />
                     ) : null
                   ) : isSelected ? (
-                    <span className="absolute bottom-2 left-2 rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-bold text-white">
-                      Free
-                    </span>
+                    <span className="absolute bottom-1 right-1 h-2 w-2 rounded-full bg-[#6BCB77]" aria-label="Selected" />
                   ) : inSurvey ? (
-                    <span className="absolute bottom-2 left-2 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold text-slate-500">
-                      Select
-                    </span>
+                    <span className="absolute bottom-1 right-1 h-2 w-2 rounded-full bg-[#F56565]" aria-label="Available to select" />
                   ) : null}
 
                   {isToday ? (

@@ -4,10 +4,13 @@ import AddIdeaModal from "../components/AddIdeaModal.jsx";
 import AvailabilityCalendar from "../components/AvailabilityCalendar.jsx";
 import IdeaCard from "../components/IdeaCard.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
+import { useSession } from "../App";
+import { formatDateRange } from "../lib/timeFormat.js";
 
 export default function TripDashboardPage() {
   const { tripId } = useParams();
   const navigate = useNavigate();
+  const session = useSession();
   const currentTrip = useTripStore((state) => state.currentTrip);
   const ideas = useTripStore((state) => state.ideas);
   const loadTrip = useTripStore((state) => state.loadTrip);
@@ -30,6 +33,12 @@ export default function TripDashboardPage() {
   const [leadersSaved, setLeadersSaved] = useState(false);
 
   useEffect(() => {
+    if (!session) {
+      navigate("/auth");
+    }
+  }, [session, navigate]);
+
+  useEffect(() => {
     if (!tripId) return;
     let cancelled = false;
 
@@ -50,7 +59,7 @@ export default function TripDashboardPage() {
 
   const inviteLink = useMemo(() => {
     if (!tripId) return "";
-    return `${window.location.origin}/trips/${tripId}`;
+    return `${window.location.origin}/trips/${tripId}/invite`;
   }, [tripId]);
 
   const handleCopy = useCallback(async () => {
@@ -146,7 +155,7 @@ export default function TripDashboardPage() {
             <h1 className="text-3xl font-semibold text-ink">{currentTrip?.name || "Loading..."}</h1>
             <p className="mt-2 text-sm text-slate-500">
               {currentTrip?.startDate && currentTrip?.endDate
-                ? `${currentTrip.startDate} → ${currentTrip.endDate}`
+                ? formatDateRange(currentTrip.startDate, currentTrip.endDate)
                 : "Dates TBD"}
             </p>
           </div>
