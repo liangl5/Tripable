@@ -13,14 +13,15 @@ https://www.tripable.pro/
 - Database: Supabase
 
 ## Local setup and run
+1. Ensure .env and ./client/.env.local files exist and include supabase
 
-1. Install dependencies.
+2. Install dependencies.
 
 ```bash
 npm install
 ```
 
-2. Start the app.
+3. Start the app.
 
 ```bash
 npm run dev
@@ -41,3 +42,6 @@ Client runs on `http://localhost:5173` and API on `http://localhost:3001`.
 ## Possible technical
 1. Cloudflare / Captcha for new users
 2. Personal profile page (hold statistics, allows users to edit profiles, add names->refer to name in trips)
+
+## Smaller to do
+1. Set date range doesn't update the calendar

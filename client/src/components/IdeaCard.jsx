@@ -1,7 +1,9 @@
 import VoteButtons from "./VoteButtons.jsx";
 import { formatRelativeTime } from "../lib/timeFormat.js";
 
-export default function IdeaCard({ idea, onVote }) {
+export default function IdeaCard({ idea, onVote, onDeleteRequest, isOwner }) {
+  const canDelete = isOwner || idea.isCreator;
+
   return (
     <div className="idea-block rounded-2xl bg-white/95 p-5 shadow-card">
       <div className="flex items-start justify-between gap-4">
@@ -24,7 +26,18 @@ export default function IdeaCard({ idea, onVote }) {
       </div>
       <div className="mt-4 flex items-center justify-between">
         <p className="text-xs text-slate-400">Submitted by {idea.submittedBy}</p>
-        <p className="text-xs text-slate-400">{formatRelativeTime(idea.createdAt)}</p>
+        <div className="flex items-center gap-3">
+          <p className="text-xs text-slate-400">{formatRelativeTime(idea.createdAt)}</p>
+          {canDelete && (
+            <button
+              type="button"
+              onClick={() => onDeleteRequest(idea.id, idea.title)}
+              className="text-xs font-semibold text-red-600 hover:text-red-700 transition"
+            >
+              Delete
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

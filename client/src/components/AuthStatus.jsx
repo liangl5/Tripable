@@ -35,6 +35,21 @@ export function AuthStatus() {
     }
     setLoading(true);
     setMessage('');
+
+    // Check if email already exists in User table
+    const { data: existingUser, error: checkError } = await supabase
+      .from('User')
+      .select('id')
+      .eq('email', email)
+      .single();
+
+    if (checkError === null && existingUser) {
+      // Email is already in use
+      setMessage('Error: This email is already in use. Try signing in instead.');
+      setLoading(false);
+      return;
+    }
+
     const { error } = await supabase.auth.signUp({ email, password });
     if (error) {
       setMessage(`Error: ${error.message}`);

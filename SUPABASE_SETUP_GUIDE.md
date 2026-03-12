@@ -5,6 +5,21 @@ This guide walks you through setting up Supabase to work directly with your fron
 
 ---
 
+## Step 0: Get Your Supabase Credentials
+
+1. Create a new Supabase project at [supabase.com](https://supabase.com)
+2. Once the project is ready, go to **Settings → API**
+3. Copy your `Project URL` and `anon public` key
+4. Create a `.env.local` file in the `client/` directory with:
+   ```
+   VITE_SUPABASE_URL=your_project_url
+   VITE_SUPABASE_ANON_KEY=your_anon_key
+   ```
+
+**Note:** Auth is automatically enabled in Supabase. Just ensure Email/Password authentication is enabled in **Authentication → Providers**.
+
+---
+
 ## Step 1: Create Database Tables
 
 Go to **Supabase Dashboard → SQL Editor** and run the following SQL:
@@ -14,15 +29,15 @@ CREATE TABLE "User" (
   id TEXT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   email VARCHAR(255) UNIQUE,
-  created_at TIMESTAMP DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE TABLE "Trip" (
   id TEXT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
-  "startDate" TIMESTAMP,
-  "endDate" TIMESTAMP,
+  "startDate" TIMESTAMPTZ,
+  "endDate" TIMESTAMPTZ,
   "createdById" TEXT NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
-  "createdAt" TIMESTAMP DEFAULT NOW()
+  "createdAt" TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE TABLE "TripMember" (
   id TEXT PRIMARY KEY,
@@ -33,14 +48,14 @@ CREATE TABLE "TripMember" (
 CREATE TABLE "SurveyDate" (
   id TEXT PRIMARY KEY,
   "tripId" TEXT NOT NULL REFERENCES "Trip"(id) ON DELETE CASCADE,
-  date TIMESTAMP NOT NULL,
+  date TIMESTAMPTZ NOT NULL,
   UNIQUE("tripId", "date")
 );
 CREATE TABLE "UserAvailability" (
   id TEXT PRIMARY KEY,
   "tripId" TEXT NOT NULL REFERENCES "Trip"(id) ON DELETE CASCADE,
   "userId" TEXT NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
-  date TIMESTAMP NOT NULL,
+  date TIMESTAMPTZ NOT NULL,
   UNIQUE("tripId", "userId", "date")
 );
 CREATE TABLE "Idea" (
@@ -51,7 +66,7 @@ CREATE TABLE "Idea" (
   location VARCHAR(255),
   category VARCHAR(50),
   "createdById" TEXT NOT NULL REFERENCES "User"(id),
-  "createdAt" TIMESTAMP DEFAULT NOW()
+  "createdAt" TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE TABLE "Vote" (
   id TEXT PRIMARY KEY,
@@ -64,7 +79,7 @@ CREATE TABLE "ItineraryDay" (
   id TEXT PRIMARY KEY,
   "tripId" TEXT NOT NULL REFERENCES "Trip"(id) ON DELETE CASCADE,
   "dayNumber" INTEGER NOT NULL,
-  date TIMESTAMP,
+  date TIMESTAMPTZ,
   UNIQUE("tripId", "dayNumber")
 );
 CREATE TABLE "ItineraryItem" (
@@ -91,9 +106,35 @@ CREATE INDEX idx_availability_user ON "UserAvailability"("userId");
 
 ---
 
-## Step 2: Enable Row-Level Security (RLS)
+## Step 1.5: (OPTIONAL) If Tables Already Exist - Update Timestamps
 
-RLS policies ensure users can only access their own data. Run this in SQL Editor:
+**⚠️ Only run this if you have an existing Supabase project with tables created before March 2026.** 
+
+If you've already created the tables with `TIMESTAMP` instead of `TIMESTAMPTZ`, run this SQL to fix the timestamp columns:
+
+```sql
+-- Update existing tables to use TIMESTAMPTZ for proper timezone handling
+ALTER TABLE "User" ALTER COLUMN "created_at" TYPE TIMESTAMPTZ;
+ALTER TABLE "User" ALTER COLUMN "created_at" SET DEFAULT NOW();
+
+ALTER TABLE "Trip" ALTER COLUMN "createdAt" TYPE TIMESTAMPTZ;
+ALTER TABLE "Trip" ALTER COLUMN "createdAt" SET DEFAULT NOW();
+ALTER TABLE "Trip" ALTER COLUMN "startDate" TYPE TIMESTAMPTZ;
+ALTER TABLE "Trip" ALTER COLUMN "endDate" TYPE TIMESTAMPTZ;
+
+ALTER TABLE "Idea" ALTER COLUMN "createdAt" TYPE TIMESTAMPTZ;
+ALTER TABLE "Idea" ALTER COLUMN "createdAt" SET DEFAULT NOW();
+
+ALTER TABLE "SurveyDate" ALTER COLUMN "date" TYPE TIMESTAMPTZ;
+ALTER TABLE "UserAvailability" ALTER COLUMN "date" TYPE TIMESTAMPTZ;
+ALTER TABLE "ItineraryDay" ALTER COLUMN "date" TYPE TIMESTAMPTZ;
+```
+
+**Why?** Using `TIMESTAMPTZ` (timestamp with timezone) ensures Supabase returns proper ISO 8601 strings that JavaScript's `Date` parser can correctly handle, making relative time calculations accurate.
+
+---
+
+## Step 2: Enable Row Level Security (RLS)
 
 ```sql
 ALTER TABLE "User" ENABLE ROW LEVEL SECURITY;
@@ -116,6 +157,10 @@ CREATE POLICY "Users can view all trip memberships" ON "TripMember" FOR SELECT U
 CREATE POLICY "Users can join trips" ON "TripMember" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
 CREATE POLICY "Users can view all ideas" ON "Idea" FOR SELECT USING (true);
 CREATE POLICY "Users can create ideas" ON "Idea" FOR INSERT WITH CHECK (auth.uid()::text = "createdById");
+CREATE POLICY "Idea creator or trip owner can delete" ON "Idea" FOR DELETE USING (
+  auth.uid()::text = "createdById" OR
+  auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "Idea"."tripId")
+);
 CREATE POLICY "Users can view all votes" ON "Vote" FOR SELECT USING (true);
 CREATE POLICY "Users can vote" ON "Vote" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
 CREATE POLICY "Users can update their votes" ON "Vote" FOR UPDATE USING (auth.uid()::text = "userId");
@@ -127,7 +172,43 @@ CREATE POLICY "Users can set their availability" ON "UserAvailability" FOR INSER
 CREATE POLICY "Users can update their availability" ON "UserAvailability" FOR UPDATE USING (auth.uid()::text = "userId");
 CREATE POLICY "Users can delete their availability" ON "UserAvailability" FOR DELETE USING (auth.uid()::text = "userId");
 CREATE POLICY "Trip members can view itinerary" ON "ItineraryDay" FOR SELECT USING (true);
+CREATE POLICY "Trip owner can delete itinerary days" ON "ItineraryDay" FOR DELETE USING (
+  auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "ItineraryDay"."tripId")
+);
 CREATE POLICY "Trip members can view itinerary items" ON "ItineraryItem" FOR SELECT USING (true);
+CREATE POLICY "Trip owner or creator can delete itinerary items" ON "ItineraryItem" FOR DELETE USING (
+  auth.uid()::text IN (
+    SELECT "createdById" FROM "Trip" 
+    WHERE id = (SELECT "tripId" FROM "ItineraryDay" WHERE id = "ItineraryItem"."itineraryDayId")
+  )
+);
 ```
 
 ---
+
+## Step 3: Verify Your Setup
+
+Once you've completed Steps 0-2, verify that:
+- ✅ All 9 tables exist in your Supabase database (User, Trip, TripMember, SurveyDate, UserAvailability, Idea, Vote, ItineraryDay, ItineraryItem)
+- ✅ All tables have RLS enabled
+- ✅ All policies are created (you should see ~25 policies in total)
+- ✅ Email/Password authentication is enabled in **Authentication → Providers**
+- ✅ You have `.env.local` in `client/` with your `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
+
+You're ready to run the app!
+
+---
+
+## Troubleshooting
+
+**"Permission denied" errors when creating/deleting data?**
+- Check that RLS policies are enabled on the table
+- Verify the policy conditions match your user's ID
+
+**Timestamps showing as "just now" everywhere?**
+- Ensure all timestamp columns are `TIMESTAMPTZ` not `TIMESTAMP`
+- If upgrading existing tables, run Step 1.5
+
+**Can't sign up?**
+- Check that email is unique in the User table
+- Verify auth is enabled in Supabase

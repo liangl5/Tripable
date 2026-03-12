@@ -102,6 +102,7 @@ async function formatTripDetails(trip, viewerUserId, members, leaders, availabil
 function formatIdea(idea, userId, votes = []) {
   const voteScore = votes.reduce((sum, vote) => sum + vote.value, 0);
   const userVote = votes.find((vote) => vote.userId === userId)?.value || 0;
+  const isCreator = idea.createdById === userId;
 
   return {
     id: idea.id,
@@ -110,10 +111,12 @@ function formatIdea(idea, userId, votes = []) {
     location: idea.location,
     category: idea.category,
     createdAt: idea.createdAt,
+    createdById: idea.createdById,
     submittedBy: idea.User?.name || "Traveler",
     voteScore,
     voteCount: votes.length,
-    userVote
+    userVote,
+    isCreator
   };
 }
 
@@ -452,6 +455,55 @@ export const api = {
     await supabase.from("ItineraryDay").delete().eq("tripId", tripId);
 
     return formatIdea(idea, user.id, []);
+  },
+
+  async deleteIdea(ideaId, tripId) {
+    const user = await getOrCreateUser();
+
+    // Get idea to check permissions
+    const { data: idea, error: fetchError } = await supabase
+      .from("Idea")
+      .select("createdById, tripId")
+      .eq("id", ideaId)
+      .single();
+
+    if (fetchError || !idea) throw new Error("Idea not found");
+
+    // Check if user is trip owner or idea creator
+    const { data: trip } = await supabase
+      .from("Trip")
+      .select("createdById")
+      .eq("id", tripId)
+      .single();
+
+    const isOwner = trip?.createdById === user.id;
+    const isCreator = idea.createdById === user.id;
+
+    if (!isOwner && !isCreator) {
+      throw new Error("Only the trip owner or activity creator can delete this activity");
+    }
+
+    // Delete votes first
+    const { error: voteError } = await supabase.from("Vote").delete().eq("ideaId", ideaId);
+    if (voteError) throw voteError;
+
+    // Delete itinerary items
+    const { error: itemError } = await supabase
+      .from("ItineraryItem")
+      .delete()
+      .eq("ideaId", ideaId);
+    if (itemError) throw itemError;
+
+    // Delete the idea
+    const { error: deleteError } = await supabase
+      .from("Idea")
+      .delete()
+      .eq("id", ideaId);
+
+    if (deleteError) throw deleteError;
+
+    // Invalidate itinerary
+    await supabase.from("ItineraryDay").delete().eq("tripId", tripId);
   },
 
   async voteIdea(ideaId, value) {

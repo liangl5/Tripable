@@ -118,6 +118,7 @@ export default function AvailabilityCalendar({
   const [dirtyAvailability, setDirtyAvailability] = useState(false);
   const [localMessage, setLocalMessage] = useState("");
   const [showDetailedView, setShowDetailedView] = useState(false);
+  const [memberViewMode, setMemberViewMode] = useState("table"); // "table" or "list"
 
   const displayedMonth = useMemo(() => dateFromMonthKey(displayedMonthKey), [displayedMonthKey]);
   const draftSurveyDates = useMemo(
@@ -372,7 +373,7 @@ export default function AvailabilityCalendar({
             </span>
           ) : (
             <span className="inline-flex items-center gap-2">
-              <span className="h-3 w-3 rounded-full bg-[#C7D5FF]" />
+              <span className="h-3 w-3 rounded-full bg-[#6BCB77]" />
               Your selected availability
             </span>
           )}
@@ -513,6 +514,100 @@ export default function AvailabilityCalendar({
           </div>
         ) : null}
       </div>
+
+      {showDetailedView ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="max-h-[80vh] w-full max-w-4xl overflow-auto rounded-3xl bg-white p-6 shadow-card">
+            <div className="flex flex-col gap-4 mb-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-semibold text-ink">Member Availability</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowDetailedView(false)}
+                  className="text-sm font-semibold text-slate-500 hover:text-ink"
+                >
+                  Close
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMemberViewMode("table")}
+                  className={classNames(
+                    "rounded-full px-3 py-2 text-xs font-semibold transition",
+                    memberViewMode === "table" ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
+                  )}
+                >
+                  Date columns
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMemberViewMode("list")}
+                  className={classNames(
+                    "rounded-full px-3 py-2 text-xs font-semibold transition",
+                    memberViewMode === "list" ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
+                  )}
+                >
+                  Member list
+                </button>
+              </div>
+            </div>
+
+            {memberViewMode === "table" ? (
+              <AvailabilityDetails 
+                members={members} 
+                availability={availability} 
+                surveyDates={surveyDatesFromTrip}
+              />
+            ) : (
+              <div className="space-y-4">
+                {members.map((member) => {
+                  const memberAvailability = availability[member.id] || [];
+                  return (
+                    <div key={member.id} className="rounded-2xl bg-mist p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="font-semibold text-ink">{member.isViewer ? "You" : member.name}</span>
+                        {member.isLeader && (
+                          <span className="rounded-full bg-[#EEF2FF] px-2 py-0.5 text-xs font-semibold text-[#4C6FFF]">
+                            Leader
+                          </span>
+                        )}
+                        <span className="ml-auto text-xs text-slate-500">
+                          {memberAvailability.length}/{surveyDatesFromTrip.length} days
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {surveyDatesFromTrip.map((date) => {
+                          const isAvailable = memberAvailability.includes(date);
+                          const dateObj = new Date(date);
+                          const dateLabel = dateObj.toLocaleDateString('en-US', { 
+                            month: 'short', 
+                            day: 'numeric',
+                            weekday: 'short'
+                          });
+                          return (
+                            <div
+                              key={`${member.id}-${date}`}
+                              className={classNames(
+                                "rounded-lg px-2 py-1 text-xs font-medium",
+                                isAvailable 
+                                  ? "bg-[#6BCB77] text-white" 
+                                  : "bg-[#F56565] text-white"
+                              )}
+                            >
+                              {dateLabel}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
