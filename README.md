@@ -40,4 +40,3 @@ Client runs on `http://localhost:5173` and API on `http://localhost:3001`.
 
 
 (Issues board) `https://github.com/users/liangl5/projects/1`
-1. Set date range doesn't update the calendar
