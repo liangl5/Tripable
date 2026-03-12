@@ -1,0 +1,509 @@
+import { useEffect, useMemo, useState } from "react";
+
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function startOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function addMonths(date, count) {
+  return new Date(date.getFullYear(), date.getMonth() + count, 1);
+}
+
+function monthKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function dateFromMonthKey(value) {
+  const [year, month] = value.split("-").map(Number);
+  return new Date(year, month - 1, 1);
+}
+
+function parseISODate(value) {
+  if (!value) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+function formatISO(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function formatDateInputLabel(value) {
+  const date = parseISODate(value);
+  if (!date) return "mm/dd/yyyy";
+  return date.toLocaleDateString(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric"
+  });
+}
+
+function formatMonthLabel(date) {
+  return date.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
+
+function buildDateRange(startValue, endValue) {
+  const start = parseISODate(startValue);
+  const end = parseISODate(endValue);
+  if (!start || !end || start.getTime() > end.getTime()) return [];
+
+  const dates = [];
+  const cursor = new Date(start);
+
+  while (cursor.getTime() <= end.getTime()) {
+    dates.push(formatISO(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return dates;
+}
+
+function buildMonthCells(monthDate) {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const first = new Date(year, month, 1);
+  const firstWeekday = first.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const cells = [];
+  for (let i = 0; i < firstWeekday; i += 1) cells.push(null);
+  for (let day = 1; day <= daysInMonth; day += 1) cells.push(new Date(year, month, day));
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
+
+function classNames(...values) {
+  return values.filter(Boolean).join(" ");
+}
+
+export default function AvailabilityCalendar({
+  trip,
+  loading,
+  onSaveAvailability,
+  onSaveSurveyDates,
+  statusMessage
+}) {
+  const members = trip?.members || [];
+  const availability = trip?.availability || {};
+  const surveyDatesFromTrip = trip?.surveyDates || [];
+  const isViewerOwner = Boolean(trip?.isViewerCreator);
+  const viewer = members.find((member) => member.isViewer) || null;
+  const viewerAvailability = viewer ? availability[viewer.id] || [] : [];
+  const surveyDatesKey = surveyDatesFromTrip.join("|");
+  const originalSurveyRange = useMemo(
+    () => ({
+      start: surveyDatesFromTrip[0] || "",
+      end: surveyDatesFromTrip[surveyDatesFromTrip.length - 1] || ""
+    }),
+    [surveyDatesKey]
+  );
+
+  const viewerAvailabilityKey = viewerAvailability.join("|");
+  const initialMonth = useMemo(() => {
+    if (surveyDatesFromTrip[0]) {
+      return monthKey(new Date(`${surveyDatesFromTrip[0]}T00:00:00`));
+    }
+    return monthKey(startOfMonth(new Date()));
+  }, [surveyDatesKey]);
+
+  const [displayedMonthKey, setDisplayedMonthKey] = useState(initialMonth);
+  const [mode, setMode] = useState("edit");
+  const [editSurveyDates, setEditSurveyDates] = useState(false);
+  const [surveyRange, setSurveyRange] = useState(() => originalSurveyRange);
+  const [selectedDates, setSelectedDates] = useState(() => new Set(viewerAvailability));
+  const [isSavingSurveyDates, setIsSavingSurveyDates] = useState(false);
+  const [dirtyAvailability, setDirtyAvailability] = useState(false);
+  const [localMessage, setLocalMessage] = useState("");
+
+  const displayedMonth = useMemo(() => dateFromMonthKey(displayedMonthKey), [displayedMonthKey]);
+  const draftSurveyDates = useMemo(
+    () => buildDateRange(surveyRange.start, surveyRange.end),
+    [surveyRange.end, surveyRange.start]
+  );
+  const surveyDateSet = useMemo(
+    () => new Set(editSurveyDates ? draftSurveyDates : surveyDatesFromTrip),
+    [draftSurveyDates, editSurveyDates, surveyDatesKey]
+  );
+  const surveyRangeDirty = surveyRange.start !== originalSurveyRange.start || surveyRange.end !== originalSurveyRange.end;
+  const surveyRangeError = useMemo(() => {
+    if (!editSurveyDates) return "";
+    if (!surveyRange.start && !surveyRange.end) return "";
+    if (!surveyRange.start || !surveyRange.end) return "Choose both a start date and an end date.";
+    if (surveyRange.start > surveyRange.end) return "End date must be on or after the start date.";
+    return "";
+  }, [editSurveyDates, surveyRange.end, surveyRange.start]);
+
+  useEffect(() => {
+    setDisplayedMonthKey(initialMonth);
+  }, [initialMonth, trip?.id]);
+
+  useEffect(() => {
+    setSurveyRange(originalSurveyRange);
+  }, [originalSurveyRange, trip?.id]);
+
+  useEffect(() => {
+    setSelectedDates(new Set(viewerAvailability));
+  }, [viewer?.id, viewerAvailabilityKey]);
+
+  useEffect(() => {
+    if (!dirtyAvailability || !trip?.id || editSurveyDates) return;
+
+    const saveAvailability = async () => {
+      try {
+        await onSaveAvailability([...selectedDates].sort());
+        setLocalMessage("Availability updated.");
+      } catch (error) {
+        setLocalMessage("Failed to save availability. Please try again.");
+        console.error("Availability save error:", error);
+      } finally {
+        setDirtyAvailability(false);
+      }
+    };
+
+    saveAvailability();
+  }, [dirtyAvailability, editSurveyDates, onSaveAvailability, selectedDates, trip?.id]);
+
+  const monthCells = useMemo(() => buildMonthCells(displayedMonth), [displayedMonth]);
+  const overlapByDate = useMemo(() => {
+    const entries = new Map();
+    for (const member of members) {
+      for (const date of availability[member.id] || []) {
+        entries.set(date, (entries.get(date) || 0) + 1);
+      }
+    }
+    return entries;
+  }, [availability, members]);
+
+  const maxOverlap = useMemo(() => {
+    let highest = 0;
+    for (const count of overlapByDate.values()) highest = Math.max(highest, count);
+    return highest;
+  }, [overlapByDate]);
+
+  const toggleDate = (isoDate) => {
+    if (editSurveyDates || !surveyDateSet.has(isoDate)) return;
+
+    setSelectedDates((current) => {
+      const next = new Set(current);
+      if (next.has(isoDate)) {
+        next.delete(isoDate);
+      } else {
+        next.add(isoDate);
+      }
+      return next;
+    });
+    setDirtyAvailability(true);
+  };
+
+  const handleResetSurveyDates = () => {
+    setSurveyRange({ start: "", end: "" });
+    setDisplayedMonthKey(monthKey(startOfMonth(new Date())));
+    setLocalMessage("Selectable date range cleared. Save changes to apply.");
+  };
+
+  const handleCancelSurveyDates = () => {
+    setSurveyRange(originalSurveyRange);
+    setEditSurveyDates(false);
+    setLocalMessage("Selectable date range edits discarded.");
+  };
+
+  const handleSaveSurveyDates = async () => {
+    if (surveyRangeError) return;
+
+    setIsSavingSurveyDates(true);
+    try {
+      await onSaveSurveyDates(draftSurveyDates);
+      setEditSurveyDates(false);
+      setLocalMessage("Selectable date range updated.");
+    } catch (error) {
+      setLocalMessage("Failed to save date range. Please try again.");
+      console.error("Survey dates save error:", error);
+    } finally {
+      setIsSavingSurveyDates(false);
+    }
+  };
+
+  const handleSurveyRangeChange = (field, value) => {
+    setSurveyRange((current) => ({ ...current, [field]: value }));
+    if (value) {
+      const nextDate = parseISODate(value);
+      if (nextDate) {
+        setDisplayedMonthKey(monthKey(startOfMonth(nextDate)));
+      }
+    }
+  };
+
+  const canEditAvailability = surveyDatesFromTrip.length > 0;
+  const monthStatusText = surveyRangeError || statusMessage || localMessage;
+
+  return (
+    <div className="rounded-3xl bg-white/95 p-6 shadow-card">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-semibold text-ink">Availability</h2>
+          <p className="mt-2 max-w-2xl text-sm text-slate-500">
+            {editSurveyDates
+              ? "Choose a simple start and end date for the trip window, then save the range."
+              : "Click on the dates you're available to mark when you are free."}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setMode("edit");
+              setEditSurveyDates(false);
+            }}
+            className={classNames(
+              "rounded-full px-4 py-2 text-xs font-semibold transition",
+              mode === "edit" && !editSurveyDates ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
+            )}
+          >
+            Select/Edit your availability
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode("group");
+              setEditSurveyDates(false);
+            }}
+            className={classNames(
+              "rounded-full px-4 py-2 text-xs font-semibold transition",
+              mode === "group" ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
+            )}
+          >
+            See group availability
+          </button>
+          {isViewerOwner ? (
+            <button
+              type="button"
+              onClick={() => {
+                setMode("edit");
+                setEditSurveyDates(true);
+                setSurveyRange(originalSurveyRange);
+              }}
+              className={classNames(
+                "rounded-full px-4 py-2 text-xs font-semibold transition",
+                editSurveyDates ? "bg-[#6BCB77] text-white" : "bg-[#E8F7EB] text-[#2C8B44]"
+              )}
+            >
+              {editSurveyDates ? "Editing date range" : "Set date range"}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {editSurveyDates ? (
+        <div className="mt-6 grid gap-4 rounded-[1.5rem] border border-slate-200/80 bg-[#FBFCFF] p-4 sm:grid-cols-2">
+          <label className="grid gap-2 text-sm font-semibold text-ink">
+            Start date
+            <input
+              type="date"
+              value={surveyRange.start}
+              onChange={(event) => handleSurveyRangeChange("start", event.target.value)}
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-normal text-ink"
+            />
+            <span className="text-xs font-normal text-slate-500">{formatDateInputLabel(surveyRange.start)}</span>
+          </label>
+          <label className="grid gap-2 text-sm font-semibold text-ink">
+            End date
+            <input
+              type="date"
+              value={surveyRange.end}
+              min={surveyRange.start || undefined}
+              onChange={(event) => handleSurveyRangeChange("end", event.target.value)}
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-normal text-ink"
+            />
+            <span className="text-xs font-normal text-slate-500">{formatDateInputLabel(surveyRange.end)}</span>
+          </label>
+        </div>
+      ) : null}
+
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setDisplayedMonthKey((current) => monthKey(addMonths(dateFromMonthKey(current), -1)))}
+            className="rounded-full bg-mist px-3 py-2 text-sm font-semibold text-ink"
+          >
+            ←
+          </button>
+          <div className="rounded-full bg-[#EEF2FF] px-4 py-2 text-sm font-semibold text-[#4C6FFF]">
+            {formatMonthLabel(displayedMonth)}
+          </div>
+          <button
+            type="button"
+            onClick={() => setDisplayedMonthKey((current) => monthKey(addMonths(dateFromMonthKey(current), 1)))}
+            className="rounded-full bg-mist px-3 py-2 text-sm font-semibold text-ink"
+          >
+            →
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
+          {editSurveyDates ? (
+            <span className="inline-flex items-center gap-2">
+              <span className="h-3 w-3 rounded-full bg-[#6BCB77]" />
+              Selectable trip range
+            </span>
+          ) : mode === "group" ? (
+            <span className="inline-flex items-center gap-2">
+              <span className="h-3 w-3 rounded-full bg-[#6BCB77]" />
+              More overlap = darker green
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-2">
+              <span className="h-3 w-3 rounded-full bg-[#C7D5FF]" />
+              Your selected availability
+            </span>
+          )}
+        </div>
+      </div>
+
+      {!canEditAvailability && !editSurveyDates ? (
+        <div className="mt-6 rounded-[1.5rem] border border-dashed border-slate-300 bg-mist px-4 py-6 text-sm text-slate-500">
+          {isViewerOwner
+            ? "Start by clicking 'Set date range' and choosing the trip's start and end dates."
+            : "Waiting for the trip owner to choose the date window."}
+        </div>
+      ) : (
+        <div className="mt-6 rounded-[1.75rem] border border-slate-200/80 bg-[#FBFCFF] p-4">
+          <div className="grid grid-cols-7 gap-2">
+            {DAY_NAMES.map((day) => (
+              <div key={day} className="px-1 pb-2 text-center text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                {day}
+              </div>
+            ))}
+
+            {monthCells.map((date, index) => {
+              if (!date) {
+                return <div key={`empty-${index}`} className="aspect-square rounded-2xl bg-transparent" />;
+              }
+
+              const isoDate = formatISO(date);
+              const inSurvey = surveyDateSet.has(isoDate);
+              const isSelected = selectedDates.has(isoDate);
+              const overlap = overlapByDate.get(isoDate) || 0;
+              const overlapStrength = maxOverlap > 0 ? overlap / maxOverlap : 0;
+              const isToday = isoDate === formatISO(new Date());
+              const disabled = !editSurveyDates && !inSurvey;
+
+              let cellStyle = "border-slate-200/70 bg-white text-ink";
+              let inlineStyle;
+
+              if (editSurveyDates && inSurvey) {
+                cellStyle = "border-[#6BCB77] bg-[#E8F7EB] text-ink";
+              } else if (mode === "edit" && isSelected) {
+                cellStyle = "border-[#4C6FFF] bg-[#4C6FFF] text-white shadow-soft";
+              } else if (mode === "group" && inSurvey && overlap > 0) {
+                cellStyle = "border-[#6BCB77]/40 text-ink";
+                inlineStyle = {
+                  backgroundColor: `rgba(107, 203, 119, ${0.15 + overlapStrength * 0.45})`
+                };
+              } else if (inSurvey) {
+                cellStyle = "border-[#4C6FFF]/25 bg-[#EEF2FF] text-ink";
+              }
+
+              return (
+                <button
+                  key={isoDate}
+                  type="button"
+                  disabled={mode === "group" || editSurveyDates || disabled}
+                  onClick={() => toggleDate(isoDate)}
+                  className={classNames(
+                    "relative aspect-square rounded-2xl border p-2 text-left transition",
+                    cellStyle,
+                    disabled || mode === "group" ? "cursor-default" : "cursor-pointer",
+                    disabled ? "opacity-35" : ""
+                  )}
+                  style={inlineStyle}
+                >
+                  <span className="text-sm font-semibold">{date.getDate()}</span>
+                  {editSurveyDates ? (
+                    inSurvey ? (
+                      <span className="absolute bottom-2 left-2 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold text-[#2C8B44]">
+                        Open
+                      </span>
+                    ) : null
+                  ) : mode === "group" ? (
+                    inSurvey ? (
+                      <span className="absolute bottom-2 left-2 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                        {overlap} free
+                      </span>
+                    ) : null
+                  ) : isSelected ? (
+                    <span className="absolute bottom-2 left-2 rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-bold text-white">
+                      Free
+                    </span>
+                  ) : inSurvey ? (
+                    <span className="absolute bottom-2 left-2 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold text-slate-500">
+                      Select
+                    </span>
+                  ) : null}
+
+                  {isToday ? (
+                    <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[#FFB86B]" aria-hidden="true" />
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-6 flex flex-wrap items-center gap-3">
+        {members.map((member) => (
+          <div key={member.id} className="rounded-full bg-mist px-3 py-2 text-xs font-semibold text-ink">
+            {member.isViewer ? "You" : member.name}
+            <span className="ml-2 text-slate-400">{(availability[member.id] || []).length} days</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6 rounded-[1.5rem] bg-mist px-4 py-4">
+        <p className="text-sm font-semibold text-ink">
+          {editSurveyDates
+            ? draftSurveyDates.length === 0 && !surveyRange.start && !surveyRange.end
+              ? "No selectable date range set"
+              : `${draftSurveyDates.length} selectable day${draftSurveyDates.length === 1 ? "" : "s"}`
+            : `${selectedDates.size} day${selectedDates.size === 1 ? "" : "s"} marked free`}
+        </p>
+        <p className="mt-1 text-xs text-slate-500">
+          {monthStatusText ||
+            (editSurveyDates
+              ? "Use a single start date and end date in mm/dd/yyyy format, then save once."
+              : "Your availability saves automatically when you finish dragging.")}
+        </p>
+
+        {editSurveyDates ? (
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={handleResetSurveyDates}
+              className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-ink shadow-soft"
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveSurveyDates}
+              disabled={!surveyRangeDirty || Boolean(surveyRangeError) || isSavingSurveyDates || loading}
+              className="rounded-full bg-[#4C6FFF] px-5 py-2.5 text-sm font-semibold text-white shadow-card disabled:opacity-60"
+            >
+              {isSavingSurveyDates ? "Saving..." : "Save changes"}
+            </button>
+            <button
+              type="button"
+              onClick={handleCancelSurveyDates}
+              className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-ink shadow-soft"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}

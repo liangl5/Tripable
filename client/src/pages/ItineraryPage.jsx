@@ -5,7 +5,13 @@ import { useTripStore } from "../hooks/useTripStore.js";
 
 export default function ItineraryPage() {
   const { tripId } = useParams();
-  const { itinerary, loadItinerary, currentTrip, loadTrip, loading, error } = useTripStore();
+  const itinerary = useTripStore((state) => state.itinerary);
+  const currentTrip = useTripStore((state) => state.currentTrip);
+  const loadItinerary = useTripStore((state) => state.loadItinerary);
+  const loadTrip = useTripStore((state) => state.loadTrip);
+  const tripLoading = useTripStore((state) => state.tripLoading);
+  const itineraryLoading = useTripStore((state) => state.itineraryLoading);
+  const error = useTripStore((state) => state.error);
 
   useEffect(() => {
     if (!tripId) return;
@@ -24,7 +30,7 @@ export default function ItineraryPage() {
       </header>
 
       <div className="mt-8">
-        {loading ? <p className="text-sm">Loading itinerary...</p> : null}
+        {tripLoading || itineraryLoading ? <p className="text-sm">Loading itinerary...</p> : null}
         {error ? <p className="text-sm text-coral">{error}</p> : null}
         <ItineraryView itinerary={itinerary} />
       </div>

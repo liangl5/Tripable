@@ -31,6 +31,9 @@ const state = {
   trips: new Map(), // tripId -> { id, name, startDate, endDate, createdById, createdAt }
   tripsByUser: new Map(), // userId -> Set<tripId>
   membersByTrip: new Map(), // tripId -> Set<userId>
+  leadersByTrip: new Map(), // tripId -> Set<userId>
+  surveyDatesByTrip: new Map(), // tripId -> Set<isoDate>
+  availabilityByTrip: new Map(), // tripId -> Map<userId, Set<isoDate>>
   ideas: new Map(), // ideaId -> { id, tripId, title, description, location, category, createdById, createdAt }
   ideasByTrip: new Map(), // tripId -> Set<ideaId>
   votesByIdea: new Map(), // ideaId -> Map<userId, value>
@@ -59,7 +62,44 @@ function formatTrip(trip) {
     name: trip.name,
     startDate: toISODate(trip.startDate),
     endDate: toISODate(trip.endDate),
-    memberCount: getMemberCount(trip.id)
+    memberCount: getMemberCount(trip.id),
+    createdById: trip.createdById
+  };
+}
+
+function formatTripDetails(tripId, viewerUserId) {
+  const trip = ensureTripExists(tripId);
+  const leaders = state.leadersByTrip.get(tripId) || new Set([trip.createdById]);
+  const members = [...(state.membersByTrip.get(tripId) || new Set())]
+    .map((userId) => state.users.get(userId))
+    .filter(Boolean)
+    .map((user) => ({
+      id: user.id,
+      name: user.name,
+      isViewer: user.id === viewerUserId,
+      isLeader: leaders.has(user.id)
+    }))
+    .sort((a, b) => {
+      if (a.isViewer) return -1;
+      if (b.isViewer) return 1;
+      return a.name.localeCompare(b.name);
+    });
+
+  const availabilityMap = state.availabilityByTrip.get(tripId) || new Map();
+  const availability = Object.fromEntries(
+    [...availabilityMap.entries()].map(([userId, dates]) => [userId, [...dates].sort()])
+  );
+  const surveyDates = [...(state.surveyDatesByTrip.get(tripId) || new Set())].sort();
+
+  return {
+    ...formatTrip(trip),
+    isViewerCreator: trip.createdById === viewerUserId,
+    isViewerLeader: leaders.has(viewerUserId),
+    ownerId: trip.createdById,
+    leaders: [...leaders],
+    members,
+    surveyDates,
+    availability
   };
 }
 
@@ -135,21 +175,26 @@ export const store = {
     const members = state.membersByTrip.get(trip.id) || new Set();
     members.add(userId);
     state.membersByTrip.set(trip.id, members);
+    state.leadersByTrip.set(trip.id, new Set([userId]));
+    state.surveyDatesByTrip.set(trip.id, new Set());
+    state.availabilityByTrip.set(trip.id, new Map());
 
     return formatTrip(trip);
   },
 
-  updateTripDates: ({ tripId, startDate, endDate }) => {
+  updateTripDates: ({ tripId, userId, startDate, endDate }) => {
     const trip = ensureTripExists(tripId);
+    if (trip.createdById !== userId) {
+      throw new HttpError(403, "Only the trip owner can update the trip dates");
+    }
     trip.startDate = new Date(startDate);
     trip.endDate = new Date(endDate);
     state.itineraries.delete(tripId);
     return formatTrip(trip);
   },
 
-  getTrip: (tripId) => {
-    const trip = ensureTripExists(tripId);
-    return formatTrip(trip);
+  getTrip: ({ tripId, userId }) => {
+    return formatTripDetails(tripId, userId);
   },
 
   joinTrip: ({ tripId, userId }) => {
@@ -162,6 +207,82 @@ export const store = {
     const userTrips = state.tripsByUser.get(userId) || new Set();
     userTrips.add(tripId);
     state.tripsByUser.set(userId, userTrips);
+  },
+
+  setAvailability: ({ tripId, userId, dates }) => {
+    ensureTripExists(tripId);
+    const surveyDates = state.surveyDatesByTrip.get(tripId) || new Set();
+    const tripAvailability = state.availabilityByTrip.get(tripId) || new Map();
+    const filtered = dates.filter((date) => surveyDates.has(date));
+    tripAvailability.set(userId, new Set(filtered));
+    state.availabilityByTrip.set(tripId, tripAvailability);
+    return formatTripDetails(tripId, userId);
+  },
+
+  setSurveyDates: ({ tripId, userId, dates }) => {
+    const trip = ensureTripExists(tripId);
+    if (trip.createdById !== userId) {
+      throw new HttpError(403, "Only the trip owner can edit selectable dates");
+    }
+
+    const nextSurveyDates = new Set(dates);
+    state.surveyDatesByTrip.set(tripId, nextSurveyDates);
+    const sortedDates = [...nextSurveyDates].sort();
+    trip.startDate = sortedDates[0] ? new Date(sortedDates[0]) : null;
+    trip.endDate = sortedDates[sortedDates.length - 1] ? new Date(sortedDates[sortedDates.length - 1]) : null;
+
+    const tripAvailability = state.availabilityByTrip.get(tripId) || new Map();
+    for (const [memberId, memberDates] of tripAvailability.entries()) {
+      tripAvailability.set(
+        memberId,
+        new Set([...memberDates].filter((date) => nextSurveyDates.has(date)))
+      );
+    }
+    state.availabilityByTrip.set(tripId, tripAvailability);
+
+    return formatTripDetails(tripId, userId);
+  },
+
+  setLeaders: ({ tripId, userId, leaderIds }) => {
+    const trip = ensureTripExists(tripId);
+    const currentLeaders = state.leadersByTrip.get(tripId) || new Set([trip.createdById]);
+    if (!currentLeaders.has(userId)) {
+      throw new HttpError(403, "Only trip leaders can manage leaders");
+    }
+
+    const members = state.membersByTrip.get(tripId) || new Set();
+    const nextLeaders = new Set(leaderIds.filter((memberId) => members.has(memberId)));
+    if (nextLeaders.size === 0) {
+      throw new HttpError(400, "A trip must have at least one leader");
+    }
+
+    state.leadersByTrip.set(tripId, nextLeaders);
+    return formatTripDetails(tripId, userId);
+  },
+
+  deleteTrip: ({ tripId, userId }) => {
+    const trip = ensureTripExists(tripId);
+    if (trip.createdById !== userId) {
+      throw new HttpError(403, "Only the trip owner can delete this trip");
+    }
+
+    state.trips.delete(tripId);
+    state.membersByTrip.delete(tripId);
+    state.leadersByTrip.delete(tripId);
+    state.surveyDatesByTrip.delete(tripId);
+    state.availabilityByTrip.delete(tripId);
+    state.itineraries.delete(tripId);
+
+    const ideaIds = state.ideasByTrip.get(tripId) || new Set();
+    for (const ideaId of ideaIds) {
+      state.ideas.delete(ideaId);
+      state.votesByIdea.delete(ideaId);
+    }
+    state.ideasByTrip.delete(tripId);
+
+    for (const tripIds of state.tripsByUser.values()) {
+      tripIds.delete(tripId);
+    }
   },
 
   listIdeas: ({ tripId, userId }) => {

@@ -4,7 +4,9 @@ import { useTripStore } from "../hooks/useTripStore.js";
 
 export default function CreateTripPage() {
   const navigate = useNavigate();
-  const { createTrip, loading, error } = useTripStore();
+  const createTrip = useTripStore((state) => state.createTrip);
+  const createTripLoading = useTripStore((state) => state.createTripLoading);
+  const error = useTripStore((state) => state.error);
   const [form, setForm] = useState({
     name: ""
   });
@@ -38,10 +40,10 @@ export default function CreateTripPage() {
           />
           <button
             type="submit"
-            disabled={loading}
+            disabled={createTripLoading}
             className="rounded-2xl bg-ocean px-4 py-3 text-sm font-semibold text-white"
           >
-            {loading ? "Creating..." : "Create trip"}
+            {createTripLoading ? "Creating..." : "Create trip"}
           </button>
           {error ? <p className="text-sm text-coral">{error}</p> : null}
         </form>

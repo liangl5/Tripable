@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
+import { getCurrentUserId } from "../lib/api.js";
 
 function getUserIdSnippet() {
-  const id = localStorage.getItem("tripute_user_id") || "";
+  const id = getCurrentUserId();
   if (!id) return "";
-  return `${id.slice(0, 4)}…${id.slice(-4)}`;
+  return `${id.slice(0, 4)}...${id.slice(-4)}`;
 }
 
 export default function UserIdentity({ editable = false }) {

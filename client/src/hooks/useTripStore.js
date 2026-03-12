@@ -7,53 +7,127 @@ export const useTripStore = create((set, get) => ({
   ideas: [],
   itinerary: null,
   loading: false,
+  tripsLoading: false,
+  createTripLoading: false,
+  tripLoading: false,
+  deleteTripLoading: false,
+  ideasLoading: false,
+  addIdeaLoading: false,
+  availabilitySaving: false,
+  surveyDatesSaving: false,
+  leadersSaving: false,
+  itineraryLoading: false,
   error: null,
 
   loadTrips: async () => {
-    set({ loading: true, error: null });
+    set({ tripsLoading: true, error: null });
     try {
       const trips = await api.getTrips();
-      set({ trips, loading: false });
+      set({ trips, tripsLoading: false });
     } catch (error) {
-      set({ error: error.message, loading: false });
+      set({ error: error.message, tripsLoading: false });
     }
   },
 
   createTrip: async (payload) => {
-    set({ loading: true, error: null });
+    set({ createTripLoading: true, error: null });
     try {
       const trip = await api.createTrip(payload);
-      set((state) => ({ trips: [trip, ...state.trips], loading: false }));
+      set((state) => ({ trips: [trip, ...state.trips], createTripLoading: false }));
       return trip;
     } catch (error) {
-      set({ error: error.message, loading: false });
+      set({ error: error.message, createTripLoading: false });
       throw error;
     }
   },
 
   loadTrip: async (tripId) => {
-    set({ loading: true, error: null });
+    set({ tripLoading: true, error: null });
     try {
       const trip = await api.getTrip(tripId);
-      set({ currentTrip: trip, loading: false });
+      set({ currentTrip: trip, tripLoading: false });
       return trip;
     } catch (error) {
-      set({ error: error.message, loading: false });
+      set({ error: error.message, tripLoading: false });
+      throw error;
     }
   },
 
   updateTripDates: async (tripId, payload) => {
-    set({ loading: true, error: null });
+    set({ tripLoading: true, error: null });
     try {
       const trip = await api.updateTripDates(tripId, payload);
       set((state) => ({
         currentTrip: state.currentTrip?.id === trip.id ? trip : state.currentTrip,
         trips: state.trips.map((candidate) => (candidate.id === trip.id ? trip : candidate)),
-        loading: false
+        tripLoading: false
       }));
       return trip;
     } catch (error) {
-      set({ error: error.message, loading: false });
+      set({ error: error.message, tripLoading: false });
+      throw error;
+    }
+  },
+
+  deleteTrip: async (tripId) => {
+    set({ deleteTripLoading: true, error: null });
+    try {
+      await api.deleteTrip(tripId);
+      set((state) => ({
+        trips: state.trips.filter((trip) => trip.id !== tripId),
+        currentTrip: state.currentTrip?.id === tripId ? null : state.currentTrip,
+        deleteTripLoading: false
+      }));
+    } catch (error) {
+      set({ error: error.message, deleteTripLoading: false });
+      throw error;
+    }
+  },
+
+  updateTripSurveyDates: async (tripId, payload) => {
+    set({ surveyDatesSaving: true, error: null });
+    try {
+      const trip = await api.updateTripSurveyDates(tripId, payload);
+      set((state) => ({
+        currentTrip: state.currentTrip?.id === trip.id ? trip : state.currentTrip,
+        trips: state.trips.map((candidate) => (candidate.id === trip.id ? { ...candidate, ...trip } : candidate)),
+        surveyDatesSaving: false
+      }));
+      return trip;
+    } catch (error) {
+      set({ error: error.message, surveyDatesSaving: false });
+      throw error;
+    }
+  },
+
+  updateTripLeaders: async (tripId, payload) => {
+    set({ leadersSaving: true, error: null });
+    try {
+      const trip = await api.updateTripLeaders(tripId, payload);
+      set((state) => ({
+        currentTrip: state.currentTrip?.id === trip.id ? trip : state.currentTrip,
+        trips: state.trips.map((candidate) => (candidate.id === trip.id ? { ...candidate, ...trip } : candidate)),
+        leadersSaving: false
+      }));
+      return trip;
+    } catch (error) {
+      set({ error: error.message, leadersSaving: false });
+      throw error;
+    }
+  },
+
+  updateTripAvailability: async (tripId, payload) => {
+    set({ availabilitySaving: true, error: null });
+    try {
+      const trip = await api.updateTripAvailability(tripId, payload);
+      set((state) => ({
+        currentTrip: state.currentTrip?.id === trip.id ? trip : state.currentTrip,
+        trips: state.trips.map((candidate) => (candidate.id === trip.id ? { ...candidate, ...trip } : candidate)),
+        availabilitySaving: false
+      }));
+      return trip;
+    } catch (error) {
+      set({ error: error.message, availabilitySaving: false });
       throw error;
     }
   },
@@ -63,27 +137,29 @@ export const useTripStore = create((set, get) => ({
       await api.joinTrip(tripId);
     } catch (error) {
       set({ error: error.message });
+      throw error;
     }
   },
 
   loadIdeas: async (tripId) => {
-    set({ loading: true, error: null });
+    set({ ideasLoading: true, error: null });
     try {
       const ideas = await api.getIdeas(tripId);
-      set({ ideas, loading: false });
+      set({ ideas, ideasLoading: false });
     } catch (error) {
-      set({ error: error.message, loading: false });
+      set({ error: error.message, ideasLoading: false });
+      throw error;
     }
   },
 
   addIdea: async (tripId, payload) => {
-    set({ loading: true, error: null });
+    set({ addIdeaLoading: true, error: null });
     try {
       const idea = await api.createIdea(tripId, payload);
-      set((state) => ({ ideas: [idea, ...state.ideas], loading: false }));
+      set((state) => ({ ideas: [idea, ...state.ideas], addIdeaLoading: false }));
       return idea;
     } catch (error) {
-      set({ error: error.message, loading: false });
+      set({ error: error.message, addIdeaLoading: false });
       throw error;
     }
   },
@@ -110,23 +186,25 @@ export const useTripStore = create((set, get) => ({
   },
 
   generateItinerary: async (tripId) => {
-    set({ loading: true, error: null });
+    set({ itineraryLoading: true, error: null });
     try {
       const itinerary = await api.generateItinerary(tripId);
-      set({ itinerary, loading: false });
+      set({ itinerary, itineraryLoading: false });
       return itinerary;
     } catch (error) {
-      set({ error: error.message, loading: false });
+      set({ error: error.message, itineraryLoading: false });
+      throw error;
     }
   },
 
   loadItinerary: async (tripId) => {
-    set({ loading: true, error: null });
+    set({ itineraryLoading: true, error: null });
     try {
       const itinerary = await api.getItinerary(tripId);
-      set({ itinerary, loading: false });
+      set({ itinerary, itineraryLoading: false });
     } catch (error) {
-      set({ error: error.message, loading: false });
+      set({ error: error.message, itineraryLoading: false });
+      throw error;
     }
   }
 }));

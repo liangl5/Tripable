@@ -4,16 +4,25 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: "#111827",
-        mist: "#F3F4F6",
-        ocean: "#0EA5E9",
-        coral: "#F97316",
-        moss: "#16A34A",
-        sand: "#FCD34D",
-        slateblue: "#1E293B"
+        brand: {
+          primary: "#4C6FFF",
+          secondary: "#6BCB77",
+          accent: "#FFB86B",
+          background: "#F7F9FC",
+          text: "#2D3748",
+          error: "#F56565"
+        },
+        ink: "#2D3748",
+        mist: "#F7F9FC",
+        ocean: "#4C6FFF",
+        coral: "#FFB86B",
+        moss: "#6BCB77",
+        sand: "#FFB86B",
+        slateblue: "#2D3748"
       },
       boxShadow: {
-        card: "0 10px 30px rgba(15, 23, 42, 0.12)"
+        card: "0 18px 45px rgba(76, 111, 255, 0.12)",
+        soft: "0 10px 25px rgba(45, 55, 72, 0.08)"
       }
     }
   },
