@@ -1,5 +1,5 @@
 {
-  "name": "tripute",
+  "name": "tripable",
   "private": true,
   "workspaces": [
     "client"

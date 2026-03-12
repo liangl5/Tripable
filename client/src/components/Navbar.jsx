@@ -4,12 +4,7 @@ import { supabase } from "../lib/supabase";
 
 function TripableLogo() {
   return (
-    <div className="relative h-11 w-11 rounded-2xl bg-white shadow-soft ring-1 ring-brand-primary/10">
-      <span className="absolute left-2 top-2 h-3.5 w-3.5 rounded-full bg-brand-primary" />
-      <span className="absolute right-2 top-2 h-3.5 w-3.5 rounded-full bg-brand-secondary" />
-      <span className="absolute bottom-2 left-2 h-3.5 w-3.5 rounded-full bg-brand-accent" />
-      <span className="absolute bottom-2 right-2 h-3.5 w-3.5 rounded-full bg-brand-primary/20 ring-2 ring-brand-primary/35" />
-    </div>
+    <img src="/imgs/icon.png" alt="Tripable Logo" width="50px"/>
   );
 }
 
