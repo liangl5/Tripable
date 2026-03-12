@@ -146,37 +146,50 @@ ALTER TABLE "Idea" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "Vote" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "ItineraryDay" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "ItineraryItem" ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing Trip policies to recreate with correct permissions
+DROP POLICY IF EXISTS "Users can view own trips" ON "Trip";
+DROP POLICY IF EXISTS "Only creator can update trip" ON "Trip";
+DROP POLICY IF EXISTS "Only creator can insert trip" ON "Trip";
+DROP POLICY IF EXISTS "Only creator can delete trip" ON "Trip";
+DROP POLICY IF EXISTS "Anyone authenticated can view trips" ON "Trip";
+
+-- Create User policies
 CREATE POLICY "Users can read their own profile" ON "User" FOR SELECT USING (true);
 CREATE POLICY "Users can update their own profile" ON "User" FOR UPDATE USING (auth.uid()::text = id);
 CREATE POLICY "Anyone can create user" ON "User" FOR INSERT WITH CHECK (true);
-CREATE POLICY "Users can view own trips" ON "Trip" FOR SELECT USING (true);
+
+-- Create Trip policies (allows any authenticated user to view, but only creator can modify)
+CREATE POLICY "Anyone authenticated can view trips" ON "Trip" FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY "Only creator can update trip" ON "Trip" FOR UPDATE USING (auth.uid()::text = "createdById");
 CREATE POLICY "Only creator can insert trip" ON "Trip" FOR INSERT WITH CHECK (auth.uid()::text = "createdById");
 CREATE POLICY "Only creator can delete trip" ON "Trip" FOR DELETE USING (auth.uid()::text = "createdById");
-CREATE POLICY "Users can view all trip memberships" ON "TripMember" FOR SELECT USING (true);
-CREATE POLICY "Users can join trips" ON "TripMember" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
-CREATE POLICY "Users can view all ideas" ON "Idea" FOR SELECT USING (true);
-CREATE POLICY "Users can create ideas" ON "Idea" FOR INSERT WITH CHECK (auth.uid()::text = "createdById");
-CREATE POLICY "Idea creator or trip owner can delete" ON "Idea" FOR DELETE USING (
+
+-- Create remaining policies
+CREATE POLICY IF NOT EXISTS "Users can view all trip memberships" ON "TripMember" FOR SELECT USING (true);
+CREATE POLICY IF NOT EXISTS "Users can join trips" ON "TripMember" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
+CREATE POLICY IF NOT EXISTS "Users can view all ideas" ON "Idea" FOR SELECT USING (true);
+CREATE POLICY IF NOT EXISTS "Users can create ideas" ON "Idea" FOR INSERT WITH CHECK (auth.uid()::text = "createdById");
+CREATE POLICY IF NOT EXISTS "Idea creator or trip owner can delete" ON "Idea" FOR DELETE USING (
   auth.uid()::text = "createdById" OR
   auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "Idea"."tripId")
 );
-CREATE POLICY "Users can view all votes" ON "Vote" FOR SELECT USING (true);
-CREATE POLICY "Users can vote" ON "Vote" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
-CREATE POLICY "Users can update their votes" ON "Vote" FOR UPDATE USING (auth.uid()::text = "userId");
-CREATE POLICY "Users can delete their votes" ON "Vote" FOR DELETE USING (auth.uid()::text = "userId");
-CREATE POLICY "Users can view survey dates" ON "SurveyDate" FOR SELECT USING (true);
-CREATE POLICY "Only creator can manage survey dates" ON "SurveyDate" FOR INSERT WITH CHECK (true);
-CREATE POLICY "Users can view all availability" ON "UserAvailability" FOR SELECT USING (true);
-CREATE POLICY "Users can set their availability" ON "UserAvailability" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
-CREATE POLICY "Users can update their availability" ON "UserAvailability" FOR UPDATE USING (auth.uid()::text = "userId");
-CREATE POLICY "Users can delete their availability" ON "UserAvailability" FOR DELETE USING (auth.uid()::text = "userId");
-CREATE POLICY "Trip members can view itinerary" ON "ItineraryDay" FOR SELECT USING (true);
-CREATE POLICY "Trip owner can delete itinerary days" ON "ItineraryDay" FOR DELETE USING (
+CREATE POLICY IF NOT EXISTS "Users can view all votes" ON "Vote" FOR SELECT USING (true);
+CREATE POLICY IF NOT EXISTS "Users can vote" ON "Vote" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
+CREATE POLICY IF NOT EXISTS "Users can update their votes" ON "Vote" FOR UPDATE USING (auth.uid()::text = "userId");
+CREATE POLICY IF NOT EXISTS "Users can delete their votes" ON "Vote" FOR DELETE USING (auth.uid()::text = "userId");
+CREATE POLICY IF NOT EXISTS "Users can view survey dates" ON "SurveyDate" FOR SELECT USING (true);
+CREATE POLICY IF NOT EXISTS "Only creator can manage survey dates" ON "SurveyDate" FOR INSERT WITH CHECK (true);
+CREATE POLICY IF NOT EXISTS "Users can view all availability" ON "UserAvailability" FOR SELECT USING (true);
+CREATE POLICY IF NOT EXISTS "Users can set their availability" ON "UserAvailability" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
+CREATE POLICY IF NOT EXISTS "Users can update their availability" ON "UserAvailability" FOR UPDATE USING (auth.uid()::text = "userId");
+CREATE POLICY IF NOT EXISTS "Users can delete their availability" ON "UserAvailability" FOR DELETE USING (auth.uid()::text = "userId");
+CREATE POLICY IF NOT EXISTS "Trip members can view itinerary" ON "ItineraryDay" FOR SELECT USING (true);
+CREATE POLICY IF NOT EXISTS "Trip owner can delete itinerary days" ON "ItineraryDay" FOR DELETE USING (
   auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "ItineraryDay"."tripId")
 );
-CREATE POLICY "Trip members can view itinerary items" ON "ItineraryItem" FOR SELECT USING (true);
-CREATE POLICY "Trip owner or creator can delete itinerary items" ON "ItineraryItem" FOR DELETE USING (
+CREATE POLICY IF NOT EXISTS "Trip members can view itinerary items" ON "ItineraryItem" FOR SELECT USING (true);
+CREATE POLICY IF NOT EXISTS "Trip owner or creator can delete itinerary items" ON "ItineraryItem" FOR DELETE USING (
   auth.uid()::text IN (
     SELECT "createdById" FROM "Trip" 
     WHERE id = (SELECT "tripId" FROM "ItineraryDay" WHERE id = "ItineraryItem"."itineraryDayId")
@@ -204,6 +217,11 @@ You're ready to run the app!
 **"Permission denied" errors when creating/deleting data?**
 - Check that RLS policies are enabled on the table
 - Verify the policy conditions match your user's ID
+
+**Invite links return 404 NOT_FOUND when opened in another account?**
+- Ensure the Trip table SELECT policy is `USING (auth.uid() IS NOT NULL)` not `USING (true)`
+- This allows any authenticated user to view trip details needed for the invite flow
+- The policy still protects updates/deletes to trip creators only
 
 **Timestamps showing as "just now" everywhere?**
 - Ensure all timestamp columns are `TIMESTAMPTZ` not `TIMESTAMP`
