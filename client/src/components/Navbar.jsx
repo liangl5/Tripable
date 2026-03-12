@@ -4,7 +4,7 @@ import { supabase } from "../lib/supabase";
 
 function TripableLogo() {
   return (
-    <img src="/imgs/icon.png" alt="Tripable Logo" width="50px"/>
+    <img src="../../imgs/icon.png" alt="Tripable Logo" width="50px"/>
   );
 }
 
