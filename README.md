@@ -39,9 +39,5 @@ Client runs on `http://localhost:5173` and API on `http://localhost:3001`.
 6. Generate the itinerary
 
 
-## Possible technical
-1. Cloudflare / Captcha for new users
-2. Personal profile page (hold statistics, allows users to edit profiles, add names->refer to name in trips)
-
-## Smaller to do
+(Issues board) `https://github.com/users/liangl5/projects/1`
 1. Set date range doesn't update the calendar
