@@ -1,15 +1,23 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useTripStore } from "../hooks/useTripStore.js";
+import { useSession } from "../App";
 
 export default function CreateTripPage() {
   const navigate = useNavigate();
+  const session = useSession();
   const createTrip = useTripStore((state) => state.createTrip);
   const createTripLoading = useTripStore((state) => state.createTripLoading);
   const error = useTripStore((state) => state.error);
   const [form, setForm] = useState({
     name: ""
   });
+
+  useEffect(() => {
+    if (!session) {
+      navigate("/auth");
+    }
+  }, [session, navigate]);
 
   const handleChange = (event) => {
     const { name, value } = event.target;

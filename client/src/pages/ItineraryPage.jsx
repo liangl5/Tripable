@@ -1,10 +1,13 @@
 import { useEffect } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useNavigate } from "react-router-dom";
 import ItineraryView from "../components/ItineraryView.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
+import { useSession } from "../App";
 
 export default function ItineraryPage() {
   const { tripId } = useParams();
+  const navigate = useNavigate();
+  const session = useSession();
   const itinerary = useTripStore((state) => state.itinerary);
   const currentTrip = useTripStore((state) => state.currentTrip);
   const loadItinerary = useTripStore((state) => state.loadItinerary);
@@ -12,6 +15,12 @@ export default function ItineraryPage() {
   const tripLoading = useTripStore((state) => state.tripLoading);
   const itineraryLoading = useTripStore((state) => state.itineraryLoading);
   const error = useTripStore((state) => state.error);
+
+  useEffect(() => {
+    if (!session) {
+      navigate("/auth");
+    }
+  }, [session, navigate]);
 
   useEffect(() => {
     if (!tripId) return;

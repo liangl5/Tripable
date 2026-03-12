@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { formatDateRange } from "../lib/timeFormat.js";
 
 export default function TripList({ trips, onDeleteTrip, deletingTripId }) {
   if (!trips.length) {
@@ -22,7 +23,7 @@ export default function TripList({ trips, onDeleteTrip, deletingTripId }) {
               </span>
             </div>
             <p className="mt-3 text-sm text-slate-500">
-              {trip.startDate && trip.endDate ? `${trip.startDate} → ${trip.endDate}` : "Dates TBD"}
+              {trip.startDate && trip.endDate ? formatDateRange(trip.startDate, trip.endDate) : "Dates TBD"}
             </p>
           </Link>
 

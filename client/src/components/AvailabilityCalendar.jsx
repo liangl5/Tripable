@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import AvailabilityDetails from "./AvailabilityDetails.jsx";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -116,6 +117,8 @@ export default function AvailabilityCalendar({
   const [isSavingSurveyDates, setIsSavingSurveyDates] = useState(false);
   const [dirtyAvailability, setDirtyAvailability] = useState(false);
   const [localMessage, setLocalMessage] = useState("");
+  const [showDetailedView, setShowDetailedView] = useState(false);
+  const [memberViewMode, setMemberViewMode] = useState("table"); // "table" or "list"
 
   const displayedMonth = useMemo(() => dateFromMonthKey(displayedMonthKey), [displayedMonthKey]);
   const draftSurveyDates = useMemo(
@@ -268,13 +271,28 @@ export default function AvailabilityCalendar({
             onClick={() => {
               setMode("group");
               setEditSurveyDates(false);
+              setShowDetailedView(false);
             }}
             className={classNames(
               "rounded-full px-4 py-2 text-xs font-semibold transition",
-              mode === "group" ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
+              mode === "group" && !showDetailedView ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
             )}
           >
             See group availability
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode("group");
+              setEditSurveyDates(false);
+              setShowDetailedView(true);
+            }}
+            className={classNames(
+              "rounded-full px-4 py-2 text-xs font-semibold transition",
+              showDetailedView ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
+            )}
+          >
+            View member breakdown
           </button>
           {isViewerOwner ? (
             <button
@@ -303,7 +321,7 @@ export default function AvailabilityCalendar({
               type="date"
               value={surveyRange.start}
               onChange={(event) => handleSurveyRangeChange("start", event.target.value)}
-              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-normal text-ink"
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-normal text-ink appearance-none"
             />
             <span className="text-xs font-normal text-slate-500">{formatDateInputLabel(surveyRange.start)}</span>
           </label>
@@ -314,7 +332,7 @@ export default function AvailabilityCalendar({
               value={surveyRange.end}
               min={surveyRange.start || undefined}
               onChange={(event) => handleSurveyRangeChange("end", event.target.value)}
-              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-normal text-ink"
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-normal text-ink appearance-none"
             />
             <span className="text-xs font-normal text-slate-500">{formatDateInputLabel(surveyRange.end)}</span>
           </label>
@@ -355,7 +373,7 @@ export default function AvailabilityCalendar({
             </span>
           ) : (
             <span className="inline-flex items-center gap-2">
-              <span className="h-3 w-3 rounded-full bg-[#C7D5FF]" />
+              <span className="h-3 w-3 rounded-full bg-[#6BCB77]" />
               Your selected availability
             </span>
           )}
@@ -423,24 +441,16 @@ export default function AvailabilityCalendar({
                   <span className="text-sm font-semibold">{date.getDate()}</span>
                   {editSurveyDates ? (
                     inSurvey ? (
-                      <span className="absolute bottom-2 left-2 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold text-[#2C8B44]">
-                        Open
-                      </span>
+                      <span className="absolute bottom-1 right-1 h-2 w-2 rounded-full bg-[#6BCB77]" aria-label="Open" />
                     ) : null
                   ) : mode === "group" ? (
                     inSurvey ? (
-                      <span className="absolute bottom-2 left-2 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold text-slate-600">
-                        {overlap} free
-                      </span>
+                      <span className="absolute bottom-1 right-1 h-2 w-2 rounded-full bg-[#6BCB77]" aria-label="Members available" />
                     ) : null
                   ) : isSelected ? (
-                    <span className="absolute bottom-2 left-2 rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-bold text-white">
-                      Free
-                    </span>
+                    <span className="absolute bottom-1 right-1 h-2 w-2 rounded-full bg-[#6BCB77]" aria-label="Selected" />
                   ) : inSurvey ? (
-                    <span className="absolute bottom-2 left-2 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold text-slate-500">
-                      Select
-                    </span>
+                    <span className="absolute bottom-1 right-1 h-2 w-2 rounded-full bg-[#F56565]" aria-label="Available to select" />
                   ) : null}
 
                   {isToday ? (
@@ -504,6 +514,100 @@ export default function AvailabilityCalendar({
           </div>
         ) : null}
       </div>
+
+      {showDetailedView ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="max-h-[80vh] w-full max-w-4xl overflow-auto rounded-3xl bg-white p-6 shadow-card">
+            <div className="flex flex-col gap-4 mb-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-semibold text-ink">Member Availability</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowDetailedView(false)}
+                  className="text-sm font-semibold text-slate-500 hover:text-ink"
+                >
+                  Close
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMemberViewMode("table")}
+                  className={classNames(
+                    "rounded-full px-3 py-2 text-xs font-semibold transition",
+                    memberViewMode === "table" ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
+                  )}
+                >
+                  Date columns
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMemberViewMode("list")}
+                  className={classNames(
+                    "rounded-full px-3 py-2 text-xs font-semibold transition",
+                    memberViewMode === "list" ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
+                  )}
+                >
+                  Member list
+                </button>
+              </div>
+            </div>
+
+            {memberViewMode === "table" ? (
+              <AvailabilityDetails 
+                members={members} 
+                availability={availability} 
+                surveyDates={surveyDatesFromTrip}
+              />
+            ) : (
+              <div className="space-y-4">
+                {members.map((member) => {
+                  const memberAvailability = availability[member.id] || [];
+                  return (
+                    <div key={member.id} className="rounded-2xl bg-mist p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="font-semibold text-ink">{member.isViewer ? "You" : member.name}</span>
+                        {member.isLeader && (
+                          <span className="rounded-full bg-[#EEF2FF] px-2 py-0.5 text-xs font-semibold text-[#4C6FFF]">
+                            Leader
+                          </span>
+                        )}
+                        <span className="ml-auto text-xs text-slate-500">
+                          {memberAvailability.length}/{surveyDatesFromTrip.length} days
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {surveyDatesFromTrip.map((date) => {
+                          const isAvailable = memberAvailability.includes(date);
+                          const dateObj = new Date(date);
+                          const dateLabel = dateObj.toLocaleDateString('en-US', { 
+                            month: 'short', 
+                            day: 'numeric',
+                            weekday: 'short'
+                          });
+                          return (
+                            <div
+                              key={`${member.id}-${date}`}
+                              className={classNames(
+                                "rounded-lg px-2 py-1 text-xs font-medium",
+                                isAvailable 
+                                  ? "bg-[#6BCB77] text-white" 
+                                  : "bg-[#F56565] text-white"
+                              )}
+                            >
+                              {dateLabel}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

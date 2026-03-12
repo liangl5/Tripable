@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useSession } from "../App";
 
 function MockPin({ className, label, color }) {
   return (
@@ -100,6 +101,17 @@ function ProductMock() {
 }
 
 export default function Hero() {
+  const navigate = useNavigate();
+  const session = useSession();
+
+  const handlePlanTrip = () => {
+    if (session) {
+      navigate("/trips/new");
+    } else {
+      navigate("/auth");
+    }
+  };
+
   return (
     <section className="section-shell overflow-hidden px-5 pb-16 pt-10 sm:px-6 lg:px-8 lg:pb-24 lg:pt-16">
       <div className="mx-auto max-w-7xl">
@@ -114,12 +126,12 @@ export default function Hero() {
             Tripable brings destination ideas, voting, availability, and itineraries into one place so your group can actually decide where to go.
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <Link
-              to="/trips/new"
+            <button
+              onClick={handlePlanTrip}
               className="rounded-full bg-[#4C6FFF] px-7 py-4 text-base font-semibold text-white shadow-card transition hover:bg-[#3F5CE0]"
             >
               Plan trip
-            </Link>
+            </button>
             <a href="#features" className="text-base font-semibold text-ink transition hover:text-brand-primary">
               See how it works →
             </a>
@@ -133,3 +145,4 @@ export default function Hero() {
     </section>
   );
 }
+

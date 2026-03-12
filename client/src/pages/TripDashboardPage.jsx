@@ -4,10 +4,13 @@ import AddIdeaModal from "../components/AddIdeaModal.jsx";
 import AvailabilityCalendar from "../components/AvailabilityCalendar.jsx";
 import IdeaCard from "../components/IdeaCard.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
+import { useSession } from "../App";
+import { formatDateRange } from "../lib/timeFormat.js";
 
 export default function TripDashboardPage() {
   const { tripId } = useParams();
   const navigate = useNavigate();
+  const session = useSession();
   const currentTrip = useTripStore((state) => state.currentTrip);
   const ideas = useTripStore((state) => state.ideas);
   const loadTrip = useTripStore((state) => state.loadTrip);
@@ -15,6 +18,7 @@ export default function TripDashboardPage() {
   const joinTrip = useTripStore((state) => state.joinTrip);
   const addIdea = useTripStore((state) => state.addIdea);
   const voteIdea = useTripStore((state) => state.voteIdea);
+  const deleteIdea = useTripStore((state) => state.deleteIdea);
   const deleteTrip = useTripStore((state) => state.deleteTrip);
   const updateTripLeaders = useTripStore((state) => state.updateTripLeaders);
   const updateTripSurveyDates = useTripStore((state) => state.updateTripSurveyDates);
@@ -28,6 +32,13 @@ export default function TripDashboardPage() {
   const [availabilitySaved, setAvailabilitySaved] = useState(false);
   const [surveyDatesSaved, setSurveyDatesSaved] = useState(false);
   const [leadersSaved, setLeadersSaved] = useState(false);
+  const [ideaToDelete, setIdeaToDelete] = useState(null);
+
+  useEffect(() => {
+    if (!session) {
+      navigate("/auth");
+    }
+  }, [session, navigate]);
 
   useEffect(() => {
     if (!tripId) return;
@@ -50,7 +61,7 @@ export default function TripDashboardPage() {
 
   const inviteLink = useMemo(() => {
     if (!tripId) return "";
-    return `${window.location.origin}/trips/${tripId}`;
+    return `${window.location.origin}/trips/${tripId}/invite`;
   }, [tripId]);
 
   const handleCopy = useCallback(async () => {
@@ -58,6 +69,16 @@ export default function TripDashboardPage() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [inviteLink]);
+
+  const handleAddIdea = useCallback(async (formData) => {
+    if (!tripId) return;
+    try {
+      await addIdea(tripId, formData);
+      setIsModalOpen(false);
+    } catch (error) {
+      console.error("Failed to add idea:", error);
+    }
+  }, [addIdea, tripId]);
 
   const handleDeleteTrip = useCallback(async () => {
     if (!tripId) return;
@@ -67,10 +88,29 @@ export default function TripDashboardPage() {
     navigate("/trips");
   }, [deleteTrip, navigate, tripId]);
 
-  const handleAddIdea = useCallback(async (payload) => {
+  const handleDeleteIdea = useCallback(async (ideaId) => {
     if (!tripId) return;
-    await addIdea(tripId, payload);
-  }, [addIdea, tripId]);
+    try {
+      await deleteIdea(ideaId, tripId);
+      setIdeaToDelete(null);
+    } catch (error) {
+      console.error("Failed to delete idea:", error);
+    }
+  }, [deleteIdea, tripId]);
+
+  const handleDeleteRequest = useCallback((ideaId, ideaTitle) => {
+    setIdeaToDelete({ id: ideaId, title: ideaTitle });
+  }, []);
+
+  const handleCancelDelete = useCallback(() => {
+    setIdeaToDelete(null);
+  }, []);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (ideaToDelete) {
+      await handleDeleteIdea(ideaToDelete.id);
+    }
+  }, [ideaToDelete, handleDeleteIdea]);
 
   const handleGenerate = useCallback(async () => {
     if (!tripId) return;
@@ -146,7 +186,7 @@ export default function TripDashboardPage() {
             <h1 className="text-3xl font-semibold text-ink">{currentTrip?.name || "Loading..."}</h1>
             <p className="mt-2 text-sm text-slate-500">
               {currentTrip?.startDate && currentTrip?.endDate
-                ? `${currentTrip.startDate} → ${currentTrip.endDate}`
+                ? formatDateRange(currentTrip.startDate, currentTrip.endDate)
                 : "Dates TBD"}
             </p>
           </div>
@@ -215,8 +255,40 @@ export default function TripDashboardPage() {
             </div>
           </div>
           <div className="mt-6 grid gap-4">
+            {ideaToDelete && (
+              <div className="rounded-2xl bg-red-50 border border-red-200 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="font-semibold text-red-900">Delete activity?</p>
+                    <p className="text-sm text-red-700 mt-1">"{ideaToDelete.title}" will be permanently deleted. This cannot be undone.</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCancelDelete}
+                      className="rounded-full bg-red-100 text-red-700 px-4 py-2 text-xs font-semibold hover:bg-red-200 transition"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmDelete}
+                      className="rounded-full bg-red-600 text-white px-4 py-2 text-xs font-semibold hover:bg-red-700 transition"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             {visibleIdeas.map((idea) => (
-              <IdeaCard key={idea.id} idea={idea} onVote={(value) => voteIdea(idea.id, value)} />
+              <IdeaCard 
+                key={idea.id} 
+                idea={idea} 
+                onVote={(value) => voteIdea(idea.id, value)}
+                onDeleteRequest={handleDeleteRequest}
+                isOwner={currentTrip?.isViewerCreator}
+              />
             ))}
           </div>
         </div>

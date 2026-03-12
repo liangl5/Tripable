@@ -13,6 +13,7 @@ export const useTripStore = create((set, get) => ({
   deleteTripLoading: false,
   ideasLoading: false,
   addIdeaLoading: false,
+  deleteIdeaLoading: false,
   availabilitySaving: false,
   surveyDatesSaving: false,
   leadersSaving: false,
@@ -164,6 +165,20 @@ export const useTripStore = create((set, get) => ({
     }
   },
 
+  deleteIdea: async (ideaId, tripId) => {
+    set({ deleteIdeaLoading: true, error: null });
+    try {
+      await api.deleteIdea(ideaId, tripId);
+      set((state) => ({
+        ideas: state.ideas.filter((idea) => idea.id !== ideaId),
+        deleteIdeaLoading: false
+      }));
+    } catch (error) {
+      set({ error: error.message, deleteIdeaLoading: false });
+      throw error;
+    }
+  },
+
   voteIdea: async (ideaId, value) => {
     const previous = get().ideas;
     const priorVote = previous.find((idea) => idea.id === ideaId)?.userVote || 0;
@@ -178,7 +193,7 @@ export const useTripStore = create((set, get) => ({
     try {
       const updated = await api.voteIdea(ideaId, value);
       set((state) => ({
-        ideas: state.ideas.map((idea) => (idea.id === updated.id ? updated : idea))
+        ideas: state.ideas.map((idea) => (idea.id === updated.id ? { ...idea, ...updated } : idea))
       }));
     } catch (error) {
       set({ ideas: previous, error: error.message });
