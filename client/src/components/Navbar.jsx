@@ -1,10 +1,11 @@
 import { Link } from "react-router-dom";
 import { useSession } from "../App";
 import { supabase } from "../lib/supabase";
+import tripableLogo from "../../imgs/icon.png";
 
 function TripableLogo() {
   return (
-    <img src="../../imgs/icon.png" alt="Tripable Logo" width="50px"/>
+    <img src={tripableLogo} alt="Tripable Logo" width="50px"/>
   );
 }
 
