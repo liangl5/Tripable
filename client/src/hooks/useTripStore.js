@@ -11,6 +11,7 @@ export const useTripStore = create((set, get) => ({
   createTripLoading: false,
   tripLoading: false,
   deleteTripLoading: false,
+  leaveTripLoading: false,
   ideasLoading: false,
   addIdeaLoading: false,
   deleteIdeaLoading: false,
@@ -138,6 +139,24 @@ export const useTripStore = create((set, get) => ({
       await api.joinTrip(tripId);
     } catch (error) {
       set({ error: error.message });
+      throw error;
+    }
+  },
+
+  leaveTrip: async (tripId) => {
+    set({ leaveTripLoading: true, error: null });
+    try {
+      await api.leaveTrip(tripId);
+      const trips = await api.getTrips();
+      set((state) => ({
+        trips,
+        currentTrip: state.currentTrip?.id === tripId ? null : state.currentTrip,
+        ideas: state.currentTrip?.id === tripId ? [] : state.ideas,
+        itinerary: state.currentTrip?.id === tripId ? null : state.itinerary,
+        leaveTripLoading: false
+      }));
+    } catch (error) {
+      set({ error: error.message, leaveTripLoading: false });
       throw error;
     }
   },
