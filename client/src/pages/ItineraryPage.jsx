@@ -1,8 +1,10 @@
-import { useEffect } from "react";
-import { Link, useParams, useNavigate } from "react-router-dom";
+import { useEffect, useMemo } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import ItineraryView from "../components/ItineraryView.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
+import { formatCurrency, getBudgetSummary } from "../lib/tripPlanning.js";
+import { formatDateRange } from "../lib/timeFormat.js";
 
 export default function ItineraryPage() {
   const { tripId } = useParams();
@@ -24,19 +26,71 @@ export default function ItineraryPage() {
 
   useEffect(() => {
     if (!tripId) return;
-    loadTrip(tripId);
-    loadItinerary(tripId);
-  }, [tripId, loadTrip, loadItinerary]);
+    let cancelled = false;
+
+    const loadPage = async () => {
+      try {
+        const trip = await loadTrip(tripId);
+        if (cancelled) return;
+
+        if (!trip?.isViewerCreator && !trip?.isViewerMember) {
+          navigate("/trips");
+          return;
+        }
+
+        await loadItinerary(tripId);
+      } catch (loadError) {
+        console.error("Unable to load itinerary", loadError);
+      }
+    };
+
+    loadPage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tripId, loadTrip, loadItinerary, navigate]);
+
+  const tripSummary = useMemo(() => getBudgetSummary(currentTrip), [currentTrip]);
+  const totalStops = itinerary?.days?.reduce((sum, day) => sum + day.items.length, 0) || 0;
 
   return (
     <div className="mx-auto min-h-screen max-w-6xl px-6 py-12">
       <Link to={`/trips/${tripId}`} className="text-sm text-slate-500">
-        ← Back to dashboard
+        {"<-"} Back to dashboard
       </Link>
-      <header className="mt-6 rounded-3xl bg-white/95 p-8 shadow-card">
-        <p className="text-sm font-semibold text-slate-500">Generated itinerary</p>
-        <h1 className="text-3xl font-semibold text-ink">{currentTrip?.name}</h1>
+
+      <header className="mt-6 rounded-[32px] bg-white/95 p-8 shadow-card">
+        <p className="text-sm font-semibold text-slate-500">Daily itinerary</p>
+        <h1 className="mt-2 text-3xl font-semibold text-ink">{currentTrip?.name}</h1>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          {currentTrip?.destination ? (
+            <span className="rounded-full bg-[#EEF2FF] px-3 py-2 text-xs font-semibold text-ocean">
+              {currentTrip.destination.label}
+            </span>
+          ) : null}
+          {currentTrip?.startDate && currentTrip?.endDate ? (
+            <span className="rounded-full bg-mist px-3 py-2 text-xs font-semibold text-slate-500">
+              {formatDateRange(currentTrip.startDate, currentTrip.endDate)}
+            </span>
+          ) : null}
+        </div>
       </header>
+
+      <section className="mt-6 grid gap-4 md:grid-cols-3">
+        <div className="rounded-3xl bg-white/95 p-5 shadow-card">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Days planned</p>
+          <p className="mt-3 text-2xl font-semibold text-ink">{itinerary?.days?.length || 0}</p>
+        </div>
+        <div className="rounded-3xl bg-white/95 p-5 shadow-card">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Planned stops</p>
+          <p className="mt-3 text-2xl font-semibold text-ink">{totalStops}</p>
+        </div>
+        <div className="rounded-3xl bg-white/95 p-5 shadow-card">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Budget remaining</p>
+          <p className="mt-3 text-2xl font-semibold text-ink">{formatCurrency(tripSummary.remaining)}</p>
+        </div>
+      </section>
 
       <div className="mt-8">
         {tripLoading || itineraryLoading ? <p className="text-sm">Loading itinerary...</p> : null}

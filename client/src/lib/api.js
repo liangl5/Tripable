@@ -1,8 +1,283 @@
 import { supabase } from "./supabase.js";
+import {
+  clearGeneratedItinerary,
+  createItineraryDraft,
+  getGeneratedItinerary,
+  hydrateIdea,
+  hydrateIdeas,
+  hydrateTrip,
+  isPlaceLikeList,
+  normalizeListName,
+  removeIdeaMeta,
+  saveGeneratedItinerary,
+  saveIdeaMeta,
+  slugify
+} from "./tripPlanning.js";
+
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+const GOOGLE_PLACE_SEARCH_FIELDS = [
+  "places.id",
+  "places.displayName",
+  "places.formattedAddress",
+  "places.location",
+  "places.primaryTypeDisplayName",
+  "places.photos"
+].join(",");
+const DEFAULT_RECOMMENDATION_LIMIT = 10;
 
 export async function getCurrentUserId() {
   const { data: { session } } = await supabase.auth.getSession();
   return session?.user?.id || null;
+}
+
+function buildPlaceSearchQuery(textQuery, destination) {
+  const trimmed = String(textQuery || "").trim();
+  const destinationLabel = String(destination?.label || destination?.name || "").trim();
+  if (!trimmed) return "";
+  if (!destinationLabel) return trimmed;
+  const normalizedQuery = trimmed.toLowerCase();
+  const normalizedDestination = destinationLabel.toLowerCase();
+  if (normalizedQuery.includes(normalizedDestination)) {
+    return trimmed;
+  }
+  return `${trimmed} in ${destinationLabel}`;
+}
+
+function getDestinationLabel(destination) {
+  return String(destination?.label || destination?.name || destination?.mapQuery || "").trim();
+}
+
+function uniqueQueries(values) {
+  return Array.from(
+    new Set(
+      (values || [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function slugMatchesAny(slug, tokens) {
+  return tokens.some((token) => slug.includes(token));
+}
+
+function buildPlaceQueries(destinationLabel, normalizedListSlug) {
+  if (slugMatchesAny(normalizedListSlug, ["landmark", "monument", "historic-site", "attraction"])) {
+    return [`top landmarks in ${destinationLabel}`, `best historic sites in ${destinationLabel}`];
+  }
+
+  if (slugMatchesAny(normalizedListSlug, ["neighborhood", "district", "area"])) {
+    return [`best neighborhoods in ${destinationLabel}`, `most interesting districts in ${destinationLabel}`];
+  }
+
+  if (slugMatchesAny(normalizedListSlug, ["viewpoint", "view", "scenic", "observation"])) {
+    return [`best viewpoints in ${destinationLabel}`, `scenic overlooks in ${destinationLabel}`];
+  }
+
+  if (slugMatchesAny(normalizedListSlug, ["park", "garden"])) {
+    return [`best parks in ${destinationLabel}`, `best gardens in ${destinationLabel}`];
+  }
+
+  return [
+    `top landmarks in ${destinationLabel}`,
+    `best neighborhoods in ${destinationLabel}`,
+    `best viewpoints in ${destinationLabel}`,
+    `best parks in ${destinationLabel}`
+  ];
+}
+
+function buildActivityQueries(destinationLabel, normalizedListSlug) {
+  if (slugMatchesAny(normalizedListSlug, ["experience", "experiences"])) {
+    return [`best experiences in ${destinationLabel}`, `unique experiences in ${destinationLabel}`];
+  }
+
+  if (slugMatchesAny(normalizedListSlug, ["tour", "tours", "guided"])) {
+    return [`best tours in ${destinationLabel}`, `guided tours in ${destinationLabel}`];
+  }
+
+  if (slugMatchesAny(normalizedListSlug, ["event", "events", "festival", "concert", "show"])) {
+    return [`top events in ${destinationLabel}`, `live events in ${destinationLabel}`];
+  }
+
+  if (slugMatchesAny(normalizedListSlug, ["class", "classes", "workshop", "making"])) {
+    return [`best classes in ${destinationLabel}`, `workshops in ${destinationLabel}`];
+  }
+
+  if (slugMatchesAny(normalizedListSlug, ["nightlife", "bar", "bars", "club", "clubbing"])) {
+    return [`best nightlife in ${destinationLabel}`, `bar hopping in ${destinationLabel}`];
+  }
+
+  if (slugMatchesAny(normalizedListSlug, ["ski", "skiing", "snowboard"])) {
+    return [`skiing in ${destinationLabel}`, `best ski resorts near ${destinationLabel}`];
+  }
+
+  return [
+    `best experiences in ${destinationLabel}`,
+    `best tours in ${destinationLabel}`,
+    `top events in ${destinationLabel}`,
+    `best classes in ${destinationLabel}`
+  ];
+}
+
+function buildFoodQueries(destinationLabel, normalizedListSlug) {
+  if (slugMatchesAny(normalizedListSlug, ["restaurant", "restaurants", "dinner", "lunch"])) {
+    return [`best restaurants in ${destinationLabel}`, `top dining in ${destinationLabel}`];
+  }
+
+  if (slugMatchesAny(normalizedListSlug, ["cafe", "cafes", "coffee", "bakery"])) {
+    return [`best cafes in ${destinationLabel}`, `best coffee shops in ${destinationLabel}`];
+  }
+
+  if (slugMatchesAny(normalizedListSlug, ["must-eat", "must-eats", "musteat", "iconic", "signature", "local-food"])) {
+    return [`must eat in ${destinationLabel}`, `iconic food in ${destinationLabel}`];
+  }
+
+  return [
+    `best restaurants in ${destinationLabel}`,
+    `best cafes in ${destinationLabel}`,
+    `must eat in ${destinationLabel}`
+  ];
+}
+
+function buildRecommendationQueries(listName, destination) {
+  const destinationLabel = getDestinationLabel(destination);
+  const normalizedListName = normalizeListName(listName) || "Places to Visit";
+  const normalizedListSlug = slugify(normalizedListName);
+
+  if (!destinationLabel) {
+    return [];
+  }
+
+  if (
+    slugMatchesAny(normalizedListSlug, [
+      "places-to-visit",
+      "landmark",
+      "monument",
+      "historic-site",
+      "attraction",
+      "neighborhood",
+      "district",
+      "viewpoint",
+      "view",
+      "scenic",
+      "park",
+      "garden"
+    ])
+  ) {
+    return uniqueQueries(buildPlaceQueries(destinationLabel, normalizedListSlug));
+  }
+
+  if (
+    slugMatchesAny(normalizedListSlug, [
+      "activities",
+      "activity",
+      "experience",
+      "tour",
+      "event",
+      "class",
+      "workshop",
+      "nightlife",
+      "bar",
+      "club",
+      "ski"
+    ])
+  ) {
+    return uniqueQueries(buildActivityQueries(destinationLabel, normalizedListSlug));
+  }
+
+  if (
+    slugMatchesAny(normalizedListSlug, [
+      "food",
+      "restaurant",
+      "cafe",
+      "coffee",
+      "bakery",
+      "must-eat",
+      "musteat",
+      "eat",
+      "brunch"
+    ])
+  ) {
+    return uniqueQueries(buildFoodQueries(destinationLabel, normalizedListSlug));
+  }
+
+  const normalizedQueryText = normalizedListName.toLowerCase();
+  return uniqueQueries([
+    `top ${normalizedQueryText} in ${destinationLabel}`,
+    `${normalizedQueryText} in ${destinationLabel}`
+  ]);
+}
+
+async function runPlacesTextSearch(textQuery, maxResultCount = 5) {
+  if (!textQuery || !GOOGLE_MAPS_API_KEY) {
+    return [];
+  }
+
+  const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
+      "X-Goog-FieldMask": GOOGLE_PLACE_SEARCH_FIELDS
+    },
+    body: JSON.stringify({
+      textQuery,
+      maxResultCount: Math.max(1, Math.min(20, Number(maxResultCount) || 5))
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || "Google Places search failed");
+  }
+
+  const payload = await response.json();
+  return payload.places || [];
+}
+
+function normalizePlaceMatch(place) {
+  const title = place.displayName?.text || "";
+  const address = place.formattedAddress || "";
+  const firstPhoto = Array.isArray(place.photos) ? place.photos[0] : null;
+  const latitude = place.location?.latitude;
+  const longitude = place.location?.longitude;
+
+  return {
+    id: place.id || `${title.toLowerCase()}-${address.toLowerCase()}`,
+    title,
+    address,
+    mapQuery: [title, address].filter(Boolean).join(", "),
+    coordinates:
+      typeof latitude === "number" && typeof longitude === "number"
+        ? { lat: latitude, lng: longitude }
+        : null,
+    primaryTypeLabel: place.primaryTypeDisplayName?.text || "",
+    photoUrl:
+      GOOGLE_MAPS_API_KEY && firstPhoto?.name
+        ? `https://places.googleapis.com/v1/${firstPhoto.name}/media?maxWidthPx=800&key=${GOOGLE_MAPS_API_KEY}`
+        : "",
+    photoAttributions: Array.isArray(firstPhoto?.authorAttributions) ? firstPhoto.authorAttributions : []
+  };
+}
+
+function buildRecommendationDescription(place, listName, destination) {
+  const destinationLabel = getDestinationLabel(destination) || "this destination";
+  const primaryTypeLabel = place.primaryTypeDisplayName?.text || "";
+  const normalizedListName = normalizeListName(listName);
+
+  if (primaryTypeLabel && normalizedListName) {
+    return `${primaryTypeLabel} recommended for ${normalizedListName.toLowerCase()} in ${destinationLabel}.`;
+  }
+
+  if (primaryTypeLabel) {
+    return `${primaryTypeLabel} in ${destinationLabel}.`;
+  }
+
+  if (normalizedListName) {
+    return `Top Google Maps pick for ${normalizedListName.toLowerCase()} in ${destinationLabel}.`;
+  }
+
+  return `Top Google Maps pick in ${destinationLabel}.`;
 }
 
 function normalizeName(value) {
@@ -71,18 +346,21 @@ function getMemberCount(tripId, members) {
 }
 
 function formatTrip(trip, memberCount = 0) {
-  return {
+  return hydrateTrip({
     id: trip.id,
     name: trip.name,
     startDate: toISODate(trip.startDate),
     endDate: toISODate(trip.endDate),
     memberCount,
     createdById: trip.createdById
-  };
+  });
 }
 
 async function formatTripDetails(trip, viewerUserId, members, leaders, availability, surveyDates) {
-  return {
+  const isViewerMember =
+    trip.createdById === viewerUserId || Boolean((members || []).some((member) => member.id === viewerUserId));
+
+  return hydrateTrip({
     id: trip.id,
     name: trip.name,
     startDate: toISODate(trip.startDate),
@@ -90,21 +368,22 @@ async function formatTripDetails(trip, viewerUserId, members, leaders, availabil
     memberCount: members?.length || 0,
     createdById: trip.createdById,
     isViewerCreator: trip.createdById === viewerUserId,
+    isViewerMember,
     isViewerLeader: leaders?.includes(viewerUserId),
     ownerId: trip.createdById,
     leaders: leaders || [trip.createdById],
     members: members || [],
     surveyDates: surveyDates || [],
     availability: availability || {}
-  };
+  });
 }
 
-function formatIdea(idea, userId, votes = []) {
+function formatIdea(tripId, idea, userId, votes = []) {
   const voteScore = votes.reduce((sum, vote) => sum + vote.value, 0);
   const userVote = votes.find((vote) => vote.userId === userId)?.value || 0;
   const isCreator = idea.createdById === userId;
 
-  return {
+  return hydrateIdea(tripId, {
     id: idea.id,
     title: idea.title,
     description: idea.description,
@@ -117,10 +396,93 @@ function formatIdea(idea, userId, votes = []) {
     voteCount: votes.length,
     userVote,
     isCreator
-  };
+  });
 }
 
 export const api = {
+  canSearchPlaces() {
+    return Boolean(GOOGLE_MAPS_API_KEY);
+  },
+
+  async searchPlaces(textQuery, destination) {
+    const query = buildPlaceSearchQuery(textQuery, destination);
+    if (!query || !GOOGLE_MAPS_API_KEY) {
+      return [];
+    }
+
+    const results = await runPlacesTextSearch(query, 5);
+    return results
+      .map((place) => normalizePlaceMatch(place))
+      .filter((place) => place.title);
+  },
+
+  async resolveMapLocation(textQuery) {
+    const query = String(textQuery || "").trim();
+    if (!query || !GOOGLE_MAPS_API_KEY) {
+      return null;
+    }
+
+    const results = await runPlacesTextSearch(query, 1);
+    const location = results[0]?.location;
+    if (
+      !location ||
+      typeof location.latitude !== "number" ||
+      typeof location.longitude !== "number"
+    ) {
+      return null;
+    }
+
+    return {
+      lat: location.latitude,
+      lng: location.longitude
+    };
+  },
+
+  async getRecommendations(destination, listName, options = {}) {
+    const queries = buildRecommendationQueries(listName, destination);
+    if (!queries.length || !GOOGLE_MAPS_API_KEY) {
+      return [];
+    }
+
+    const limit = Math.max(1, Math.min(20, Number(options.limit) || DEFAULT_RECOMMENDATION_LIMIT));
+    const entryType = isPlaceLikeList(listName) ? "place" : "activity";
+    const seenIds = new Set();
+    const seenTitles = new Set();
+    const recommendations = [];
+
+    for (const query of queries) {
+      const results = await runPlacesTextSearch(query, limit);
+      for (const place of results) {
+        const normalized = normalizePlaceMatch(place);
+        const titleKey = normalized.title.trim().toLowerCase();
+        if (!normalized.title || seenIds.has(normalized.id) || seenTitles.has(titleKey)) {
+          continue;
+        }
+
+        seenIds.add(normalized.id);
+        seenTitles.add(titleKey);
+        recommendations.push({
+          id: normalized.id,
+          title: normalized.title,
+          description: buildRecommendationDescription(place, listName, destination),
+          location: normalized.address || normalized.title,
+          entryType,
+          mapQuery: normalized.mapQuery || normalized.address || normalized.title,
+          coordinates: normalized.coordinates,
+          recommendationSource: "Google Maps",
+          photoUrl: normalized.photoUrl,
+          photoAttributions: normalized.photoAttributions
+        });
+
+        if (recommendations.length >= limit) {
+          return recommendations;
+        }
+      }
+    }
+
+    return recommendations;
+  },
+
   async getTrips() {
     const user = await getOrCreateUser();
     const userId = user.id;
@@ -306,8 +668,9 @@ export const api = {
 
     // Invalidate itinerary
     await supabase.from("ItineraryDay").delete().eq("tripId", tripId);
+    clearGeneratedItinerary(tripId);
 
-    return formatTrip(updated, 0);
+    return this.getTrip(tripId);
   },
 
   async updateTripSurveyDates(tripId, payload) {
@@ -350,6 +713,8 @@ export const api = {
         endDate: sortedDates[sortedDates.length - 1] ? new Date(sortedDates[sortedDates.length - 1]).toISOString() : null
       })
       .eq("id", tripId);
+
+    clearGeneratedItinerary(tripId);
 
     return this.getTrip(tripId);
   },
@@ -417,6 +782,85 @@ export const api = {
     if (error) throw error;
   },
 
+  async leaveTrip(tripId) {
+    const user = await getOrCreateUser();
+
+    const { data: trip, error: tripError } = await supabase
+      .from("Trip")
+      .select("id, createdById")
+      .eq("id", tripId)
+      .single();
+
+    if (tripError || !trip) {
+      throw new Error("Trip not found");
+    }
+
+    if (trip.createdById === user.id) {
+      throw new Error("Trip owners can't leave their own trip.");
+    }
+
+    const { data: membershipRows, error: membershipError } = await supabase
+      .from("TripMember")
+      .select("id")
+      .eq("tripId", tripId)
+      .eq("userId", user.id)
+      .limit(1);
+
+    if (membershipError) throw membershipError;
+    if (!membershipRows?.length) {
+      throw new Error("You are not a member of this trip.");
+    }
+
+    const membershipIds = membershipRows.map((membership) => membership.id);
+
+    const { data: ideaRows, error: ideaError } = await supabase
+      .from("Idea")
+      .select("id")
+      .eq("tripId", tripId);
+
+    if (ideaError) throw ideaError;
+
+    const ideaIds = (ideaRows || []).map((idea) => idea.id);
+
+    const { data: deletedMemberships, error: deleteMembershipError } = await supabase
+      .from("TripMember")
+      .delete()
+      .in("id", membershipIds)
+      .select("id");
+
+    if (deleteMembershipError) throw deleteMembershipError;
+    if (!deletedMemberships?.length) {
+      throw new Error("Unable to leave this trip right now.");
+    }
+
+    const { error: availabilityDeleteError } = await supabase
+      .from("UserAvailability")
+      .delete()
+      .eq("tripId", tripId)
+      .eq("userId", user.id);
+
+    if (availabilityDeleteError) throw availabilityDeleteError;
+
+    if (ideaIds.length) {
+      const { error: voteDeleteError } = await supabase
+        .from("Vote")
+        .delete()
+        .eq("userId", user.id)
+        .in("ideaId", ideaIds);
+
+      if (voteDeleteError) throw voteDeleteError;
+    }
+
+    const { error: itineraryDeleteError } = await supabase
+      .from("ItineraryDay")
+      .delete()
+      .eq("tripId", tripId);
+
+    if (itineraryDeleteError) throw itineraryDeleteError;
+
+    clearGeneratedItinerary(tripId);
+  },
+
   async getIdeas(tripId) {
     const user = await getOrCreateUser();
 
@@ -428,7 +872,10 @@ export const api = {
 
     if (error) throw error;
 
-    return ideas?.map(idea => formatIdea(idea, user.id, idea.votes)) || [];
+    return hydrateIdeas(
+      tripId,
+      ideas?.map((idea) => formatIdea(tripId, idea, user.id, idea.votes)) || []
+    );
   },
 
   async createIdea(tripId, payload) {
@@ -453,8 +900,18 @@ export const api = {
 
     // Invalidate itinerary
     await supabase.from("ItineraryDay").delete().eq("tripId", tripId);
+    clearGeneratedItinerary(tripId);
+    saveIdeaMeta(tripId, ideaId, {
+      entryType: payload.entryType,
+      mapQuery: payload.mapQuery,
+      coordinates: payload.coordinates || null,
+      photoUrl: payload.photoUrl || "",
+      photoAttributions: payload.photoAttributions || [],
+      listName: payload.category,
+      recommendationSource: payload.recommendationSource || null
+    });
 
-    return formatIdea(idea, user.id, []);
+    return formatIdea(tripId, idea, user.id, []);
   },
 
   async deleteIdea(ideaId, tripId) {
@@ -504,6 +961,8 @@ export const api = {
 
     // Invalidate itinerary
     await supabase.from("ItineraryDay").delete().eq("tripId", tripId);
+    clearGeneratedItinerary(tripId);
+    removeIdeaMeta(tripId, ideaId);
   },
 
   async voteIdea(ideaId, value) {
@@ -549,6 +1008,7 @@ export const api = {
 
     // Invalidate itinerary
     await supabase.from("ItineraryDay").delete().eq("tripId", idea.tripId);
+    clearGeneratedItinerary(idea.tripId);
 
     // Return updated idea
     const { data: votes } = await supabase
@@ -568,63 +1028,24 @@ export const api = {
   },
 
   async generateItinerary(tripId) {
-    const { data: trip, error: tripError } = await supabase
-      .from("Trip")
-      .select("*")
-      .eq("id", tripId)
-      .single();
+    const trip = await this.getTrip(tripId);
 
-    if (tripError || !trip) throw new Error("Trip not found");
+    if (!trip) throw new Error("Trip not found");
 
     if (!trip.startDate || !trip.endDate) {
       throw new Error("Set trip dates before generating an itinerary");
     }
-
-    const { data: ideasData } = await supabase
-      .from("Idea")
-      .select("*, votes:Vote(*)")
-      .eq("tripId", tripId);
-
-    const ideas = ideasData ?? [];
-
-    // Build itinerary (simplified - same logic as before)
-    const totalDays = Math.max(
-      1,
-      Math.floor(
-        (new Date(trip.endDate) - new Date(trip.startDate)) / (24 * 60 * 60 * 1000)
-      ) + 1
-    );
-
-    const dayBuckets = Array.from({ length: totalDays }, (_, index) => ({
-      dayNumber: index + 1,
-      date: new Date(new Date(trip.startDate).getTime() + index * 24 * 60 * 60 * 1000),
-      items: []
-    }));
-
-    ideas.forEach((idea, idx) => {
-      const dayIndex = idx % totalDays;
-      dayBuckets[dayIndex].items.push({
-        id: `${trip.id}-${dayIndex + 1}-${dayBuckets[dayIndex].items.length + 1}`,
-        order: dayBuckets[dayIndex].items.length + 1,
-        title: idea.title,
-        location: idea.location
-      });
-    });
-
-    const itinerary = {
-      tripId,
-      days: dayBuckets.map(day => ({
-        dayNumber: day.dayNumber,
-        date: toISODate(day.date),
-        locationLabel: day.items[0]?.location || "",
-        items: day.items
-      }))
-    };
-
-    return itinerary;
+    const ideas = await this.getIdeas(tripId);
+    const itinerary = createItineraryDraft(trip, ideas);
+    return saveGeneratedItinerary(tripId, itinerary);
   },
 
   async getItinerary(tripId) {
+    const saved = getGeneratedItinerary(tripId);
+    if (saved) {
+      return saved;
+    }
+
     const { data: days } = await supabase
       .from("ItineraryDay")
       .select("*, items:ItineraryItem(*)")

@@ -22,6 +22,9 @@ export default function TripList({ trips, onDeleteTrip, deletingTripId }) {
                 {trip.memberCount} members
               </span>
             </div>
+            {trip.destination ? (
+              <p className="mt-3 text-sm font-semibold text-ocean">{trip.destination.label}</p>
+            ) : null}
             <p className="mt-3 text-sm text-slate-500">
               {trip.startDate && trip.endDate ? formatDateRange(trip.startDate, trip.endDate) : "Dates TBD"}
             </p>
