@@ -168,6 +168,7 @@ CREATE POLICY "Only creator can delete trip" ON "Trip" FOR DELETE USING (auth.ui
 -- Create remaining policies
 CREATE POLICY IF NOT EXISTS "Users can view all trip memberships" ON "TripMember" FOR SELECT USING (true);
 CREATE POLICY IF NOT EXISTS "Users can join trips" ON "TripMember" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
+CREATE POLICY "Users can leave trips" ON "TripMember" FOR DELETE USING (auth.uid()::text = "userId");
 CREATE POLICY IF NOT EXISTS "Users can view all ideas" ON "Idea" FOR SELECT USING (true);
 CREATE POLICY IF NOT EXISTS "Users can create ideas" ON "Idea" FOR INSERT WITH CHECK (auth.uid()::text = "createdById");
 CREATE POLICY IF NOT EXISTS "Idea creator or trip owner can delete" ON "Idea" FOR DELETE USING (
