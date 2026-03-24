@@ -16,15 +16,17 @@ export default function TripListPage() {
   const error = useTripStore((state) => state.error);
   const [deletingTripId, setDeletingTripId] = useState(null);
 
+  const currentUserId = session?.user?.id;
+
   useEffect(() => {
     if (!session) {
       navigate("/auth");
       return;
     }
-    loadTrips();
-  }, [loadTrips, session, navigate]);
 
-  const currentUserId = getCurrentUserId();
+    loadTrips();
+  }, [session, navigate, loadTrips]);
+
   const tripsWithOwnership = useMemo(
     () =>
       trips.map((trip) => ({

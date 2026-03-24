@@ -25,11 +25,6 @@ const GOOGLE_PLACE_SEARCH_FIELDS = [
 ].join(",");
 const DEFAULT_RECOMMENDATION_LIMIT = 10;
 
-export async function getCurrentUserId() {
-  const { data: { session } } = await supabase.auth.getSession();
-  return session?.user?.id || null;
-}
-
 function buildPlaceSearchQuery(textQuery, destination) {
   const trimmed = String(textQuery || "").trim();
   const destinationLabel = String(destination?.label || destination?.name || "").trim();
