@@ -3,7 +3,6 @@ import { Link, useNavigate } from "react-router-dom";
 import TripList from "../components/TripList.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
-import { getCurrentUserId } from "../lib/api.js";
 
 export default function TripListPage() {
   const navigate = useNavigate();
@@ -15,7 +14,7 @@ export default function TripListPage() {
   const deleteTripLoading = useTripStore((state) => state.deleteTripLoading);
   const error = useTripStore((state) => state.error);
   const [deletingTripId, setDeletingTripId] = useState(null);
-
+  const currentUserId = session?.user?.id;
 
   useEffect(() => {
     if (!session) {
@@ -25,7 +24,6 @@ export default function TripListPage() {
 
     loadTrips();
   }, [loadTrips, session, navigate]);
-  const currentUserId = getCurrentUserId();
 
   const tripsWithOwnership = useMemo(
     () =>

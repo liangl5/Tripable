@@ -1,11 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { useSession, useUserProfile } from "../App";
+import { getDisplayName } from "../lib/userProfile.js";
 
 export function AuthStatus() {
+  const session = useSession();
+  const { profile, refreshProfile } = useUserProfile();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [session, setSession] = useState(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -14,18 +17,7 @@ export function AuthStatus() {
   const [message, setMessage] = useState('');
 
   const returnUrl = searchParams.get('return') || '/trips';
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
+  const displayName = useMemo(() => getDisplayName(profile, session), [profile, session]);
 
   const handleSignUp = async (e) => {
     e.preventDefault();
@@ -75,6 +67,8 @@ export function AuthStatus() {
       setEmail('');
       setPassword('');
       setConfirmPassword('');
+      const { data } = await supabase.auth.getSession();
+      await refreshProfile(data?.session || null);
       setTimeout(() => navigate(returnUrl), 1000);
     }
     setLoading(false);
@@ -82,7 +76,6 @@ export function AuthStatus() {
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
-    setSession(null);
   };
 
   const switchMode = () => {
@@ -100,7 +93,7 @@ export function AuthStatus() {
           <h1 className="text-3xl font-bold text-slate-900 mb-4">Tripable</h1>
           <div className="space-y-4">
             <p className="text-slate-600">
-              Logged in as: <span className="font-semibold">{session.user.email}</span>
+              Logged in as: <span className="font-semibold">{displayName}</span>
             </p>
             <button
               onClick={handleSignOut}
@@ -169,7 +162,7 @@ export function AuthStatus() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={6}
+                minLength={isSignUp ? 6 : undefined}
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
               />
             </div>

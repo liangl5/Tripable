@@ -1,53 +1,55 @@
-import { useMemo, useState } from "react";
-import { getCurrentUserId } from "../lib/api.js";
-
-function getUserIdSnippet() {
-  const id = getCurrentUserId();
-  if (!id) return "";
-  return `${id.slice(0, 4)}...${id.slice(-4)}`;
-}
+import { useState } from "react";
+import { useSession, useUserProfile } from "../App";
+import { updateUserProfileName } from "../lib/userProfile.js";
 
 export default function UserIdentity({ editable = false }) {
-  const [savedName, setSavedName] = useState(() => localStorage.getItem("tripute_user_name") || "");
-  const [isEditing, setIsEditing] = useState(editable && !savedName);
-  const [draftName, setDraftName] = useState(savedName);
+  const session = useSession();
+  const { profile, profileLoading, refreshProfile } = useUserProfile();
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const snippet = useMemo(() => getUserIdSnippet(), []);
+  const displayName = String(profile?.name || "").trim();
+  const inputValue = isEditing ? draftName : displayName;
 
   const handleSave = () => {
+    if (!session) return;
     const next = draftName.trim();
-    localStorage.setItem("tripute_user_name", next);
-    setSavedName(next);
-    setIsEditing(false);
+    if (!next) return;
+
+    setSaving(true);
+    updateUserProfileName(session, next)
+      .then(() => refreshProfile(session))
+      .finally(() => {
+        setSaving(false);
+        setIsEditing(false);
+      });
   };
 
   const handleEdit = () => {
-    setDraftName(savedName);
+    setDraftName(displayName);
     setIsEditing(true);
   };
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/60 bg-white/70 px-4 py-3 text-sm shadow-card backdrop-blur">
-      <div>
-        <p className="text-xs font-semibold text-slate-500">Your name (for ideas + votes)</p>
-        <p className="text-xs text-slate-400">This browser is a unique voter {snippet ? `· ${snippet}` : ""}</p>
-      </div>
+    <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
       {editable ? (
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+        <>
           <input
-            value={isEditing ? draftName : savedName}
+            value={inputValue}
             onChange={(event) => setDraftName(event.target.value)}
             placeholder="e.g. Maya"
-            disabled={!isEditing}
-            className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-2 text-sm disabled:opacity-80 sm:w-56"
+            disabled={!isEditing || profileLoading || saving}
+            className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-2 text-sm disabled:opacity-80 sm:w-64"
           />
           {isEditing ? (
             <button
               type="button"
               onClick={handleSave}
-              className="rounded-full bg-ocean px-4 py-2 text-xs font-semibold text-white"
+              disabled={!draftName.trim() || saving}
+              className="rounded-full bg-ocean px-4 py-2 text-xs font-semibold text-white disabled:opacity-70"
             >
-              Save
+              {saving ? "Saving..." : "Save"}
             </button>
           ) : (
             <button
@@ -58,10 +60,10 @@ export default function UserIdentity({ editable = false }) {
               Edit
             </button>
           )}
-        </div>
+        </>
       ) : (
         <div className="rounded-full bg-white/80 px-4 py-2 text-xs font-semibold text-ink shadow-card">
-          {savedName ? savedName : "Set your name on Home"}
+          {displayName ? displayName : "Set your name on Home"}
         </div>
       )}
     </div>
