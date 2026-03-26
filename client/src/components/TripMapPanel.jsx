@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api.js";
 import {
   canUseGoogleMapsJsApi,
+  getGoogleMapsMapId,
   loadGoogleMapsJsApi
 } from "../lib/googleMaps.js";
 
@@ -27,6 +28,17 @@ function createMarkerTooltipContent(value) {
   node.style.color = "#1f2937";
   node.textContent = label;
   return node;
+}
+
+function createAdvancedMarkerContent(PinElement, title) {
+  const pin = new PinElement({
+    background: "#4F68F5",
+    borderColor: "#3B4ED6",
+    glyphColor: "#FFFFFF",
+    glyphText: String(title || "").trim().slice(0, 1).toUpperCase()
+  });
+
+  return pin.element;
 }
 
 function normalizeCoordinates(coordinates) {
@@ -103,12 +115,14 @@ export default function TripMapPanel({
     const initializeMap = async () => {
       try {
         const googleMaps = await loadGoogleMapsJsApi();
+        await googleMaps.importLibrary("marker");
         if (cancelled || !mapContainerRef.current) return;
 
         if (!mapInstanceRef.current) {
           mapInstanceRef.current = new googleMaps.Map(mapContainerRef.current, {
             center: { lat: 20, lng: 0 },
             zoom: 3,
+            mapId: getGoogleMapsMapId(),
             streetViewControl: false,
             mapTypeControl: false,
             fullscreenControl: false,
@@ -150,9 +164,10 @@ export default function TripMapPanel({
       }
       persistentInfoWindowsRef.current.forEach((infoWindow) => infoWindow.close());
       persistentInfoWindowsRef.current = [];
-      markersRef.current.forEach((marker) => {
+      markersRef.current.forEach(({ cleanup, marker }) => {
+        cleanup?.();
         window.google?.maps?.event?.clearInstanceListeners?.(marker);
-        marker.setMap(null);
+        marker.map = null;
       });
       markersRef.current = [];
       markerLookupRef.current = new Map();
@@ -161,6 +176,9 @@ export default function TripMapPanel({
     const renderMarkers = async () => {
       const googleMaps = window.google?.maps;
       if (!googleMaps || cancelled) return;
+      const markerLibrary = await googleMaps.importLibrary("marker");
+      if (cancelled) return;
+      const { AdvancedMarkerElement, PinElement } = markerLibrary;
 
       clearMarkers();
 
@@ -183,11 +201,28 @@ export default function TripMapPanel({
 
         const markerLabel = String(idea.title || idea.locationLabel || idea.mapQuery || "Plan item").trim();
         const markerTitle = truncateMarkerTitle(markerLabel);
-        const marker = new googleMaps.Marker({
+        const markerContent = createAdvancedMarkerContent(PinElement, markerLabel);
+        const marker = new AdvancedMarkerElement({
           map,
           position,
-          title: markerTitle
+          title: markerTitle,
+          content: markerContent
         });
+        const openHoverLabel = () => {
+          infoWindowRef.current?.setContent(createMarkerTooltipContent(markerLabel));
+          infoWindowRef.current?.open({
+            anchor: marker,
+            map,
+            shouldFocus: false
+          });
+        };
+        const closeHoverLabel = () => {
+          infoWindowRef.current?.close();
+        };
+        const cleanup = () => {
+          markerContent.removeEventListener("mouseenter", openHoverLabel);
+          markerContent.removeEventListener("mouseleave", closeHoverLabel);
+        };
 
         if (showAllNames) {
           const persistentInfoWindow = new googleMaps.InfoWindow({
@@ -203,24 +238,14 @@ export default function TripMapPanel({
           });
           persistentInfoWindowsRef.current.push(persistentInfoWindow);
         } else {
-          marker.addListener("mouseover", () => {
-            infoWindowRef.current?.setContent(createMarkerTooltipContent(markerLabel));
-            infoWindowRef.current?.open({
-              anchor: marker,
-              map,
-              shouldFocus: false
-            });
-          });
-
-          marker.addListener("mouseout", () => {
-            infoWindowRef.current?.close();
-          });
+          markerContent.addEventListener("mouseenter", openHoverLabel);
+          markerContent.addEventListener("mouseleave", closeHoverLabel);
         }
 
         if (!firstMarkerPosition) {
           firstMarkerPosition = position;
         }
-        nextMarkers.push(marker);
+        nextMarkers.push({ cleanup, marker });
         markerLookupRef.current.set(idea.id, { position, query: idea.mapQuery, title: markerTitle });
         markerLookupRef.current.set(idea.mapQuery, { position, query: idea.mapQuery, title: markerTitle });
         bounds.extend(position);
@@ -331,38 +356,27 @@ export default function TripMapPanel({
                 <h2 className="text-xl font-semibold text-ink">
                   {destination?.name || "Map preview"}
                 </h2>
-                <p className="mt-2 text-sm text-slate-500">
-                  Selected places and activities with map locations show up as markers on the map.
-                </p>
                 {jsMapError ? (
                   <p className="mt-2 text-xs font-semibold text-slate-400">{jsMapError}</p>
                 ) : null}
               </div>
-              <div className="flex flex-col items-end gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
-                  role="switch"
-                  aria-checked={showAllNames}
+                  aria-pressed={showAllNames}
                   onClick={() => setShowAllNames((current) => !current)}
-                  className="flex items-center gap-3 rounded-full bg-[#EEF2FF] px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-[#E3E9FF]"
+                  className={`rounded-full border px-3 py-2 text-xs font-semibold transition ${
+                    showAllNames
+                      ? "border-ocean bg-ocean text-white"
+                      : "border-slate-200 bg-white text-slate-700 hover:bg-mist"
+                  }`}
                 >
-                  <span>Show all names</span>
-                  <span
-                    className={`relative h-6 w-11 rounded-full transition ${
-                      showAllNames ? "bg-ocean" : "bg-slate-300"
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition ${
-                        showAllNames ? "translate-x-[22px]" : "translate-x-0.5"
-                      }`}
-                    />
-                  </span>
+                  Show all names
                 </button>
                 <button
                   type="button"
                   onClick={() => onFocusLocation(fallbackQuery)}
-                  className="rounded-full bg-mist px-3 py-2 text-xs font-semibold text-slate-600"
+                  className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-mist"
                 >
                   Reset map
                 </button>
@@ -383,7 +397,7 @@ export default function TripMapPanel({
               {destination?.name || "Map preview"}
             </h2>
             <p className="mt-2 text-sm text-slate-500">
-              Ideas with a real map location focus the map, including activities that came from Google matches.
+              Only selected-list items with a real map location appear here, including Google-matched activities.
             </p>
           </div>
           <span className="rounded-full bg-mist px-3 py-2 text-xs font-semibold text-slate-500">
@@ -433,7 +447,7 @@ export default function TripMapPanel({
           </div>
         ) : (
           <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-mist px-4 py-5 text-sm text-slate-500">
-            Add places with real addresses to start pinning the plan on the map.
+            Select a list with mapped items, or add places with real addresses to start pinning the plan on the map.
           </div>
         )}
       </div>

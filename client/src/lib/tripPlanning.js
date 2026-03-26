@@ -718,6 +718,30 @@ export function addCustomList(tripId, listName) {
   return saveTripMeta(tripId, { customLists: nextCustomLists });
 }
 
+export function removeCustomList(tripId, listName) {
+  const normalized = normalizeListName(listName);
+  if (!normalized) return getTripMeta(tripId);
+  const meta = getTripMeta(tripId);
+  return saveTripMeta(tripId, {
+    customLists: meta.customLists.filter((candidate) => slugify(candidate) !== slugify(normalized))
+  });
+}
+
+export function renameCustomList(tripId, currentListName, nextListName) {
+  const currentNormalized = normalizeListName(currentListName);
+  const nextNormalized = normalizeListName(nextListName);
+  if (!currentNormalized || !nextNormalized) return getTripMeta(tripId);
+
+  const meta = getTripMeta(tripId);
+  const nextCustomLists = uniqueStrings(
+    meta.customLists.map((candidate) =>
+      slugify(candidate) === slugify(currentNormalized) ? nextNormalized : candidate
+    )
+  ).filter((name) => !DEFAULT_LIST_NAMES.some((candidate) => slugify(candidate) === slugify(name)));
+
+  return saveTripMeta(tripId, { customLists: nextCustomLists });
+}
+
 export function updateTripBudget(tripId, budgetTotal) {
   return saveTripMeta(tripId, { budgetTotal: budgetTotal === "" ? "" : String(budgetTotal) });
 }
@@ -757,7 +781,8 @@ export function getTripLists(tripOrId) {
 
   return uniqueStrings([...DEFAULT_LIST_NAMES, ...customLists]).map((name) => ({
     id: slugify(name),
-    name
+    name,
+    isDefault: DEFAULT_LIST_NAMES.some((candidate) => slugify(candidate) === slugify(name))
   }));
 }
 
@@ -872,7 +897,7 @@ export function getRecommendations(destination, listName) {
     return [
       {
         title: `${placeLabel} signature dinner`,
-        description: "Use this as a placeholder until you connect a live restaurant API.",
+        description: "Well-known dining area with crowd-pleasing dinner options.",
         location: `Top-rated restaurant district in ${placeLabel}`,
         entryType: "place",
         mapQuery: `best restaurants in ${placeLabel}`,
@@ -881,7 +906,7 @@ export function getRecommendations(destination, listName) {
       },
       {
         title: `${placeLabel} food hall stop`,
-        description: "Good backup when the group wants variety in one place.",
+        description: "Casual food hall with multiple vendors and easy group seating.",
         location: `Food hall in ${placeLabel}`,
         entryType: "place",
         mapQuery: `food hall in ${placeLabel}`,
@@ -890,7 +915,7 @@ export function getRecommendations(destination, listName) {
       },
       {
         title: `${placeLabel} cafe morning`,
-        description: "Easy first-day option while everyone settles in.",
+        description: "Popular cafe stop for coffee, pastries, and a slower start.",
         location: `Popular cafe in ${placeLabel}`,
         entryType: "place",
         mapQuery: `best cafes in ${placeLabel}`,
@@ -904,7 +929,7 @@ export function getRecommendations(destination, listName) {
     return [
       {
         title: `${placeLabel} walking tour`,
-        description: "Simple shared activity that helps everyone get oriented.",
+        description: "Guided walk through a central part of the destination with major sights.",
         location: `City center of ${placeLabel}`,
         entryType: "activity",
         mapQuery: `${placeLabel} walking tour`,
@@ -913,7 +938,7 @@ export function getRecommendations(destination, listName) {
       },
       {
         title: `${placeLabel} sunset outing`,
-        description: "A flexible evening block that usually earns quick votes.",
+        description: "Scenic evening stop known for open views and a relaxed pace.",
         location: `Best sunset spot in ${placeLabel}`,
         entryType: "activity",
         mapQuery: `sunset spots in ${placeLabel}`,
@@ -922,7 +947,7 @@ export function getRecommendations(destination, listName) {
       },
       {
         title: `${placeLabel} market afternoon`,
-        description: "Low-friction option when the group wants a light day.",
+        description: "Local market area with browsing, snacks, and people-watching.",
         location: `Top market in ${placeLabel}`,
         entryType: "activity",
         mapQuery: `markets in ${placeLabel}`,
@@ -935,7 +960,7 @@ export function getRecommendations(destination, listName) {
   return [
     {
       title: `${placeLabel} landmark circuit`,
-      description: "An easy starter list while the group narrows the trip down.",
+      description: "A cluster of major landmarks that works well for a first overview.",
       location: `Top landmarks in ${placeLabel}`,
       entryType: "place",
       mapQuery: `top landmarks in ${placeLabel}`,
@@ -944,7 +969,7 @@ export function getRecommendations(destination, listName) {
     },
     {
       title: `${placeLabel} scenic viewpoint`,
-      description: "Works well as a high-signal group vote option.",
+      description: "Elevated or open-air viewpoint with strong city or landscape views.",
       location: `Best viewpoint in ${placeLabel}`,
       entryType: "place",
       mapQuery: `scenic viewpoints in ${placeLabel}`,
@@ -953,7 +978,7 @@ export function getRecommendations(destination, listName) {
     },
     {
       title: `${placeLabel} neighborhood day`,
-      description: "A simple way to reserve time for exploring beyond one attraction.",
+      description: "Walkable neighborhood with shops, cafes, and space to wander.",
       location: `Most walkable area in ${placeLabel}`,
       entryType: "place",
       mapQuery: `best neighborhoods in ${placeLabel}`,
