@@ -13,10 +13,77 @@ import {
   addCustomList,
   getRecommendations as getFallbackRecommendations,
   getTripLists,
+  isPlaceLikeList,
   normalizeListName,
+  renameCustomList,
+  removeCustomList,
+  saveIdeaMeta,
   slugify
 } from "../lib/tripPlanning.js";
 import { formatDateRange } from "../lib/timeFormat.js";
+
+const DEFAULT_RECOMMENDATION_SEARCH = "Places to Visit";
+const RECOMMENDATION_PAGE_SIZE = 8;
+const INITIAL_RECOMMENDATION_FETCH_COUNT = RECOMMENDATION_PAGE_SIZE * 2;
+const TRIP_LIST_SELECTION_STORAGE_PREFIX = "tripable.trip-dashboard.selected-lists";
+
+function looksFoodRelated(value) {
+  return /food|restaurant|cafe|coffee|bakery|brunch|breakfast|lunch|dinner|bar|drink|ramen|sushi|pizza|eat/.test(
+    slugify(value)
+  );
+}
+
+function looksActivityRelated(value) {
+  return /activit|tour|class|workshop|nightlife|show|event|experience|lesson|crawl/.test(slugify(value));
+}
+
+function looksPlaceRelated(value) {
+  return /place|visit|landmark|museum|neighborhood|district|park|garden|temple|shrine|view|market/.test(
+    slugify(value)
+  );
+}
+
+function getRecommendationKey(recommendation) {
+  return String(recommendation?.id || recommendation?.title || "").trim();
+}
+
+function getTripListSelectionStorageKey(tripId) {
+  return tripId ? `${TRIP_LIST_SELECTION_STORAGE_PREFIX}.${tripId}` : "";
+}
+
+function readStoredListSelection(tripId) {
+  if (typeof window === "undefined" || !tripId) {
+    return undefined;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(getTripListSelectionStorageKey(tripId));
+    if (raw === null) {
+      return undefined;
+    }
+
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  } catch (error) {
+    console.error("Unable to read saved trip list selection", error);
+    return undefined;
+  }
+}
+
+function writeStoredListSelection(tripId, selectedListIds) {
+  if (typeof window === "undefined" || !tripId) {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(
+      getTripListSelectionStorageKey(tripId),
+      JSON.stringify(Array.isArray(selectedListIds) ? selectedListIds : [])
+    );
+  } catch (error) {
+    console.error("Unable to save trip list selection", error);
+  }
+}
 
 export default function TripDashboardPage() {
   const { tripId } = useParams();
@@ -40,16 +107,30 @@ export default function TripDashboardPage() {
   const error = useTripStore((state) => state.error);
   const [tripView, setTripView] = useState(null);
   const [copied, setCopied] = useState(false);
-  const [sortMode, setSortMode] = useState("top");
   const [availabilitySaved, setAvailabilitySaved] = useState(false);
   const [surveyDatesSaved, setSurveyDatesSaved] = useState(false);
   const [ideaToDelete, setIdeaToDelete] = useState(null);
-  const [activeListId, setActiveListId] = useState("places-to-visit");
+  const [listActionLoadingId, setListActionLoadingId] = useState("");
+  const [listContextMenu, setListContextMenu] = useState(null);
+  const [listToDelete, setListToDelete] = useState(null);
+  const [listToRename, setListToRename] = useState(null);
+  const [renameListName, setRenameListName] = useState("");
+  const [renameListError, setRenameListError] = useState("");
+  const [selectedListIds, setSelectedListIds] = useState([]);
+  const [recommendationSearchInput, setRecommendationSearchInput] = useState(DEFAULT_RECOMMENDATION_SEARCH);
+  const [activeRecommendationSearch, setActiveRecommendationSearch] = useState(DEFAULT_RECOMMENDATION_SEARCH);
+  const [recommendationVisibleCount, setRecommendationVisibleCount] = useState(RECOMMENDATION_PAGE_SIZE);
+  const [recommendationFetchCount, setRecommendationFetchCount] = useState(INITIAL_RECOMMENDATION_FETCH_COUNT);
   const [activeMapQuery, setActiveMapQuery] = useState("");
   const [recommendationItems, setRecommendationItems] = useState([]);
+  const [recommendationTargetByKey, setRecommendationTargetByKey] = useState({});
+  const [recommendationToAdd, setRecommendationToAdd] = useState(null);
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
+  const [recommendationsLoadingMore, setRecommendationsLoadingMore] = useState(false);
   const [recommendationsNotice, setRecommendationsNotice] = useState("");
   const recommendationScrollerRef = useRef(null);
+  const previousRecommendationQueryRef = useRef("");
+  const hasInitializedListSelectionRef = useRef(false);
 
   useEffect(() => {
     if (!session) {
@@ -91,6 +172,11 @@ export default function TripDashboardPage() {
     setTripView(currentTrip);
   }, [currentTrip]);
 
+  useEffect(() => {
+    hasInitializedListSelectionRef.current = false;
+    setSelectedListIds([]);
+  }, [tripId]);
+
   const inviteLink = useMemo(() => {
     if (!tripId) return "";
     return `${window.location.origin}/trips/${tripId}/invite`;
@@ -98,59 +184,119 @@ export default function TripDashboardPage() {
 
   const activeTrip = tripView || currentTrip;
   const lists = useMemo(() => getTripLists(activeTrip || tripId), [activeTrip, tripId]);
+  const selectedListIdSet = useMemo(() => new Set(selectedListIds), [selectedListIds]);
 
   useEffect(() => {
     if (!lists.length) return;
-    const exists = lists.some((list) => list.id === activeListId);
-    if (!exists) {
-      setActiveListId(lists[0].id);
-    }
-  }, [lists, activeListId]);
+    setSelectedListIds((current) => {
+      const validSelections = current.filter((listId) => lists.some((list) => list.id === listId));
+      if (!hasInitializedListSelectionRef.current) {
+        const storedSelection = readStoredListSelection(tripId);
+        const validStoredSelection =
+          storedSelection?.filter((listId) => lists.some((list) => list.id === listId)) || [];
 
-  const activeList = lists.find((list) => list.id === activeListId) || lists[0];
+        hasInitializedListSelectionRef.current = true;
+
+        if (storedSelection !== undefined) {
+          return validStoredSelection;
+        }
+
+        return lists.map((list) => list.id);
+      }
+      if (
+        validSelections.length === current.length &&
+        validSelections.every((listId, index) => listId === current[index])
+      ) {
+        return current;
+      }
+      if (!validSelections.length) {
+        return [];
+      }
+      return validSelections;
+    });
+  }, [lists, tripId]);
 
   useEffect(() => {
-    if (!activeTrip?.destination || !activeList?.name) {
+    if (!tripId || !hasInitializedListSelectionRef.current) return;
+    writeStoredListSelection(tripId, selectedListIds);
+  }, [selectedListIds, tripId]);
+
+  useEffect(() => {
+    const validListNames = new Set(lists.map((list) => list.name));
+    setRecommendationTargetByKey((current) => {
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([, listName]) => validListNames.has(listName))
+      );
+
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+  }, [lists]);
+
+  const normalizedRecommendationSearch =
+    normalizeListName(activeRecommendationSearch) || DEFAULT_RECOMMENDATION_SEARCH;
+
+  useEffect(() => {
+    if (!activeTrip?.destination || !normalizedRecommendationSearch) {
       setRecommendationItems([]);
       setRecommendationsLoading(false);
+      setRecommendationsLoadingMore(false);
       setRecommendationsNotice("");
       return;
     }
+
+    const recommendationQueryKey = [
+      activeTrip?.destination?.id,
+      activeTrip?.destination?.label,
+      activeTrip?.destination?.mapQuery,
+      activeTrip?.destination?.name,
+      normalizedRecommendationSearch
+    ].join("::");
+    const isNewRecommendationQuery = previousRecommendationQueryRef.current !== recommendationQueryKey;
+    previousRecommendationQueryRef.current = recommendationQueryKey;
 
     let cancelled = false;
 
     const loadRecommendationFeed = async () => {
       if (!api.canSearchPlaces()) {
         if (cancelled) return;
-        setRecommendationItems(getFallbackRecommendations(activeTrip.destination, activeList.name));
+        setRecommendationItems(getFallbackRecommendations(activeTrip.destination, normalizedRecommendationSearch));
         setRecommendationsLoading(false);
+        setRecommendationsLoadingMore(false);
         setRecommendationsNotice("Showing local suggestions until Google Maps recommendations are available.");
         return;
       }
 
-      setRecommendationsLoading(true);
-      setRecommendationsNotice("");
-      setRecommendationItems([]);
+      if (isNewRecommendationQuery) {
+        setRecommendationsLoading(true);
+        setRecommendationsLoadingMore(false);
+        setRecommendationsNotice("");
+        setRecommendationItems([]);
+      } else {
+        setRecommendationsLoadingMore(true);
+      }
 
       try {
-        const liveRecommendations = await api.getRecommendations(activeTrip.destination, activeList.name, { limit: 10 });
+        const liveRecommendations = await api.getRecommendations(activeTrip.destination, normalizedRecommendationSearch, {
+          limit: recommendationFetchCount
+        });
         if (cancelled) return;
 
         if (liveRecommendations.length) {
           setRecommendationItems(liveRecommendations);
           setRecommendationsNotice("");
         } else {
-          setRecommendationItems(getFallbackRecommendations(activeTrip.destination, activeList.name));
+          setRecommendationItems(getFallbackRecommendations(activeTrip.destination, normalizedRecommendationSearch));
           setRecommendationsNotice("Google Maps did not return results for this list yet, so local suggestions are shown.");
         }
       } catch (loadError) {
         console.error("Unable to load recommendations", loadError);
         if (cancelled) return;
-        setRecommendationItems(getFallbackRecommendations(activeTrip.destination, activeList.name));
+        setRecommendationItems(getFallbackRecommendations(activeTrip.destination, normalizedRecommendationSearch));
         setRecommendationsNotice("Google Maps recommendations are unavailable right now, so local suggestions are shown.");
       } finally {
         if (!cancelled) {
           setRecommendationsLoading(false);
+          setRecommendationsLoadingMore(false);
         }
       }
     };
@@ -161,65 +307,53 @@ export default function TripDashboardPage() {
       cancelled = true;
     };
   }, [
-    activeList?.name,
     activeTrip?.destination?.id,
     activeTrip?.destination?.label,
     activeTrip?.destination?.mapQuery,
-    activeTrip?.destination?.name
+    activeTrip?.destination?.name,
+    normalizedRecommendationSearch,
+    recommendationFetchCount
   ]);
 
   const visibleIdeas = useMemo(() => {
-    const list = [...ideas].filter((idea) => idea.listId === activeListId);
-    if (sortMode === "new") {
-      return list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-    }
-    return list.sort((a, b) => {
+    return [...ideas]
+      .filter((idea) => selectedListIdSet.has(idea.listId))
+      .sort((a, b) => {
       if (b.voteScore !== a.voteScore) return b.voteScore - a.voteScore;
       return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
-    });
-  }, [activeListId, ideas, sortMode]);
+      });
+  }, [ideas, selectedListIdSet]);
 
   const mappedIdeas = useMemo(
     () =>
       [...ideas]
-        .filter((idea) => idea.hasMapLocation)
+        .filter((idea) => idea.hasMapLocation && selectedListIdSet.has(idea.listId))
         .sort((a, b) => {
           if (b.voteScore !== a.voteScore) return b.voteScore - a.voteScore;
           return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
         }),
-    [ideas]
+    [ideas, selectedListIdSet]
   );
 
   const recommendations = useMemo(() => {
-    if (!activeList?.id) return recommendationItems;
-    const existingTitles = new Set(
-      ideas
-        .filter((idea) => idea.listId === activeList.id)
-        .map((idea) => idea.title.trim().toLowerCase())
-    );
+    const existingTitles = new Set(ideas.map((idea) => idea.title.trim().toLowerCase()));
     return recommendationItems.filter(
       (item) => !existingTitles.has(item.title.trim().toLowerCase())
     );
-  }, [activeList?.id, ideas, recommendationItems]);
+  }, [ideas, recommendationItems]);
+
+  const visibleRecommendations = useMemo(
+    () => recommendations.slice(0, recommendationVisibleCount),
+    [recommendationVisibleCount, recommendations]
+  );
+  const canLoadMoreRecommendations = recommendations.length > recommendationVisibleCount;
+  const showViewMoreCard = canLoadMoreRecommendations || recommendationsLoadingMore;
 
   const tripTitle = useMemo(() => {
     if (!activeTrip?.name) return "Loading...";
     const locationLabel = activeTrip?.destination?.name || activeTrip?.destination?.label;
     return locationLabel ? `${activeTrip.name} at ${locationLabel}` : activeTrip.name;
   }, [activeTrip?.destination?.label, activeTrip?.destination?.name, activeTrip?.name]);
-
-  const collaborators = useMemo(() => {
-    const members = Array.isArray(activeTrip?.members) ? [...activeTrip.members] : [];
-    return members.sort((left, right) => {
-      if (left.isLeader !== right.isLeader) {
-        return Number(right.isLeader) - Number(left.isLeader);
-      }
-      if (left.isViewer !== right.isViewer) {
-        return Number(right.isViewer) - Number(left.isViewer);
-      }
-      return String(left.name || "").localeCompare(String(right.name || ""));
-    });
-  }, [activeTrip?.members]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(inviteLink);
@@ -229,17 +363,26 @@ export default function TripDashboardPage() {
 
   const handleAddIdea = async (formData) => {
     if (!tripId) return;
-    await addIdea(tripId, formData);
+    const createdIdea = await addIdea(tripId, formData);
+    const nextListId = slugify(formData.category);
+    if (nextListId) {
+      setSelectedListIds((current) => (current.includes(nextListId) ? current : [...current, nextListId]));
+    }
+    return createdIdea;
   };
 
-  const handleAddRecommendation = async (recommendation) => {
-    if (!tripId || !activeList) return;
+  const handleAddRecommendation = async (recommendation, explicitTargetListName) => {
+    if (!tripId) return;
+    const targetListName =
+      normalizeListName(explicitTargetListName) || normalizeListName(getRecommendationTargetListName(recommendation));
+    if (!targetListName) return false;
+
     try {
       await addIdea(tripId, {
         title: recommendation.title,
         description: recommendation.description,
         location: recommendation.location,
-        category: activeList.name,
+        category: targetListName,
         entryType: recommendation.entryType,
         mapQuery: recommendation.mapQuery,
         coordinates: recommendation.coordinates || null,
@@ -247,8 +390,12 @@ export default function TripDashboardPage() {
         photoAttributions: recommendation.photoAttributions || [],
         recommendationSource: recommendation.recommendationSource
       });
+      const targetListId = slugify(targetListName);
+      setSelectedListIds((current) => (current.includes(targetListId) ? current : [...current, targetListId]));
+      return true;
     } catch (submitError) {
       console.error("Unable to add recommendation", submitError);
+      return false;
     }
   };
 
@@ -315,20 +462,186 @@ export default function TripDashboardPage() {
     if (!normalized) return "";
     const nextMeta = addCustomList(tripId, normalized);
     setTripView((prev) => (prev ? { ...prev, ...nextMeta } : prev));
-    setActiveListId(slugify(normalized));
+    const nextListId = slugify(normalized);
+    setSelectedListIds((current) => (current.includes(nextListId) ? current : [...current, nextListId]));
     return normalized;
+  };
+
+  const handleListContextMenu = (event, list) => {
+    if (!list || list.isDefault) return;
+    event.preventDefault();
+    setListContextMenu({
+      list,
+      x: Math.min(event.clientX, window.innerWidth - 180),
+      y: Math.min(event.clientY, window.innerHeight - 120)
+    });
+  };
+
+  const handleDeleteList = async (list) => {
+    if (!tripId || !list || list.isDefault || listActionLoadingId) return;
+
+    const ideasInList = ideas.filter((idea) => idea.listId === list.id);
+    setListActionLoadingId(list.id);
+
+    try {
+      for (const idea of ideasInList) {
+        await deleteIdea(idea.id, tripId);
+      }
+
+      const nextMeta = removeCustomList(tripId, list.name);
+      setTripView((prev) => (prev ? { ...prev, ...nextMeta } : prev));
+      setSelectedListIds((current) => current.filter((listId) => listId !== list.id));
+      setRecommendationTargetByKey((current) =>
+        Object.fromEntries(Object.entries(current).filter(([, listName]) => slugify(listName) !== list.id))
+      );
+      if (recommendationToAdd && slugify(getRecommendationTargetListName(recommendationToAdd)) === list.id) {
+        setRecommendationToAdd(null);
+      }
+      setListToDelete(null);
+    } catch (deleteListError) {
+      console.error("Unable to delete list", deleteListError);
+    } finally {
+      setListActionLoadingId("");
+    }
+  };
+
+  const handleOpenRenameListModal = (list) => {
+    setListContextMenu(null);
+    setRenameListError("");
+    setRenameListName(list.name);
+    setListToRename(list);
+  };
+
+  const handleRenameList = async () => {
+    if (!tripId || !listToRename || listActionLoadingId) return;
+
+    const normalizedNextName = normalizeListName(renameListName);
+    if (!normalizedNextName) {
+      setRenameListError("Enter a list name.");
+      return;
+    }
+
+    const nextListSlug = slugify(normalizedNextName);
+    const currentListSlug = listToRename.id;
+    if (nextListSlug !== currentListSlug && lists.some((list) => list.id === nextListSlug)) {
+      setRenameListError("That list name already exists.");
+      return;
+    }
+
+    if (nextListSlug === currentListSlug) {
+      setListToRename(null);
+      setRenameListName("");
+      setRenameListError("");
+      return;
+    }
+
+    setListActionLoadingId(listToRename.id);
+
+    try {
+      const nextMeta = renameCustomList(tripId, listToRename.name, normalizedNextName);
+      const ideasInList = ideas.filter((idea) => idea.listId === listToRename.id);
+
+      ideasInList.forEach((idea) => {
+        saveIdeaMeta(tripId, idea.id, { listName: normalizedNextName });
+      });
+
+      setTripView((prev) => (prev ? { ...prev, ...nextMeta } : prev));
+      setSelectedListIds((current) => {
+        const nextSelections = current.map((listId) => (listId === listToRename.id ? nextListSlug : listId));
+        return Array.from(new Set(nextSelections));
+      });
+      setRecommendationTargetByKey((current) =>
+        Object.fromEntries(
+          Object.entries(current).map(([recommendationKey, listName]) => [
+            recommendationKey,
+            slugify(listName) === listToRename.id ? normalizedNextName : listName
+          ])
+        )
+      );
+      await loadIdeas(tripId);
+      setListToRename(null);
+      setRenameListName("");
+      setRenameListError("");
+    } catch (renameListFailure) {
+      console.error("Unable to rename list", renameListFailure);
+      setRenameListError("Unable to rename this list right now.");
+    } finally {
+      setListActionLoadingId("");
+    }
   };
 
   const handleBudgetChange = (meta) => {
     setTripView((prev) => (prev ? { ...prev, ...meta } : prev));
   };
 
-  const handleScrollRecommendations = (direction) => {
-    const container = recommendationScrollerRef.current;
-    if (!container) return;
-    const scrollAmount = Math.max(container.clientWidth * 0.82, 320) * direction;
-    container.scrollBy({ left: scrollAmount, behavior: "smooth" });
+  const handleToggleListSelection = (listId) => {
+    setSelectedListIds((current) => {
+      if (current.includes(listId)) {
+        return current.filter((candidate) => candidate !== listId);
+      }
+      return [...current, listId];
+    });
   };
+
+  const handleToggleAllLists = () => {
+    setSelectedListIds((current) => {
+      if (current.length === lists.length) {
+        return [];
+      }
+      return lists.map((list) => list.id);
+    });
+  };
+
+  const handleRecommendationSearch = (event) => {
+    event.preventDefault();
+    const nextSearch = normalizeListName(recommendationSearchInput) || DEFAULT_RECOMMENDATION_SEARCH;
+    previousRecommendationQueryRef.current = "";
+    setRecommendationTargetByKey({});
+    setRecommendationToAdd(null);
+    setRecommendationSearchInput(nextSearch);
+    setActiveRecommendationSearch(nextSearch);
+    setRecommendationVisibleCount(RECOMMENDATION_PAGE_SIZE);
+    setRecommendationFetchCount(INITIAL_RECOMMENDATION_FETCH_COUNT);
+    recommendationScrollerRef.current?.scrollTo({ left: 0, behavior: "smooth" });
+  };
+
+  const handleLoadMoreRecommendations = () => {
+    const nextVisibleCount = recommendationVisibleCount + RECOMMENDATION_PAGE_SIZE;
+    setRecommendationVisibleCount(nextVisibleCount);
+    if (recommendationItems.length <= nextVisibleCount) {
+      setRecommendationFetchCount((current) => current + RECOMMENDATION_PAGE_SIZE);
+    }
+  };
+
+  const handleRecommendationTargetChange = (recommendation, nextListName) => {
+    const recommendationKey = getRecommendationKey(recommendation);
+    setRecommendationTargetByKey((current) => ({
+      ...current,
+      [recommendationKey]: nextListName
+    }));
+  };
+
+  const handleOpenRecommendationAddModal = (recommendation) => {
+    const recommendationKey = getRecommendationKey(recommendation);
+    setRecommendationTargetByKey((current) => {
+      if (current[recommendationKey]) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [recommendationKey]: getRecommendedListName(recommendation)
+      };
+    });
+    setRecommendationToAdd(recommendation);
+  };
+
+  const activeRecommendationTargetListName = recommendationToAdd
+    ? getRecommendationTargetListName(recommendationToAdd)
+    : "";
+  const activeRecommendationSuggestedListName = recommendationToAdd
+    ? getRecommendedListName(recommendationToAdd)
+    : "";
 
   return (
     <>
@@ -428,7 +741,7 @@ export default function TripDashboardPage() {
             </section>
 
           <section className="mt-10 grid min-w-0 gap-6">
-            <section className="min-w-0 overflow-hidden rounded-[32px] bg-white/95 p-6 shadow-card">
+            <section className="min-w-0 overflow-visible rounded-[32px] bg-white/95 p-6 shadow-card">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-semibold text-ink">Things to Do</h2>
@@ -436,59 +749,60 @@ export default function TripDashboardPage() {
                     Everyone can add options, vote, and keep location-based items ready for the map.
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="rounded-full bg-mist p-1 text-xs font-semibold text-slate-500">
-                    <button
-                      type="button"
-                      onClick={() => setSortMode("top")}
-                      className={`rounded-full px-3 py-1 ${sortMode === "top" ? "bg-white text-ink shadow-soft" : ""}`}
-                    >
-                      Top
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSortMode("new")}
-                      className={`rounded-full px-3 py-1 ${sortMode === "new" ? "bg-white text-ink shadow-soft" : ""}`}
-                    >
-                      New
-                    </button>
-                  </div>
-                <button
-                  type="button"
-                  onClick={() => loadIdeas(tripId)}
-                  className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-ink shadow-soft"
-                >
-                  Refresh
-                </button>
               </div>
-            </div>
 
-            <div className="mt-6 flex flex-wrap items-center gap-2">
-              {lists.map((list) => (
-                  <button
-                    key={list.id}
-                    type="button"
-                    onClick={() => setActiveListId(list.id)}
-                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                      activeListId === list.id
-                        ? "bg-ocean text-white shadow-soft"
-                        : "bg-mist text-slate-600 hover:bg-[#E9EEF8]"
-                    }`}
-                >
-                  {list.name}
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-4 min-w-0">
+            <div className="relative z-20 mt-6 min-w-0">
               <InlineIdeaComposer
                 destination={activeTrip?.destination}
                 listNames={lists.map((list) => list.name)}
-                defaultListName={activeList?.name}
+                defaultListName={lists[0]?.name}
                 onAddIdea={handleAddIdea}
                 onAddList={handleAddList}
                 disabled={!activeTrip}
               />
+            </div>
+
+            <div className="mt-6 flex flex-wrap items-start justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                {lists.map((list) => {
+                  const isSelected = selectedListIdSet.has(list.id);
+                  return (
+                    <div
+                      key={list.id}
+                      onContextMenu={(event) => handleListContextMenu(event, list)}
+                      className={`flex items-center gap-1 rounded-full transition ${
+                        isSelected
+                          ? "bg-ocean text-white shadow-soft"
+                          : "bg-mist text-slate-600 hover:bg-[#E9EEF8]"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={() => handleToggleListSelection(list.id)}
+                        className="rounded-full px-4 py-2 text-sm font-semibold"
+                      >
+                        {list.name}
+                      </button>
+                    </div>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={handleToggleAllLists}
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink shadow-soft"
+                >
+                  {allListsSelected ? "Deselect all" : "Select all"}
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => loadIdeas(tripId)}
+                className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-ink shadow-soft"
+              >
+                Refresh
+              </button>
             </div>
 
             <div className="mt-6 min-w-0 max-h-[640px] overflow-y-auto pr-2">
@@ -535,10 +849,8 @@ export default function TripDashboardPage() {
                   ))
                 ) : (
                   <div className="rounded-2xl border border-dashed border-slate-300 bg-mist px-4 py-8 text-center">
-                    <p className="text-base font-semibold text-ink">Nothing in {activeList?.name} yet</p>
-                    <p className="mt-2 text-sm text-slate-500">
-                      Add a plan item or start from the recommended suggestions below.
-                    </p>
+                    <p className="text-base font-semibold text-ink">{emptyIdeasTitle}</p>
+                    <p className="mt-2 text-sm text-slate-500">{emptyIdeasDescription}</p>
                   </div>
                 )}
               </div>
@@ -548,101 +860,114 @@ export default function TripDashboardPage() {
             <section className="min-w-0 overflow-hidden rounded-[32px] bg-white/95 p-6 shadow-card">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <p className="text-sm font-semibold text-slate-500">Recommendations</p>
                   <h2 className="mt-1 text-2xl font-semibold text-ink">
-                    {activeList?.name} suggestions for {activeTrip?.destination?.name || "your trip"}
+                    Recommendations for {activeTrip?.destination?.name || "your trip"}
                   </h2>
                   {recommendationsNotice ? (
                     <p className="mt-3 rounded-2xl bg-mist px-4 py-3 text-sm text-slate-500">{recommendationsNotice}</p>
                   ) : null}
                 </div>
-                {recommendations.length > 3 ? (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleScrollRecommendations(-1)}
-                      className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-ink shadow-soft"
-                    >
-                      {"<"} Prev
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleScrollRecommendations(1)}
-                      className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-ink shadow-soft"
-                    >
-                      Next {">"}
-                    </button>
-                  </div>
-                ) : null}
+                <div className="min-w-[220px]">
+                  <form onSubmit={handleRecommendationSearch}>
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        id="recommendation-search"
+                        value={recommendationSearchInput}
+                        onChange={(event) => setRecommendationSearchInput(event.target.value)}
+                        placeholder={DEFAULT_RECOMMENDATION_SEARCH}
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-ink outline-none transition focus:border-ocean focus:ring-2 focus:ring-ocean/10"
+                      />
+                      <button
+                        type="submit"
+                        className="rounded-2xl bg-ocean px-4 py-3 text-sm font-semibold text-white"
+                      >
+                        Search
+                      </button>
+                    </div>
+                  </form>
+                </div>
               </div>
 
               <div className="mt-6 min-w-0">
                 {recommendationsLoading ? (
                   <div className="rounded-2xl border border-dashed border-slate-300 bg-mist px-4 py-8 text-sm text-slate-500">
-                    Loading the top Google Maps picks for {activeList?.name || "this list"} in{" "}
+                    Loading the top Google Maps picks for {normalizedRecommendationSearch || "this list"} in{" "}
                     {activeTrip?.destination?.name || "this destination"}...
                   </div>
-                ) : recommendations.length ? (
+                ) : visibleRecommendations.length ? (
                   <div
                     ref={recommendationScrollerRef}
                     className="flex w-full max-w-full snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-hidden pb-2 scroll-smooth"
                   >
-                    {recommendations.map((recommendation) => (
-                      <div
-                        key={recommendation.id || recommendation.title}
-                        className="w-[220px] shrink-0 snap-start rounded-2xl border border-slate-200 bg-white sm:w-[240px] lg:w-[250px] xl:w-[255px]"
-                      >
-                        {recommendation.photoUrl ? (
-                          <div className="overflow-hidden rounded-t-2xl bg-mist">
-                            <img
-                              src={recommendation.photoUrl}
-                              alt={recommendation.title}
-                              className="h-32 w-full object-cover sm:h-36"
-                              loading="lazy"
-                              referrerPolicy="no-referrer-when-downgrade"
-                            />
-                          </div>
-                        ) : null}
-
-                        <div className="p-4">
-                          <h3 className="text-[15px] font-semibold leading-snug text-ink">{recommendation.title}</h3>
-                          <p className="mt-2 text-sm leading-6 text-slate-500">{recommendation.description}</p>
-                          {recommendation.photoAttributions?.length ? (
-                            <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-400">
-                              {recommendation.photoAttributions.map((attribution, index) => (
-                                attribution?.uri ? (
-                                  <a
-                                    key={`${recommendation.id || recommendation.title}-photo-${index}`}
-                                    href={attribution.uri}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="transition hover:text-slate-500"
-                                  >
-                                    Photo: {attribution.displayName || attribution.authorName || "Source"}
-                                  </a>
-                                ) : (
-                                  <span key={`${recommendation.id || recommendation.title}-photo-${index}`}>
-                                    Photo: {attribution?.displayName || attribution?.authorName || "Source"}
-                                  </span>
-                                )
-                              ))}
+                    {visibleRecommendations.map((recommendation) => {
+                      return (
+                        <div
+                          key={recommendation.id || recommendation.title}
+                          className="w-[220px] shrink-0 snap-start rounded-2xl border border-slate-200 bg-white sm:w-[240px] lg:w-[250px] xl:w-[255px]"
+                        >
+                          {recommendation.photoUrl ? (
+                            <div className="overflow-hidden rounded-t-2xl bg-mist">
+                              <img
+                                src={recommendation.photoUrl}
+                                alt={recommendation.title}
+                                className="h-32 w-full object-cover sm:h-36"
+                                loading="lazy"
+                                referrerPolicy="no-referrer-when-downgrade"
+                              />
                             </div>
                           ) : null}
-                          <button
-                            type="button"
-                            onClick={() => handleAddRecommendation(recommendation)}
-                            className="mt-4 rounded-full bg-ocean px-4 py-2 text-xs font-semibold text-white"
-                          >
-                            Add to {activeList?.name}
-                          </button>
+
+                          <div className="p-4">
+                            <h3 className="text-[15px] font-semibold leading-snug text-ink">{recommendation.title}</h3>
+                            <p className="mt-2 text-sm leading-6 text-slate-500">{recommendation.description}</p>
+                            {recommendation.photoAttributions?.length ? (
+                              <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-400">
+                                {recommendation.photoAttributions.map((attribution, index) => (
+                                  attribution?.uri ? (
+                                    <a
+                                      key={`${recommendation.id || recommendation.title}-photo-${index}`}
+                                      href={attribution.uri}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="transition hover:text-slate-500"
+                                    >
+                                      Photo: {attribution.displayName || attribution.authorName || "Source"}
+                                    </a>
+                                  ) : (
+                                    <span key={`${recommendation.id || recommendation.title}-photo-${index}`}>
+                                      Photo: {attribution?.displayName || attribution?.authorName || "Source"}
+                                    </span>
+                                  )
+                                ))}
+                              </div>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenRecommendationAddModal(recommendation)}
+                              className="mt-4 rounded-full bg-ocean px-4 py-2 text-xs font-semibold text-white"
+                            >
+                              Add
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
+
+                    {showViewMoreCard ? (
+                      <button
+                        type="button"
+                        onClick={handleLoadMoreRecommendations}
+                        disabled={recommendationsLoadingMore}
+                        className="flex w-[220px] shrink-0 snap-start items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-mist px-6 py-6 text-center text-base font-semibold text-ink transition hover:border-ocean hover:bg-[#F8FAFF] disabled:cursor-wait disabled:opacity-70 sm:w-[240px] lg:w-[250px] xl:w-[255px]"
+                      >
+                        {recommendationsLoadingMore ? "Loading more..." : "View more"}
+                      </button>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-dashed border-slate-300 bg-mist px-4 py-8 text-sm text-slate-500">
                     {recommendationItems.length
-                      ? `You already added the current top picks for ${activeList?.name}.`
+                      ? `You already added the current top picks for ${normalizedRecommendationSearch}.`
                       : "Once the destination is set, this area can pull live recommendations for each list title."}
                   </div>
                 )}
@@ -741,6 +1066,226 @@ export default function TripDashboardPage() {
             />
           </div>
         </aside>
+
+        {listContextMenu ? (
+          <div
+            className="fixed inset-0 z-50"
+            onClick={() => setListContextMenu(null)}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            <div
+              className="absolute w-40 overflow-hidden rounded-2xl border border-slate-200 bg-white py-2 shadow-card"
+              style={{ left: `${listContextMenu.x}px`, top: `${listContextMenu.y}px` }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => handleOpenRenameListModal(listContextMenu.list)}
+                className="flex w-full items-center px-4 py-3 text-left text-sm font-semibold text-ink transition hover:bg-mist"
+              >
+                Rename
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setListToDelete(listContextMenu.list);
+                  setListContextMenu(null);
+                }}
+                className="flex w-full items-center px-4 py-3 text-left text-sm font-semibold text-coral transition hover:bg-red-50"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {listToDelete ? (
+          <div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/35 px-4 py-6"
+            onClick={() => setListToDelete(null)}
+          >
+            <div
+              className="w-full max-w-md rounded-[28px] bg-white p-6 shadow-card"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Delete list</p>
+              <h3 className="mt-2 text-xl font-semibold text-ink">{listToDelete.name}</h3>
+              <p className="mt-3 text-sm text-slate-500">
+                {(() => {
+                  const itemCount = ideas.filter((idea) => idea.listId === listToDelete.id).length;
+                  return itemCount
+                    ? `This will also delete ${itemCount} item${itemCount === 1 ? "" : "s"} in that list.`
+                    : "This will remove the list from this trip.";
+                })()}
+              </p>
+              <div className="mt-6 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setListToDelete(null)}
+                  className="rounded-full bg-mist px-4 py-2 text-sm font-semibold text-slate-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteList(listToDelete)}
+                  disabled={listActionLoadingId === listToDelete.id}
+                  className="rounded-full bg-[#F56565] px-5 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-70"
+                >
+                  {listActionLoadingId === listToDelete.id ? "Deleting..." : "Delete"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {listToRename ? (
+          <div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/35 px-4 py-6"
+            onClick={() => {
+              setListToRename(null);
+              setRenameListName("");
+              setRenameListError("");
+            }}
+          >
+            <div
+              className="w-full max-w-md rounded-[28px] bg-white p-6 shadow-card"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Rename list</p>
+              <h3 className="mt-2 text-xl font-semibold text-ink">{listToRename.name}</h3>
+              <div className="mt-5">
+                <label htmlFor="rename-list-name" className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                  New name
+                </label>
+                <input
+                  id="rename-list-name"
+                  value={renameListName}
+                  onChange={(event) => {
+                    setRenameListName(event.target.value);
+                    if (renameListError) {
+                      setRenameListError("");
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      handleRenameList();
+                    }
+                  }}
+                  className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-ink outline-none transition focus:border-ocean focus:ring-2 focus:ring-ocean/10"
+                />
+                {renameListError ? <p className="mt-2 text-sm text-coral">{renameListError}</p> : null}
+              </div>
+              <div className="mt-6 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setListToRename(null);
+                    setRenameListName("");
+                    setRenameListError("");
+                  }}
+                  className="rounded-full bg-mist px-4 py-2 text-sm font-semibold text-slate-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRenameList}
+                  disabled={listActionLoadingId === listToRename.id}
+                  className="rounded-full bg-ocean px-5 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-70"
+                >
+                  {listActionLoadingId === listToRename.id ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {recommendationToAdd ? (
+          <div
+            className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/35 px-4 py-6"
+            onClick={() => setRecommendationToAdd(null)}
+          >
+            <div
+              className="w-full max-w-md rounded-[28px] bg-white p-6 shadow-card"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Add recommendation
+                  </p>
+                  <h3 className="mt-2 text-xl font-semibold text-ink">{recommendationToAdd.title}</h3>
+                  <p className="mt-3 text-sm text-slate-500">
+                    Recommended list: {activeRecommendationSuggestedListName}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRecommendationToAdd(null)}
+                  className="rounded-full bg-mist px-3 py-2 text-xs font-semibold text-slate-500"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="mt-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Choose a list</p>
+                <div className="mt-3 max-h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2">
+                  <div className="grid gap-1">
+                    {lists.map((list) => {
+                      const isSelected = activeRecommendationTargetListName === list.name;
+                      const isRecommended = activeRecommendationSuggestedListName === list.name;
+
+                      return (
+                        <button
+                          key={`recommendation-target-${list.id}`}
+                          type="button"
+                          onClick={() => handleRecommendationTargetChange(recommendationToAdd, list.name)}
+                          className={`flex items-center justify-between gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold transition ${
+                            isSelected
+                              ? "bg-[#EEF2FF] text-ocean"
+                              : "text-ink hover:bg-mist"
+                          }`}
+                        >
+                          <span>{list.name}</span>
+                          {isRecommended ? (
+                            <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                              Suggested
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRecommendationToAdd(null)}
+                  className="rounded-full bg-mist px-4 py-2 text-sm font-semibold text-slate-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const didAdd = await handleAddRecommendation(recommendationToAdd, activeRecommendationTargetListName);
+                    if (didAdd) {
+                      setRecommendationToAdd(null);
+                    }
+                  }}
+                  className="rounded-full bg-ocean px-5 py-2 text-sm font-semibold text-white"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </>
   );

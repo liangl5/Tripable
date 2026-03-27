@@ -15,29 +15,18 @@ import {
 } from "./tripPlanning.js";
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-const GOOGLE_DESTINATION_AUTOCOMPLETE_FIELDS = [
-  "suggestions.placePrediction.place",
-  "suggestions.placePrediction.placeId",
-  "suggestions.placePrediction.text.text",
-  "suggestions.placePrediction.structuredFormat.mainText.text",
-  "suggestions.placePrediction.structuredFormat.secondaryText.text",
-  "suggestions.placePrediction.types"
-].join(",");
-const GOOGLE_DESTINATION_DETAILS_FIELDS = [
-  "id",
-  "displayName",
-  "formattedAddress",
-  "location",
-  "types",
-  "addressComponents"
-].join(",");
 const GOOGLE_PLACE_SEARCH_FIELDS = [
   "places.id",
   "places.displayName",
   "places.formattedAddress",
+  "places.shortFormattedAddress",
   "places.location",
   "places.primaryTypeDisplayName",
   "places.photos"
+].join(",");
+const GOOGLE_PLACE_RECOMMENDATION_FIELDS = [
+  GOOGLE_PLACE_BASE_FIELDS,
+  "places.editorialSummary"
 ].join(",");
 const DEFAULT_RECOMMENDATION_LIMIT = 10;
 const DESTINATION_REGION_TYPES = new Set([
@@ -239,14 +228,18 @@ function buildRecommendationQueries(listName, destination) {
   ]);
 }
 
-async function runPlacesTextSearch(textQuery, maxResultCount = 5) {
+async function runPlacesTextSearch(textQuery, maxResultCount = 5, fieldMask = GOOGLE_PLACE_BASE_FIELDS) {
   if (!textQuery || !GOOGLE_MAPS_API_KEY) {
     return [];
   }
 
   const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
     method: "POST",
-    headers: buildGoogleMapsHeaders(GOOGLE_PLACE_SEARCH_FIELDS),
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
+      "X-Goog-FieldMask": GOOGLE_PLACE_SEARCH_FIELDS
+    },
     body: JSON.stringify({
       textQuery,
       maxResultCount: Math.max(1, Math.min(20, Number(maxResultCount) || 5))
@@ -312,6 +305,7 @@ async function getPlaceDetails(placeId, sessionToken) {
 function normalizePlaceMatch(place) {
   const title = place.displayName?.text || "";
   const address = place.formattedAddress || "";
+  const shortAddress = place.shortFormattedAddress || "";
   const firstPhoto = Array.isArray(place.photos) ? place.photos[0] : null;
   const latitude = place.location?.latitude;
   const longitude = place.location?.longitude;
@@ -320,6 +314,7 @@ function normalizePlaceMatch(place) {
     id: place.id || `${title.toLowerCase()}-${address.toLowerCase()}`,
     title,
     address,
+    shortAddress,
     mapQuery: [title, address].filter(Boolean).join(", "),
     coordinates:
       typeof latitude === "number" && typeof longitude === "number"
@@ -335,23 +330,33 @@ function normalizePlaceMatch(place) {
 }
 
 function buildRecommendationDescription(place, listName, destination) {
-  const destinationLabel = getDestinationLabel(destination) || "this destination";
+  const editorialSummary = String(place.editorialSummary?.text || "").trim();
+  if (editorialSummary) {
+    return editorialSummary;
+  }
+
   const primaryTypeLabel = place.primaryTypeDisplayName?.text || "";
+  const shortAddress = String(place.shortFormattedAddress || place.formattedAddress || "").trim();
+  const destinationLabel = getDestinationLabel(destination) || "this destination";
   const normalizedListName = normalizeListName(listName);
 
-  if (primaryTypeLabel && normalizedListName) {
-    return `${primaryTypeLabel} recommended for ${normalizedListName.toLowerCase()} in ${destinationLabel}.`;
+  if (primaryTypeLabel && shortAddress) {
+    return `${primaryTypeLabel} in ${shortAddress}.`;
   }
 
   if (primaryTypeLabel) {
     return `${primaryTypeLabel} in ${destinationLabel}.`;
   }
 
-  if (normalizedListName) {
-    return `Top Google Maps pick for ${normalizedListName.toLowerCase()} in ${destinationLabel}.`;
+  if (shortAddress) {
+    return `Popular stop in ${shortAddress}.`;
   }
 
-  return `Top Google Maps pick in ${destinationLabel}.`;
+  if (normalizedListName) {
+    return `Popular ${normalizedListName.toLowerCase()} pick in ${destinationLabel}.`;
+  }
+
+  return `Popular spot in ${destinationLabel}.`;
 }
 
 function getAddressComponentText(addressComponents, type) {
@@ -665,14 +670,24 @@ export const api = {
       return [];
     }
 
-    const limit = Math.max(1, Math.min(20, Number(options.limit) || DEFAULT_RECOMMENDATION_LIMIT));
+    const limit = Math.max(1, Math.min(64, Number(options.limit) || DEFAULT_RECOMMENDATION_LIMIT));
     const entryType = isPlaceLikeList(listName) ? "place" : "activity";
     const seenIds = new Set();
     const seenTitles = new Set();
     const recommendations = [];
 
     for (const query of queries) {
-      const results = await runPlacesTextSearch(query, limit);
+      const remaining = limit - recommendations.length;
+      if (remaining <= 0) {
+        return recommendations;
+      }
+
+      const results = await runPlacesTextSearch(
+        query,
+        Math.min(20, remaining),
+        GOOGLE_PLACE_RECOMMENDATION_FIELDS
+      );
+
       for (const place of results) {
         const normalized = normalizePlaceMatch(place);
         const titleKey = normalized.title.trim().toLowerCase();

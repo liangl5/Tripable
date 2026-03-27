@@ -65,6 +65,12 @@ export default function InlineIdeaComposer({
   }, [defaultListName]);
 
   useEffect(() => {
+    if (!normalizedListNames.length) return;
+    if (normalizedListNames.includes(selectedListName)) return;
+    setSelectedListName(normalizedListNames[0]);
+  }, [normalizedListNames, selectedListName]);
+
+  useEffect(() => {
     const handleClickOutside = (event) => {
       if (!dropdownRef.current?.contains(event.target)) {
         setDropdownOpen(false);
@@ -172,8 +178,11 @@ export default function InlineIdeaComposer({
   };
 
   return (
-    <div className="min-w-0 rounded-[28px] border border-slate-200 bg-white/95 p-5 shadow-card">
-      <p className="text-sm font-semibold text-slate-500">Quick add</p>
+    <div className="relative min-w-0 rounded-[28px] border border-slate-200 bg-white/95 p-5 shadow-card">
+      <h3 className="text-lg font-semibold text-ink">Add a place, activity, or brand-new list</h3>
+      <p className="mt-2 text-sm text-slate-500">
+        Search Google Maps for a strong match, or type your own idea and save it directly.
+      </p>
       <form onSubmit={handleSubmit} className="mt-4 min-w-0">
         <div className="flex min-w-0 flex-col gap-3 xl:flex-row">
           <div className="relative min-w-0 flex-1">
@@ -181,7 +190,7 @@ export default function InlineIdeaComposer({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Add new activity or place"
+              placeholder="Search for a place or type a custom item"
               disabled={disabled || submitting}
               className="w-full rounded-2xl border border-slate-200 px-5 py-4 text-sm text-ink outline-none transition focus:border-ocean focus:ring-2 focus:ring-ocean/10 disabled:opacity-60"
             />
@@ -223,38 +232,40 @@ export default function InlineIdeaComposer({
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap xl:shrink-0">
-            <div ref={dropdownRef} className="relative min-w-0 flex-1 sm:flex-none">
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row xl:shrink-0">
+            <div ref={dropdownRef} className="relative min-w-0 w-full xl:w-[280px]">
               <button
                 type="button"
                 onClick={() => setDropdownOpen((current) => !current)}
-                className="inline-flex w-full min-w-0 items-center justify-between rounded-2xl border border-slate-200 px-4 py-4 text-sm font-semibold text-ink sm:min-w-[220px]"
+                className="inline-flex w-full min-w-0 items-center justify-between rounded-2xl border border-slate-200 px-4 py-4 text-sm font-semibold text-ink"
               >
-                <span>{selectedListName}</span>
+                <span className="truncate">{selectedListName}</span>
                 <span className="text-slate-400">v</span>
               </button>
 
               {dropdownOpen ? (
-                <div className="absolute right-0 top-[calc(100%+10px)] z-30 w-[280px] rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
-                  <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    Save to list
-                  </p>
-                  <div className="grid gap-1">
-                    {normalizedListNames.map((listName) => (
-                      <button
-                        key={slugify(listName)}
-                        type="button"
-                        onClick={() => {
-                          setSelectedListName(listName);
-                          setDropdownOpen(false);
-                        }}
-                        className={`rounded-xl px-3 py-2 text-left text-sm font-semibold ${
-                          selectedListName === listName ? "bg-[#EEF2FF] text-ocean" : "text-ink hover:bg-mist"
-                        }`}
-                      >
-                        {listName}
-                      </button>
-                    ))}
+                <div className="absolute left-0 top-[calc(100%+10px)] z-30 max-h-[min(24rem,calc(100vh-16rem))] w-full max-w-full overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
+                  <div className="max-h-52 overflow-y-auto">
+                    <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                      Save to list
+                    </p>
+                    <div className="grid gap-1">
+                      {normalizedListNames.map((listName) => (
+                        <button
+                          key={slugify(listName)}
+                          type="button"
+                          onClick={() => {
+                            setSelectedListName(listName);
+                            setDropdownOpen(false);
+                          }}
+                          className={`rounded-xl px-3 py-2 text-left text-sm font-semibold ${
+                            selectedListName === listName ? "bg-[#EEF2FF] text-ocean" : "text-ink hover:bg-mist"
+                          }`}
+                        >
+                          {listName}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   <div className="mt-3 border-t border-slate-100 pt-3">
@@ -298,9 +309,6 @@ export default function InlineIdeaComposer({
         </div>
       </form>
 
-      <p className="mt-3 text-xs text-slate-500">
-        Press Enter to use the best Google Maps match, or save your raw text if nothing matches.
-      </p>
     </div>
   );
 }
