@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import TripableLogoLink from "../components/TripableLogoLink.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
 import { formatDateRange } from "../lib/timeFormat.js";
@@ -67,7 +68,8 @@ export default function TripInvitePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center px-4">
+      <div className="relative flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 px-4">
+        <TripableLogoLink className="absolute left-4 top-4 sm:left-6 sm:top-6" compact surface />
         <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8">
           <p className="text-center text-slate-600">Loading trip details...</p>
         </div>
@@ -77,7 +79,8 @@ export default function TripInvitePage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center px-4">
+      <div className="relative flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 px-4">
+        <TripableLogoLink className="absolute left-4 top-4 sm:left-6 sm:top-6" compact surface />
         <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8">
           <h2 className="text-xl font-bold text-red-600 mb-4">Error</h2>
           <p className="text-slate-600 mb-6">{error}</p>
@@ -94,7 +97,8 @@ export default function TripInvitePage() {
 
   if (accepted) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center px-4">
+      <div className="relative flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 px-4">
+        <TripableLogoLink className="absolute left-4 top-4 sm:left-6 sm:top-6" compact surface />
         <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8">
           <div className="text-center">
             <div className="text-4xl mb-4">✓</div>
@@ -108,7 +112,8 @@ export default function TripInvitePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center px-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 px-4">
+      <TripableLogoLink className="absolute left-4 top-4 sm:left-6 sm:top-6" compact surface />
       <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8">
         <div className="text-center mb-8">
           <h2 className="text-2xl font-bold text-slate-900 mb-2">Trip Invitation</h2>

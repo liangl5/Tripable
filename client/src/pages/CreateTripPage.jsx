@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import DestinationAutocomplete from "../components/DestinationAutocomplete.jsx";
+import TripableLogoLink from "../components/TripableLogoLink.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
 import { parseInvitees, saveTripMeta } from "../lib/tripPlanning.js";
@@ -120,17 +121,22 @@ export default function CreateTripPage() {
 
   return (
     <div className="mx-auto min-h-screen max-w-5xl px-6 py-12">
-      <Link to="/trips" className="text-sm text-slate-500">
-        {"<-"} Back to trips
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <TripableLogoLink compact />
+        <Link
+          to="/trips"
+          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-4 py-2.5 text-sm font-semibold text-ink shadow-soft transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
+        >
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-mist text-base text-ocean">
+            ←
+          </span>
+          Back to trips
+        </Link>
+      </div>
 
       <section className="mt-6 grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
         <div className="rounded-[32px] bg-white/95 p-8 shadow-card">
-          <p className="text-sm font-semibold text-slate-500">New trip window</p>
           <h1 className="mt-2 text-3xl font-semibold text-ink">Start a collaborative trip plan</h1>
-          <p className="mt-3 text-sm text-slate-500">
-            Pick the destination first, then optionally lock dates and note who should be invited.
-          </p>
 
           <form onSubmit={handleSubmit} className="mt-8 grid gap-5">
             <DestinationAutocomplete

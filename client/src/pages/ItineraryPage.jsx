@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ItineraryView from "../components/ItineraryView.jsx";
+import TripableLogoLink from "../components/TripableLogoLink.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
 import { formatCurrency, getBudgetSummary } from "../lib/tripPlanning.js";
@@ -56,9 +57,12 @@ export default function ItineraryPage() {
 
   return (
     <div className="mx-auto min-h-screen max-w-6xl px-6 py-12">
-      <Link to={`/trips/${tripId}`} className="text-sm text-slate-500">
-        {"<-"} Back to dashboard
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <TripableLogoLink compact />
+        <Link to={`/trips/${tripId}`} className="text-sm text-slate-500">
+          {"<-"} Back to dashboard
+        </Link>
+      </div>
 
       <header className="mt-6 rounded-[32px] bg-white/95 p-8 shadow-card">
         <p className="text-sm font-semibold text-slate-500">Daily itinerary</p>

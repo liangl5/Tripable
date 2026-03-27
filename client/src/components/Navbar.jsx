@@ -4,13 +4,7 @@ import { useSession, useUserProfile } from "../App";
 import { supabase } from "../lib/supabase";
 import { getDisplayName } from "../lib/userProfile.js";
 import UserIdentity from "./UserIdentity.jsx";
-import tripableLogo from "../../imgs/icon.png";
-
-function TripableLogo() {
-  return (
-    <img src={tripableLogo} alt="Tripable Logo" width="50px"/>
-  );
-}
+import TripableLogoLink from "./TripableLogoLink.jsx";
 
 export default function Navbar() {
   const session = useSession();
@@ -41,13 +35,7 @@ export default function Navbar() {
   return (
     <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-mist/90 backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-6 lg:px-8">
-        <Link to="/" className="flex items-center gap-3">
-          <TripableLogo />
-          <div>
-            <p className="text-lg font-bold tracking-tight text-ink">Tripable</p>
-            <p className="text-xs text-ink/60">Plan together</p>
-          </div>
-        </Link>
+        <TripableLogoLink className="shrink-0" />
 
         <nav className="flex items-center gap-3 text-sm font-semibold text-ink">
           {!session ? (

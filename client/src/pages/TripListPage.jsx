@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import TripList from "../components/TripList.jsx";
+import TripableLogoLink from "../components/TripableLogoLink.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
 
@@ -49,8 +50,8 @@ export default function TripListPage() {
     <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-12">
       <header className="mb-10 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold text-slate-500">Tripable</p>
-          <h1 className="text-3xl font-semibold text-ink">Your trips</h1>
+          <TripableLogoLink className="w-fit" compact />
+          <h1 className="mt-4 text-3xl font-semibold text-ink">Your trips</h1>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Link to="/" className="rounded-full bg-white/80 px-5 py-3 text-sm font-semibold text-ink shadow-card">

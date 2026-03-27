@@ -4,6 +4,7 @@ import AvailabilityCalendar from "../components/AvailabilityCalendar.jsx";
 import BudgetPanel from "../components/BudgetPanel.jsx";
 import IdeaCard from "../components/IdeaCard.jsx";
 import InlineIdeaComposer from "../components/InlineIdeaComposer.jsx";
+import TripableLogoLink from "../components/TripableLogoLink.jsx";
 import TripMapPanel from "../components/TripMapPanel.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
@@ -207,6 +208,19 @@ export default function TripDashboardPage() {
     return locationLabel ? `${activeTrip.name} at ${locationLabel}` : activeTrip.name;
   }, [activeTrip?.destination?.label, activeTrip?.destination?.name, activeTrip?.name]);
 
+  const collaborators = useMemo(() => {
+    const members = Array.isArray(activeTrip?.members) ? [...activeTrip.members] : [];
+    return members.sort((left, right) => {
+      if (left.isLeader !== right.isLeader) {
+        return Number(right.isLeader) - Number(left.isLeader);
+      }
+      if (left.isViewer !== right.isViewer) {
+        return Number(right.isViewer) - Number(left.isViewer);
+      }
+      return String(left.name || "").localeCompare(String(right.name || ""));
+    });
+  }, [activeTrip?.members]);
+
   const handleCopy = async () => {
     await navigator.clipboard.writeText(inviteLink);
     setCopied(true);
@@ -321,61 +335,97 @@ export default function TripDashboardPage() {
       <div className="min-h-screen overflow-x-hidden xl:pr-[clamp(420px,38vw,640px)]">
         <main className="min-w-0 xl:w-full xl:overflow-hidden">
           <div className="mx-auto w-full max-w-[980px] px-6 py-12 xl:max-w-[900px] 2xl:max-w-[960px]">
-          <Link to="/trips" className="text-sm text-slate-500">
-            {"<-"} Back to trips
-          </Link>
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <TripableLogoLink compact />
+              <Link
+                to="/trips"
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-4 py-2.5 text-sm font-semibold text-ink shadow-soft transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
+              >
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-mist text-base text-ocean">
+                  ←
+                </span>
+                Back to trips
+              </Link>
+            </div>
 
-          <section className="mt-6 rounded-[32px] bg-white/95 p-8 shadow-card">
-            <div className="flex flex-wrap items-start justify-between gap-6">
-              <div className="max-w-3xl">
-                <p className="text-sm font-semibold text-slate-500">Plan trip dashboard</p>
-                <h1 className="mt-2 text-3xl font-semibold text-ink">{tripTitle}</h1>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  {activeTrip?.destination ? (
-                    <span className="rounded-full bg-[#EEF2FF] px-3 py-2 text-xs font-semibold text-ocean">
-                      {activeTrip.destination.label}
+            <section className="mt-6 rounded-[32px] bg-white/95 p-8 shadow-card">
+              <div className="flex flex-wrap items-start justify-between gap-6">
+                <div className="max-w-3xl">
+                  <p className="text-sm font-semibold text-slate-500">Plan trip dashboard</p>
+                  <h1 className="mt-2 text-3xl font-semibold text-ink">{tripTitle}</h1>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {activeTrip?.destination ? (
+                      <span className="rounded-full bg-[#EEF2FF] px-3 py-2 text-xs font-semibold text-ocean">
+                        {activeTrip.destination.label}
+                      </span>
+                    ) : null}
+                    <span className="rounded-full bg-mist px-3 py-2 text-xs font-semibold text-slate-500">
+                      {activeTrip?.startDate && activeTrip?.endDate
+                        ? formatDateRange(activeTrip.startDate, activeTrip.endDate)
+                        : "Dates TBD"}
                     </span>
+                    <div className="group relative">
+                      <button
+                        type="button"
+                        className="rounded-full bg-mist px-3 py-2 text-xs font-semibold text-slate-500 transition hover:bg-[#E9EEF8] focus:bg-[#E9EEF8]"
+                      >
+                        {activeTrip?.memberCount || collaborators.length || 0} collaborators
+                      </button>
+                      {collaborators.length ? (
+                        <div className="pointer-events-none absolute left-1/2 top-[calc(100%+10px)] z-20 hidden w-64 -translate-x-1/2 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-card group-hover:block group-focus-within:block">
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                            People in this trip
+                          </p>
+                          <div className="mt-3 grid gap-2">
+                            {collaborators.map((member) => (
+                              <div
+                                key={member.id}
+                                className="flex items-center justify-between gap-3 rounded-2xl bg-mist px-3 py-2"
+                              >
+                                <span className="text-sm font-semibold text-ink">
+                                  {member.isViewer ? "You" : member.name}
+                                </span>
+                                <span className="text-xs font-semibold text-slate-500">
+                                  {member.isLeader ? "(Owner)" : ""}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col items-end gap-3">
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="rounded-full bg-ocean px-5 py-3 text-sm font-semibold text-white"
+                  >
+                    {copied ? "Copied invite link" : "Copy invite link"}
+                  </button>
+                  {activeTrip?.isViewerCreator ? (
+                    <button
+                      type="button"
+                      onClick={handleDeleteTrip}
+                      className="rounded-full bg-[#F56565] px-4 py-2 text-xs font-semibold text-white"
+                    >
+                      Delete trip
+                    </button>
+                  ) : activeTrip?.isViewerMember ? (
+                    <button
+                      type="button"
+                      onClick={handleLeaveTrip}
+                      disabled={leaveTripLoading}
+                      className="rounded-full bg-[#F97316] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                    >
+                      {leaveTripLoading ? "Leaving..." : "Leave trip"}
+                    </button>
                   ) : null}
-                  <span className="rounded-full bg-mist px-3 py-2 text-xs font-semibold text-slate-500">
-                    {activeTrip?.startDate && activeTrip?.endDate
-                      ? formatDateRange(activeTrip.startDate, activeTrip.endDate)
-                      : "Dates TBD"}
-                  </span>
-                  <span className="rounded-full bg-mist px-3 py-2 text-xs font-semibold text-slate-500">
-                    {activeTrip?.memberCount || 0} collaborators
-                  </span>
                 </div>
               </div>
-
-              <div className="flex flex-col items-end gap-3">
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="rounded-full bg-ocean px-5 py-3 text-sm font-semibold text-white"
-                >
-                  {copied ? "Copied invite link" : "Copy invite link"}
-                </button>
-                {activeTrip?.isViewerCreator ? (
-                  <button
-                    type="button"
-                    onClick={handleDeleteTrip}
-                    className="rounded-full bg-[#F56565] px-4 py-2 text-xs font-semibold text-white"
-                  >
-                    Delete trip
-                  </button>
-                ) : activeTrip?.isViewerMember ? (
-                  <button
-                    type="button"
-                    onClick={handleLeaveTrip}
-                    disabled={leaveTripLoading}
-                    className="rounded-full bg-[#F97316] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
-                  >
-                    {leaveTripLoading ? "Leaving..." : "Leave trip"}
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          </section>
+            </section>
 
           <section className="mt-10 grid min-w-0 gap-6">
             <section className="min-w-0 overflow-hidden rounded-[32px] bg-white/95 p-6 shadow-card">

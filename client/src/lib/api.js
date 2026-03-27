@@ -15,6 +15,22 @@ import {
 } from "./tripPlanning.js";
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+const GOOGLE_DESTINATION_AUTOCOMPLETE_FIELDS = [
+  "suggestions.placePrediction.place",
+  "suggestions.placePrediction.placeId",
+  "suggestions.placePrediction.text.text",
+  "suggestions.placePrediction.structuredFormat.mainText.text",
+  "suggestions.placePrediction.structuredFormat.secondaryText.text",
+  "suggestions.placePrediction.types"
+].join(",");
+const GOOGLE_DESTINATION_DETAILS_FIELDS = [
+  "id",
+  "displayName",
+  "formattedAddress",
+  "location",
+  "types",
+  "addressComponents"
+].join(",");
 const GOOGLE_PLACE_SEARCH_FIELDS = [
   "places.id",
   "places.displayName",
@@ -24,6 +40,21 @@ const GOOGLE_PLACE_SEARCH_FIELDS = [
   "places.photos"
 ].join(",");
 const DEFAULT_RECOMMENDATION_LIMIT = 10;
+const DESTINATION_REGION_TYPES = new Set([
+  "country",
+  "administrative_area_level_1",
+  "administrative_area_level_2",
+  "administrative_area_level_3",
+  "postal_town"
+]);
+
+function buildGoogleMapsHeaders(fieldMask) {
+  return {
+    "Content-Type": "application/json",
+    "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
+    "X-Goog-FieldMask": fieldMask
+  };
+}
 
 export async function getCurrentUserId() {
   const { data: { session } } = await supabase.auth.getSession();
@@ -215,11 +246,7 @@ async function runPlacesTextSearch(textQuery, maxResultCount = 5) {
 
   const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
-      "X-Goog-FieldMask": GOOGLE_PLACE_SEARCH_FIELDS
-    },
+    headers: buildGoogleMapsHeaders(GOOGLE_PLACE_SEARCH_FIELDS),
     body: JSON.stringify({
       textQuery,
       maxResultCount: Math.max(1, Math.min(20, Number(maxResultCount) || 5))
@@ -233,6 +260,53 @@ async function runPlacesTextSearch(textQuery, maxResultCount = 5) {
 
   const payload = await response.json();
   return payload.places || [];
+}
+
+async function runPlacesAutocomplete(input, includedPrimaryTypes, sessionToken) {
+  if (!input || !GOOGLE_MAPS_API_KEY) {
+    return [];
+  }
+
+  const response = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
+    method: "POST",
+    headers: buildGoogleMapsHeaders(GOOGLE_DESTINATION_AUTOCOMPLETE_FIELDS),
+    body: JSON.stringify({
+      input,
+      includedPrimaryTypes,
+      includeQueryPredictions: false,
+      ...(sessionToken ? { sessionToken } : {})
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || "Google Places autocomplete failed");
+  }
+
+  const payload = await response.json();
+  return payload.suggestions || [];
+}
+
+async function getPlaceDetails(placeId, sessionToken) {
+  if (!placeId || !GOOGLE_MAPS_API_KEY) {
+    return null;
+  }
+
+  const url = new URL(`https://places.googleapis.com/v1/places/${placeId}`);
+  if (sessionToken) {
+    url.searchParams.set("sessionToken", sessionToken);
+  }
+
+  const response = await fetch(url, {
+    headers: buildGoogleMapsHeaders(GOOGLE_DESTINATION_DETAILS_FIELDS)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || "Google Place Details request failed");
+  }
+
+  return response.json();
 }
 
 function normalizePlaceMatch(place) {
@@ -278,6 +352,102 @@ function buildRecommendationDescription(place, listName, destination) {
   }
 
   return `Top Google Maps pick in ${destinationLabel}.`;
+}
+
+function getAddressComponentText(addressComponents, type) {
+  return (
+    addressComponents?.find((component) => Array.isArray(component.types) && component.types.includes(type))?.longText ||
+    ""
+  );
+}
+
+function buildDestinationType(types) {
+  const normalizedTypes = Array.isArray(types) ? types : [];
+
+  if (normalizedTypes.includes("country")) {
+    return "Country";
+  }
+
+  if (normalizedTypes.includes("administrative_area_level_1")) {
+    return "State/Province";
+  }
+
+  if (normalizedTypes.includes("locality") || normalizedTypes.includes("postal_town")) {
+    return "City";
+  }
+
+  if (
+    normalizedTypes.includes("administrative_area_level_2") ||
+    normalizedTypes.includes("administrative_area_level_3")
+  ) {
+    return "Region";
+  }
+
+  return "Destination";
+}
+
+function normalizeDestinationPrediction(placePrediction) {
+  const label =
+    String(placePrediction?.text?.text || placePrediction?.structuredFormat?.mainText?.text || "").trim();
+  const secondaryText = String(placePrediction?.structuredFormat?.secondaryText?.text || "").trim();
+  const types = Array.isArray(placePrediction?.types) ? placePrediction.types : [];
+
+  if (!label) {
+    return null;
+  }
+
+  return {
+    id: placePrediction.placeId || label.toLowerCase(),
+    placeId: placePrediction.placeId || "",
+    placeResourceName: placePrediction.place || "",
+    label,
+    name: String(placePrediction?.structuredFormat?.mainText?.text || label).trim(),
+    type: buildDestinationType(types),
+    summary: secondaryText,
+    region: "",
+    country: "",
+    mapQuery: String(placePrediction?.text?.text || label).trim(),
+    coordinates: null,
+    predictionTypes: types
+  };
+}
+
+function isAllowedRegionPrediction(placePrediction) {
+  const types = Array.isArray(placePrediction?.types) ? placePrediction.types : [];
+  return types.some((type) => DESTINATION_REGION_TYPES.has(type));
+}
+
+function normalizeDestinationDetails(place, fallbackDestination) {
+  const displayName = String(place?.displayName?.text || fallbackDestination?.name || fallbackDestination?.label || "").trim();
+  const formattedAddress = String(place?.formattedAddress || fallbackDestination?.summary || fallbackDestination?.label || "").trim();
+  const addressComponents = Array.isArray(place?.addressComponents) ? place.addressComponents : [];
+  const types = Array.isArray(place?.types) && place.types.length
+    ? place.types
+    : Array.isArray(fallbackDestination?.predictionTypes)
+      ? fallbackDestination.predictionTypes
+      : [];
+  const latitude = place?.location?.latitude;
+  const longitude = place?.location?.longitude;
+  const region =
+    getAddressComponentText(addressComponents, "administrative_area_level_1") ||
+    getAddressComponentText(addressComponents, "administrative_area_level_2");
+  const country = getAddressComponentText(addressComponents, "country");
+  const summary = formattedAddress || [region, country].filter(Boolean).join(", ");
+
+  return {
+    id: place?.id || fallbackDestination?.id || displayName.toLowerCase(),
+    label: displayName || fallbackDestination?.label || "",
+    name: displayName || fallbackDestination?.name || fallbackDestination?.label || "",
+    type: buildDestinationType(types),
+    region,
+    country,
+    mapQuery: formattedAddress || displayName || fallbackDestination?.mapQuery || "",
+    coordinates:
+      typeof latitude === "number" && typeof longitude === "number"
+        ? { lat: latitude, lng: longitude }
+        : fallbackDestination?.coordinates || null,
+    summary
+  };
 }
 
 function normalizeName(value) {
@@ -414,6 +584,57 @@ export const api = {
     return results
       .map((place) => normalizePlaceMatch(place))
       .filter((place) => place.title);
+  },
+
+  async searchDestinations(textQuery, options = {}) {
+    const query = String(textQuery || "").trim();
+    if (!query || !GOOGLE_MAPS_API_KEY) {
+      return [];
+    }
+
+    const sessionToken = String(options.sessionToken || "").trim();
+    const [citySuggestions, regionSuggestions] = await Promise.all([
+      runPlacesAutocomplete(query, ["(cities)"], sessionToken),
+      runPlacesAutocomplete(query, ["(regions)"], sessionToken)
+    ]);
+
+    const seenPlaceIds = new Set();
+    const predictions = [];
+    const appendPrediction = (placePrediction) => {
+      const normalized = normalizeDestinationPrediction(placePrediction);
+      if (!normalized?.placeId || seenPlaceIds.has(normalized.placeId)) return;
+
+      seenPlaceIds.add(normalized.placeId);
+      predictions.push(normalized);
+    };
+
+    citySuggestions.forEach((suggestion) => {
+      if (suggestion?.placePrediction) {
+        appendPrediction(suggestion.placePrediction);
+      }
+    });
+
+    regionSuggestions.forEach((suggestion) => {
+      const placePrediction = suggestion?.placePrediction;
+      if (!placePrediction || !isAllowedRegionPrediction(placePrediction)) return;
+      appendPrediction(placePrediction);
+    });
+
+    return predictions.slice(0, 8);
+  },
+
+  async resolveDestination(destinationPrediction, options = {}) {
+    if (!destinationPrediction) {
+      return null;
+    }
+
+    if (!GOOGLE_MAPS_API_KEY || !destinationPrediction.placeId) {
+      return normalizeDestinationDetails(null, destinationPrediction);
+    }
+
+    const sessionToken = String(options.sessionToken || "").trim();
+    const place = await getPlaceDetails(destinationPrediction.placeId, sessionToken);
+    return normalizeDestinationDetails(place, destinationPrediction);
   },
 
   async resolveMapLocation(textQuery) {

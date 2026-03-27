@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useSession, useUserProfile } from "../App";
 import { getDisplayName } from "../lib/userProfile.js";
+import TripableLogoLink from "./TripableLogoLink.jsx";
 
 export function AuthStatus() {
   const session = useSession();
@@ -88,9 +89,9 @@ export function AuthStatus() {
 
   if (session) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center px-4">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 px-4">
         <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8">
-          <h1 className="text-3xl font-bold text-slate-900 mb-4">Tripable</h1>
+          <TripableLogoLink className="mb-6" compact showTagline={false} />
           <div className="space-y-4">
             <p className="text-slate-600">
               Logged in as: <span className="font-semibold">{displayName}</span>
@@ -108,10 +109,10 @@ export function AuthStatus() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center px-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 px-4">
       <div className="w-full max-w-md">
         <div className="bg-white rounded-lg shadow-lg p-8">
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">Tripable</h1>
+          <TripableLogoLink className="mb-2" compact showTagline={false} />
           <p className="text-slate-500 mb-8">Plan trips together, effortlessly</p>
 
           {/* Tab Navigation */}
