@@ -96,7 +96,8 @@ export default function CreateTripPage() {
     }
 
     const payload = {
-      name: form.name.trim() || `Trip to ${destination.name}`
+      name: form.name.trim() || `Trip to ${destination.name}`,
+      destination
     };
 
     try {

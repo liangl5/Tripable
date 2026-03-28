@@ -7,6 +7,7 @@ import {
   hydrateIdeas,
   hydrateTrip,
   isPlaceLikeList,
+  normalizeDestination,
   normalizeListName,
   removeIdeaMeta,
   saveGeneratedItinerary,
@@ -479,6 +480,38 @@ function toISODate(value) {
   return new Date(value).toISOString().slice(0, 10);
 }
 
+function isMissingTripDestinationColumnError(error) {
+  const message = [error?.message, error?.details, error?.hint, error?.code]
+    .filter(Boolean)
+    .join(" ");
+  return /destination/i.test(message) && /(column|schema cache|PGRST204|not found)/i.test(message);
+}
+
+async function persistTripDestination(tripId, createdById, destination) {
+  const normalizedDestination = normalizeDestination(destination);
+  if (!tripId || !createdById || !normalizedDestination) {
+    return false;
+  }
+
+  const { error } = await supabase
+    .from("Trip")
+    .update({ destination: normalizedDestination })
+    .eq("id", tripId)
+    .eq("createdById", createdById);
+
+  if (!error) {
+    return true;
+  }
+
+  if (isMissingTripDestinationColumnError(error)) {
+    console.warn('Trip.destination column is missing. Run the destination migration to persist trip locations.');
+    return false;
+  }
+
+  console.error("Unable to persist trip destination", error);
+  return false;
+}
+
 async function getOrCreateUser() {
   const { data: { session }, error: sessionError } = await supabase.auth.getSession();
   if (sessionError || !session) {
@@ -538,6 +571,7 @@ function formatTrip(trip, memberCount = 0) {
     name: trip.name,
     startDate: toISODate(trip.startDate),
     endDate: toISODate(trip.endDate),
+    destination: trip.destination || null,
     memberCount,
     createdById: trip.createdById
   });
@@ -552,6 +586,7 @@ async function formatTripDetails(trip, viewerUserId, members, leaders, availabil
     name: trip.name,
     startDate: toISODate(trip.startDate),
     endDate: toISODate(trip.endDate),
+    destination: trip.destination || null,
     memberCount: members?.length || 0,
     createdById: trip.createdById,
     isViewerCreator: trip.createdById === viewerUserId,
@@ -823,7 +858,13 @@ export const api = {
 
     const leaders = [trip.createdById];
 
-    return formatTripDetails(trip, userId, members, leaders, availability, surveyDates);
+    const formattedTrip = await formatTripDetails(trip, userId, members, leaders, availability, surveyDates);
+
+    if (!normalizeDestination(trip.destination) && formattedTrip.destination && trip.createdById === userId) {
+      void persistTripDestination(tripId, userId, formattedTrip.destination);
+    }
+
+    return formattedTrip;
   },
 
   async createTrip(payload) {
@@ -856,7 +897,9 @@ export const api = {
 
     if (memberError) throw memberError;
 
-    return formatTrip(trip, 1);
+    await persistTripDestination(tripId, user.id, payload.destination);
+
+    return formatTrip({ ...trip, destination: payload.destination || null }, 1);
   },
 
   async deleteTrip(tripId) {

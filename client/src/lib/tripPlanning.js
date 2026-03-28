@@ -596,7 +596,7 @@ function normalizeCoordinates(coordinates) {
   return { lat, lng };
 }
 
-function normalizeDestination(destination) {
+export function normalizeDestination(destination) {
   if (!destination) return null;
   const matched = getDestinationById(destination.id) || getDestinationByLabel(destination.label);
   if (matched) return matched;
@@ -789,9 +789,10 @@ export function getTripLists(tripOrId) {
 export function hydrateTrip(trip) {
   if (!trip?.id) return trip;
   const meta = getTripMeta(trip.id);
+  const persistedDestination = normalizeDestination(trip.destination);
   return {
     ...trip,
-    destination: meta.destination,
+    destination: persistedDestination || meta.destination,
     invitees: meta.invitees,
     customLists: meta.customLists,
     budgetTotal: meta.budgetTotal,

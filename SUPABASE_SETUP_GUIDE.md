@@ -34,6 +34,7 @@ CREATE TABLE "User" (
 CREATE TABLE "Trip" (
   id TEXT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
+  destination JSONB,
   "startDate" TIMESTAMPTZ,
   "endDate" TIMESTAMPTZ,
   "createdById" TEXT NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
@@ -106,17 +107,18 @@ CREATE INDEX idx_availability_user ON "UserAvailability"("userId");
 
 ---
 
-## Step 1.5: (OPTIONAL) If Tables Already Exist - Update Timestamps
+## Step 1.5: (OPTIONAL) If Tables Already Exist - Update Timestamps And Add Trip Destination
 
 **⚠️ Only run this if you have an existing Supabase project with tables created before March 2026.** 
 
-If you've already created the tables with `TIMESTAMP` instead of `TIMESTAMPTZ`, run this SQL to fix the timestamp columns:
+If you've already created the tables with `TIMESTAMP` instead of `TIMESTAMPTZ`, or your `Trip` table does not yet have a `destination` column, run this SQL:
 
 ```sql
 -- Update existing tables to use TIMESTAMPTZ for proper timezone handling
 ALTER TABLE "User" ALTER COLUMN "created_at" TYPE TIMESTAMPTZ;
 ALTER TABLE "User" ALTER COLUMN "created_at" SET DEFAULT NOW();
 
+ALTER TABLE "Trip" ADD COLUMN IF NOT EXISTS destination JSONB;
 ALTER TABLE "Trip" ALTER COLUMN "createdAt" TYPE TIMESTAMPTZ;
 ALTER TABLE "Trip" ALTER COLUMN "createdAt" SET DEFAULT NOW();
 ALTER TABLE "Trip" ALTER COLUMN "startDate" TYPE TIMESTAMPTZ;
