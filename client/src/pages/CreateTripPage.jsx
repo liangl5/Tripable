@@ -87,9 +87,10 @@ export default function CreateTripPage() {
     const pendingInvitees = parseInvitees(inviteDraft);
     const nextInvitees = pendingInvitees.reduce((allInvitees, invitee) => addInvitee(allInvitees, invitee), invitees);
 
+    const tripName = form.name.trim();
     const destination = selectedDestination;
-    if (!destination) {
-      setFormError("Choose a destination from the suggestions before creating the trip.");
+    if (!tripName) {
+      setFormError("Give your trip a title before creating it.");
       return;
     }
 
@@ -104,8 +105,8 @@ export default function CreateTripPage() {
     }
 
     const payload = {
-      name: form.name.trim() || `Trip to ${destination.name}`,
-      destination
+      name: tripName,
+      destination: destination || null
     };
 
     try {
@@ -148,22 +149,28 @@ export default function CreateTripPage() {
           <h1 className="mt-2 text-3xl font-semibold text-ink">Start a collaborative trip plan</h1>
 
           <form onSubmit={handleSubmit} className="mt-8 grid gap-5">
-            <DestinationAutocomplete
-              value={destinationQuery}
-              selectedDestination={selectedDestination}
-              onChange={handleDestinationQueryChange}
-              onSelect={handleSelectDestination}
-            />
-
             <div>
               <label className="text-sm font-semibold text-ink">Trip title</label>
               <input
                 name="name"
                 value={form.name}
                 onChange={handleChange}
-                placeholder={selectedDestination ? `Trip to ${selectedDestination.name}` : "Ex: Spring break with roommates"}
+                placeholder="Ex: Spring break with roommates"
                 className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm"
               />
+            </div>
+
+            <div>
+              <DestinationAutocomplete
+                value={destinationQuery}
+                selectedDestination={selectedDestination}
+                onChange={handleDestinationQueryChange}
+                onSelect={handleSelectDestination}
+                label="Destination (optional)"
+              />
+              <p className="mt-2 text-xs text-slate-500">
+                Skip this if the group is still deciding. You can vote on destination ideas inside the trip.
+              </p>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">

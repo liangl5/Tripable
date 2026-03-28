@@ -66,6 +66,8 @@ CREATE TABLE "Idea" (
   description TEXT,
   location VARCHAR(255),
   category VARCHAR(50),
+  "entryType" VARCHAR(20) CHECK ("entryType" IN ('place', 'activity')),
+  "parentIdeaId" TEXT REFERENCES "Idea"(id) ON DELETE CASCADE,
   "createdById" TEXT NOT NULL REFERENCES "User"(id),
   "createdAt" TIMESTAMPTZ DEFAULT NOW()
 );
@@ -96,6 +98,8 @@ CREATE INDEX idx_trip_member_user ON "TripMember"("userId");
 CREATE INDEX idx_trip_member_trip ON "TripMember"("tripId");
 CREATE INDEX idx_idea_trip ON "Idea"("tripId");
 CREATE INDEX idx_idea_created_by ON "Idea"("createdById");
+CREATE INDEX idx_idea_entry_type ON "Idea"("entryType");
+CREATE INDEX idx_idea_parent ON "Idea"("parentIdeaId");
 CREATE INDEX idx_vote_idea ON "Vote"("ideaId");
 CREATE INDEX idx_vote_user ON "Vote"("userId");
 CREATE INDEX idx_itinerary_day_trip ON "ItineraryDay"("tripId");
@@ -105,13 +109,18 @@ CREATE INDEX idx_availability_trip ON "UserAvailability"("tripId");
 CREATE INDEX idx_availability_user ON "UserAvailability"("userId");
 ```
 
+**How multiple destinations work now**
+- `Trip.destination` stays optional and represents the confirmed/main destination for the trip.
+- Destination options like `France`, `Tokyo`, or `Florida` are stored as top-level rows in `Idea` using `category = 'Destinations'` and `entryType = 'place'`.
+- Activities or food ideas grouped under those destinations use `parentIdeaId` to point back to the destination idea.
+
 ---
 
-## Step 1.5: (OPTIONAL) If Tables Already Exist - Update Timestamps And Add Trip Destination
+## Step 1.5: (OPTIONAL) If Tables Already Exist - Update Timestamps, Optional Trip Destination, And Idea Hierarchy
 
 **⚠️ Only run this if you have an existing Supabase project with tables created before March 2026.** 
 
-If you've already created the tables with `TIMESTAMP` instead of `TIMESTAMPTZ`, or your `Trip` table does not yet have a `destination` column, run this SQL:
+If you've already created the tables with `TIMESTAMP` instead of `TIMESTAMPTZ`, your `Trip` table does not yet have a `destination` column, or your `Idea` table does not yet support nested destination groupings, run this SQL:
 
 ```sql
 -- Update existing tables to use TIMESTAMPTZ for proper timezone handling
@@ -126,10 +135,29 @@ ALTER TABLE "Trip" ALTER COLUMN "endDate" TYPE TIMESTAMPTZ;
 
 ALTER TABLE "Idea" ALTER COLUMN "createdAt" TYPE TIMESTAMPTZ;
 ALTER TABLE "Idea" ALTER COLUMN "createdAt" SET DEFAULT NOW();
+ALTER TABLE "Idea" ADD COLUMN IF NOT EXISTS "entryType" VARCHAR(20);
+ALTER TABLE "Idea" ADD COLUMN IF NOT EXISTS "parentIdeaId" TEXT REFERENCES "Idea"(id) ON DELETE CASCADE;
+
+ALTER TABLE "Idea" DROP CONSTRAINT IF EXISTS "Idea_entryType_check";
+ALTER TABLE "Idea"
+  ADD CONSTRAINT "Idea_entryType_check"
+  CHECK ("entryType" IS NULL OR "entryType" IN ('place', 'activity'));
+
+UPDATE "Idea"
+SET "entryType" = CASE
+  WHEN LOWER(COALESCE(category, '')) = 'activities' THEN 'activity'
+  WHEN LOWER(COALESCE(category, '')) = 'destinations' THEN 'place'
+  WHEN LOWER(COALESCE(category, '')) LIKE '%activity%' THEN 'activity'
+  ELSE 'place'
+END
+WHERE "entryType" IS NULL;
 
 ALTER TABLE "SurveyDate" ALTER COLUMN "date" TYPE TIMESTAMPTZ;
 ALTER TABLE "UserAvailability" ALTER COLUMN "date" TYPE TIMESTAMPTZ;
 ALTER TABLE "ItineraryDay" ALTER COLUMN "date" TYPE TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS idx_idea_entry_type ON "Idea"("entryType");
+CREATE INDEX IF NOT EXISTS idx_idea_parent ON "Idea"("parentIdeaId");
 ```
 
 **Why?** Using `TIMESTAMPTZ` (timestamp with timezone) ensures Supabase returns proper ISO 8601 strings that JavaScript's `Date` parser can correctly handle, making relative time calculations accurate.

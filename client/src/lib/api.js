@@ -487,6 +487,13 @@ function isMissingTripDestinationColumnError(error) {
   return /destination/i.test(message) && /(column|schema cache|PGRST204|not found)/i.test(message);
 }
 
+function isMissingIdeaHierarchyColumnError(error) {
+  const message = [error?.message, error?.details, error?.hint, error?.code]
+    .filter(Boolean)
+    .join(" ");
+  return /(entrytype|parentideaid)/i.test(message) && /(column|schema cache|PGRST204|not found)/i.test(message);
+}
+
 async function persistTripDestination(tripId, createdById, destination) {
   const normalizedDestination = normalizeDestination(destination);
   if (!tripId || !createdById || !normalizedDestination) {
@@ -607,6 +614,8 @@ function formatIdea(tripId, idea, userId, votes = []) {
     description: idea.description,
     location: idea.location,
     category: idea.category,
+    entryType: idea.entryType,
+    parentIdeaId: idea.parentIdeaId || null,
     createdAt: idea.createdAt,
     createdById: idea.createdById,
     submittedBy: idea.User?.name || "Traveler",
@@ -1168,20 +1177,36 @@ export const api = {
   async createIdea(tripId, payload) {
     const user = await getOrCreateUser();
     const ideaId = crypto.randomUUID();
+    const baseIdeaRecord = {
+      id: ideaId,
+      tripId,
+      createdById: user.id,
+      title: payload.title,
+      description: payload.description,
+      location: payload.location,
+      category: payload.category || null
+    };
 
-    const { data: idea, error } = await supabase
+    let idea;
+    let error;
+    ({ data: idea, error } = await supabase
       .from("Idea")
       .insert([{
-        id: ideaId,
-        tripId,
-        createdById: user.id,
-        title: payload.title,
-        description: payload.description,
-        location: payload.location,
-        category: payload.category || null
+        ...baseIdeaRecord,
+        entryType: payload.entryType || null,
+        parentIdeaId: payload.parentIdeaId || null
       }])
       .select("*, User(*)")
-      .single();
+      .single());
+
+    if (error && isMissingIdeaHierarchyColumnError(error)) {
+      console.warn('Idea.entryType or Idea.parentIdeaId is missing. Run the hierarchy migration to share grouped destination ideas across collaborators.');
+      ({ data: idea, error } = await supabase
+        .from("Idea")
+        .insert([baseIdeaRecord])
+        .select("*, User(*)")
+        .single());
+    }
 
     if (error) throw error;
 
@@ -1190,15 +1215,95 @@ export const api = {
     clearGeneratedItinerary(tripId);
     saveIdeaMeta(tripId, ideaId, {
       entryType: payload.entryType,
+      parentIdeaId: payload.parentIdeaId || null,
       mapQuery: payload.mapQuery,
       coordinates: payload.coordinates || null,
       photoUrl: payload.photoUrl || "",
       photoAttributions: payload.photoAttributions || [],
+      listId: payload.listId || "",
       listName: payload.category,
       recommendationSource: payload.recommendationSource || null
     });
 
     return formatIdea(tripId, idea, user.id, []);
+  },
+
+  async updateIdea(ideaId, tripId, payload) {
+    const user = await getOrCreateUser();
+
+    const { data: existingIdea, error: fetchError } = await supabase
+      .from("Idea")
+      .select("id, createdById")
+      .eq("id", ideaId)
+      .single();
+
+    if (fetchError || !existingIdea) throw new Error("Idea not found");
+
+    const { data: trip } = await supabase
+      .from("Trip")
+      .select("createdById")
+      .eq("id", tripId)
+      .single();
+
+    const isOwner = trip?.createdById === user.id;
+    const isCreator = existingIdea.createdById === user.id;
+
+    if (!isOwner && !isCreator) {
+      throw new Error("Only the trip owner or item creator can edit this item");
+    }
+
+    const baseIdeaRecord = {
+      title: payload.title,
+      description: payload.description,
+      location: payload.location,
+      category: payload.category || null
+    };
+
+    let error;
+    ({ error } = await supabase
+      .from("Idea")
+      .update({
+        ...baseIdeaRecord,
+        entryType: payload.entryType || null,
+        parentIdeaId: payload.parentIdeaId || null
+      })
+      .eq("id", ideaId));
+
+    if (error && isMissingIdeaHierarchyColumnError(error)) {
+      console.warn('Idea.entryType or Idea.parentIdeaId is missing. Run the hierarchy migration to share grouped destination ideas across collaborators.');
+      ({ error } = await supabase
+        .from("Idea")
+        .update(baseIdeaRecord)
+        .eq("id", ideaId));
+    }
+
+    if (error) throw error;
+
+    await supabase.from("ItineraryDay").delete().eq("tripId", tripId);
+    clearGeneratedItinerary(tripId);
+    saveIdeaMeta(tripId, ideaId, {
+      entryType: payload.entryType,
+      parentIdeaId: payload.parentIdeaId || null,
+      mapQuery: payload.mapQuery,
+      coordinates: payload.coordinates || null,
+      photoUrl: payload.photoUrl || "",
+      photoAttributions: payload.photoAttributions || [],
+      listId: payload.listId || "",
+      listName: payload.category,
+      recommendationSource: payload.recommendationSource || null
+    });
+
+    const { data: updatedIdea, error: updatedIdeaError } = await supabase
+      .from("Idea")
+      .select("*, votes:Vote(*), User(*)")
+      .eq("id", ideaId)
+      .single();
+
+    if (updatedIdeaError || !updatedIdea) {
+      throw updatedIdeaError || new Error("Unable to load the updated item");
+    }
+
+    return formatIdea(tripId, updatedIdea, user.id, updatedIdea.votes || []);
   },
 
   async deleteIdea(ideaId, tripId) {

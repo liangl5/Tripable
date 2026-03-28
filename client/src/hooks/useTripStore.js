@@ -14,6 +14,7 @@ export const useTripStore = create((set, get) => ({
   leaveTripLoading: false,
   ideasLoading: false,
   addIdeaLoading: false,
+  updateIdeaLoading: false,
   deleteIdeaLoading: false,
   availabilitySaving: false,
   surveyDatesSaving: false,
@@ -184,14 +185,31 @@ export const useTripStore = create((set, get) => ({
     }
   },
 
+  updateIdea: async (ideaId, tripId, payload) => {
+    set({ updateIdeaLoading: true, error: null });
+    try {
+      const updatedIdea = await api.updateIdea(ideaId, tripId, payload);
+      const ideas = await api.getIdeas(tripId);
+      set({
+        ideas,
+        updateIdeaLoading: false
+      });
+      return updatedIdea;
+    } catch (error) {
+      set({ error: error.message, updateIdeaLoading: false });
+      throw error;
+    }
+  },
+
   deleteIdea: async (ideaId, tripId) => {
     set({ deleteIdeaLoading: true, error: null });
     try {
       await api.deleteIdea(ideaId, tripId);
-      set((state) => ({
-        ideas: state.ideas.filter((idea) => idea.id !== ideaId),
+      const ideas = await api.getIdeas(tripId);
+      set({
+        ideas,
         deleteIdeaLoading: false
-      }));
+      });
     } catch (error) {
       set({ error: error.message, deleteIdeaLoading: false });
       throw error;

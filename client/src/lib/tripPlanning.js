@@ -2,7 +2,11 @@ const TRIP_META_STORAGE_KEY = "tripable.trip-meta.v2";
 const IDEA_META_STORAGE_KEY = "tripable.idea-meta.v2";
 const ITINERARY_STORAGE_KEY = "tripable.itinerary.v2";
 
-export const DEFAULT_LIST_NAMES = ["Places to Visit", "Activities", "Food"];
+export const DEFAULT_LIST_NAMES = ["Destinations", "Places to Visit", "Activities", "Food"];
+export const DEFAULT_LISTS = DEFAULT_LIST_NAMES.map((name) => ({
+  id: slugify(name),
+  name
+}));
 
 export const DESTINATION_OPTIONS = [
   {
@@ -548,10 +552,78 @@ function uniqueStrings(values) {
   });
 }
 
+function normalizeTripList(list) {
+  if (typeof list === "string") {
+    const normalizedName = normalizeListName(list);
+    return normalizedName
+      ? {
+          id: slugify(normalizedName),
+          name: normalizedName
+        }
+      : null;
+  }
+
+  const normalizedName = normalizeListName(list?.name);
+  const templateMatch = DEFAULT_LISTS.find(
+    (candidate) => candidate.id === String(list?.id || "").trim() || candidate.name === normalizedName
+  );
+  const normalizedId = String(list?.id || templateMatch?.id || slugify(normalizedName)).trim();
+
+  if (!normalizedId || !normalizedName) {
+    return null;
+  }
+
+  return {
+    id: normalizedId,
+    name: normalizedName
+  };
+}
+
+function uniqueTripLists(values) {
+  const seen = new Set();
+  return (values || []).reduce((lists, list) => {
+    const normalized = normalizeTripList(list);
+    if (!normalized || seen.has(normalized.id)) {
+      return lists;
+    }
+
+    seen.add(normalized.id);
+    lists.push(normalized);
+    return lists;
+  }, []);
+}
+
+function normalizeTripLists(lists, legacyCustomLists = []) {
+  if (Array.isArray(lists)) {
+    return uniqueTripLists(lists);
+  }
+
+  return uniqueTripLists([
+    ...DEFAULT_LISTS,
+    ...uniqueStrings(legacyCustomLists || []).map((name) => ({
+      id: slugify(name),
+      name
+    }))
+  ]);
+}
+
+function findTripList(lists, listIdOrName) {
+  const normalizedValue = String(listIdOrName || "").trim();
+  if (!normalizedValue) return null;
+
+  const normalizedSlug = slugify(normalizedValue);
+  return (
+    (lists || []).find((list) => list.id === normalizedValue) ||
+    (lists || []).find((list) => slugify(list.name) === normalizedSlug) ||
+    null
+  );
+}
+
 function emptyTripMeta() {
   return {
     destination: null,
     invitees: [],
+    lists: [...DEFAULT_LISTS],
     customLists: [],
     budgetTotal: "",
     expenses: []
@@ -627,6 +699,7 @@ export function normalizeListName(value) {
 export function isPlaceLikeList(listName) {
   const normalized = slugify(listName);
   return [
+    "destination",
     "place",
     "food",
     "restaurant",
@@ -660,12 +733,14 @@ export function getTripMeta(tripId) {
   if (!tripId) return emptyTripMeta();
   const allMeta = readStorage(TRIP_META_STORAGE_KEY, {});
   const tripMeta = allMeta[tripId] || {};
+  const lists = normalizeTripLists(tripMeta.lists, tripMeta.customLists);
   return {
     ...emptyTripMeta(),
     ...tripMeta,
     destination: normalizeDestination(tripMeta.destination),
+    lists,
     invitees: sanitizeInvitees(tripMeta.invitees),
-    customLists: uniqueStrings(tripMeta.customLists || []),
+    customLists: lists.map((list) => list.name),
     expenses: sanitizeExpenses(tripMeta.expenses),
     budgetTotal: tripMeta.budgetTotal === "" ? "" : String(tripMeta.budgetTotal ?? "")
   };
@@ -679,8 +754,9 @@ export function saveTripMeta(tripId, patch) {
     ...patch
   };
   nextMeta.destination = normalizeDestination(nextMeta.destination);
+  nextMeta.lists = normalizeTripLists(nextMeta.lists, nextMeta.customLists);
   nextMeta.invitees = sanitizeInvitees(nextMeta.invitees);
-  nextMeta.customLists = uniqueStrings(nextMeta.customLists || []);
+  nextMeta.customLists = nextMeta.lists.map((list) => list.name);
   nextMeta.expenses = sanitizeExpenses(nextMeta.expenses);
   nextMeta.budgetTotal = nextMeta.budgetTotal === "" ? "" : String(nextMeta.budgetTotal ?? "");
   allMeta[tripId] = nextMeta;
@@ -692,34 +768,45 @@ export function addCustomList(tripId, listName) {
   const normalized = normalizeListName(listName);
   if (!normalized) return getTripMeta(tripId);
   const meta = getTripMeta(tripId);
-  const nextCustomLists = uniqueStrings([...meta.customLists, normalized]).filter(
-    (name) => !DEFAULT_LIST_NAMES.some((candidate) => slugify(candidate) === slugify(name))
-  );
-  return saveTripMeta(tripId, { customLists: nextCustomLists });
+  const nextList = {
+    id: slugify(normalized),
+    name: normalized
+  };
+
+  if (findTripList(meta.lists, nextList.id) || findTripList(meta.lists, nextList.name)) {
+    return meta;
+  }
+
+  return saveTripMeta(tripId, { lists: [...meta.lists, nextList] });
 }
 
-export function removeCustomList(tripId, listName) {
-  const normalized = normalizeListName(listName);
-  if (!normalized) return getTripMeta(tripId);
+export function removeCustomList(tripId, listIdOrName) {
   const meta = getTripMeta(tripId);
+  const matchedList = findTripList(meta.lists, listIdOrName);
+  if (!matchedList) return meta;
   return saveTripMeta(tripId, {
-    customLists: meta.customLists.filter((candidate) => slugify(candidate) !== slugify(normalized))
+    lists: meta.lists.filter((candidate) => candidate.id !== matchedList.id)
   });
 }
 
-export function renameCustomList(tripId, currentListName, nextListName) {
-  const currentNormalized = normalizeListName(currentListName);
+export function renameCustomList(tripId, currentListIdOrName, nextListName) {
   const nextNormalized = normalizeListName(nextListName);
-  if (!currentNormalized || !nextNormalized) return getTripMeta(tripId);
+  if (!nextNormalized) return getTripMeta(tripId);
 
   const meta = getTripMeta(tripId);
-  const nextCustomLists = uniqueStrings(
-    meta.customLists.map((candidate) =>
-      slugify(candidate) === slugify(currentNormalized) ? nextNormalized : candidate
-    )
-  ).filter((name) => !DEFAULT_LIST_NAMES.some((candidate) => slugify(candidate) === slugify(name)));
+  const matchedList = findTripList(meta.lists, currentListIdOrName);
+  if (!matchedList) return meta;
 
-  return saveTripMeta(tripId, { customLists: nextCustomLists });
+  return saveTripMeta(tripId, {
+    lists: meta.lists.map((candidate) =>
+      candidate.id === matchedList.id
+        ? {
+            ...candidate,
+            name: nextNormalized
+          }
+        : candidate
+    )
+  });
 }
 
 export function updateTripBudget(tripId, budgetTotal) {
@@ -753,17 +840,11 @@ export function removeTripExpense(tripId, expenseId) {
 }
 
 export function getTripLists(tripOrId) {
-  const tripId = typeof tripOrId === "string" ? tripOrId : tripOrId?.id;
-  const customLists =
-    typeof tripOrId === "string"
-      ? getTripMeta(tripOrId).customLists
-      : uniqueStrings(tripOrId?.customLists || []);
+  if (typeof tripOrId === "string") {
+    return getTripMeta(tripOrId).lists;
+  }
 
-  return uniqueStrings([...DEFAULT_LIST_NAMES, ...customLists]).map((name) => ({
-    id: slugify(name),
-    name,
-    isDefault: DEFAULT_LIST_NAMES.some((candidate) => slugify(candidate) === slugify(name))
-  }));
+  return normalizeTripLists(tripOrId?.lists, tripOrId?.customLists);
 }
 
 export function hydrateTrip(trip) {
@@ -774,6 +855,7 @@ export function hydrateTrip(trip) {
     ...trip,
     destination: persistedDestination || meta.destination,
     invitees: meta.invitees,
+    lists: meta.lists,
     customLists: meta.customLists,
     budgetTotal: meta.budgetTotal,
     expenses: meta.expenses
@@ -816,6 +898,9 @@ export function removeIdeaMeta(tripId, ideaId) {
 }
 
 function inferEntryType(idea, meta) {
+  if (idea?.entryType === "place" || idea?.entryType === "activity") {
+    return idea.entryType;
+  }
   if (meta.entryType === "place" || meta.entryType === "activity") {
     return meta.entryType;
   }
@@ -826,24 +911,23 @@ function inferEntryType(idea, meta) {
   return "activity";
 }
 
-function defaultListName(entryType) {
-  return entryType === "place" ? "Places to Visit" : "Activities";
-}
-
 export function hydrateIdea(tripId, idea) {
   if (!idea?.id) return idea;
   const meta = getIdeaMeta(tripId, idea.id);
   const entryType = inferEntryType(idea, meta);
-  const listName = normalizeListName(meta.listName || idea.category || defaultListName(entryType));
+  const listName = normalizeListName(meta.listName || idea.category || "");
+  const listId = String(meta.listId || slugify(listName)).trim();
   const mapQuery = String(meta.mapQuery || (entryType === "place" ? idea.location || "" : "")).trim();
   const locationLabel = String(idea.location || (entryType === "activity" ? "Flexible activity" : "")).trim();
   const coordinates = normalizeCoordinates(meta.coordinates);
+  const parentIdeaId = String(meta.parentIdeaId || idea.parentIdeaId || "").trim();
 
   return {
     ...idea,
     listName,
-    listId: slugify(listName),
+    listId: listId || slugify(listName),
     entryType,
+    parentIdeaId: parentIdeaId || null,
     hasMapLocation: Boolean(mapQuery || coordinates),
     mapQuery,
     coordinates,
@@ -1000,6 +1084,7 @@ function getTimeLabel(item, slotIndex) {
 
 export function createItineraryDraft(trip, ideas) {
   const hydratedIdeas = hydrateIdeas(trip?.id, ideas || [])
+    .filter((idea) => idea.listId !== slugify("Destinations"))
     .filter((idea) => idea.voteScore >= 0)
     .sort((a, b) => {
       if (b.voteScore !== a.voteScore) return b.voteScore - a.voteScore;
@@ -1007,7 +1092,10 @@ export function createItineraryDraft(trip, ideas) {
       return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
     });
 
-  const items = hydratedIdeas.length > 0 ? hydratedIdeas : hydrateIdeas(trip?.id, ideas || []);
+  const items =
+    hydratedIdeas.length > 0
+      ? hydratedIdeas
+      : hydrateIdeas(trip?.id, ideas || []).filter((idea) => idea.listId !== slugify("Destinations"));
   const totalDays = Math.max(1, getTripDayCount(trip) || Math.min(Math.max(items.length, 1), 3));
 
   const days = Array.from({ length: totalDays }, (_, index) => ({

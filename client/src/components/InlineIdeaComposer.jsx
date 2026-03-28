@@ -1,90 +1,179 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.js";
-import { isPlaceLikeList, normalizeListName, slugify } from "../lib/tripPlanning.js";
+import {
+  buildFreeformIdeaPayload,
+  buildResolvedIdeaPayload,
+  DESTINATION_LIST_NAME
+} from "../lib/ideaComposer.js";
+import { normalizeListName, slugify } from "../lib/tripPlanning.js";
 
-function buildFreeformPayload(query, listName, destination) {
-  const normalizedListName = normalizeListName(listName);
-  const isPlaceLike = isPlaceLikeList(normalizedListName);
-
-  return {
-    title: query,
-    description: "",
-    location: isPlaceLike ? query : "",
-    category: normalizedListName,
-    entryType: isPlaceLike ? "place" : "activity",
-    mapQuery: isPlaceLike
-      ? [query, destination?.name || destination?.label].filter(Boolean).join(", ")
-      : "",
-    recommendationSource: null
-  };
+function ModeToggle({ active, title, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+        active
+          ? "bg-ocean text-white shadow-soft"
+          : "bg-white text-slate-600 hover:bg-mist"
+      }`}
+    >
+      {title}
+    </button>
+  );
 }
 
-function buildResolvedPayload(placeMatch, listName) {
-  const normalizedListName = normalizeListName(listName);
-  const isPlaceLike = isPlaceLikeList(normalizedListName);
+function buildListOptions(listOptions, defaultListName) {
+  const normalizedOptions = (Array.isArray(listOptions) ? listOptions : [])
+    .map((list) => ({
+      ...list,
+      id: String(list?.id || slugify(list?.name)).trim(),
+      name: normalizeListName(list?.name)
+    }))
+    .filter((list) => list.id && list.name);
 
-  return {
-    title: placeMatch.title,
-    description: "",
-    location: placeMatch.address || placeMatch.title,
-    category: normalizedListName,
-    entryType: isPlaceLike ? "place" : "activity",
-    mapQuery: placeMatch.mapQuery || placeMatch.address || placeMatch.title,
-    coordinates: placeMatch.coordinates || null,
-    photoUrl: placeMatch.photoUrl || "",
-    photoAttributions: placeMatch.photoAttributions || [],
-    recommendationSource: "Google Maps"
-  };
+  if (normalizedOptions.length) {
+    return normalizedOptions;
+  }
+
+  const fallbackListName = normalizeListName(defaultListName);
+  if (!fallbackListName) {
+    return [];
+  }
+
+  return [
+    {
+      id: slugify(fallbackListName),
+      name: fallbackListName,
+      isDefault: true
+    }
+  ];
 }
 
 export default function InlineIdeaComposer({
   destination,
-  listNames,
+  listOptions = [],
   defaultListName,
+  placeGroups = [],
+  preferredMode = "",
+  preferredPlaceGroupId = "",
   onAddIdea,
-  onAddList,
   disabled
 }) {
+  const [mode, setMode] = useState(preferredMode || "destination");
   const [query, setQuery] = useState("");
-  const [selectedListName, setSelectedListName] = useState(defaultListName || listNames[0] || "Activities");
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [newListName, setNewListName] = useState("");
+  const [selectedSuggestion, setSelectedSuggestion] = useState(null);
+  const [selectedListName, setSelectedListName] = useState(defaultListName || "");
+  const [selectedPlaceGroupId, setSelectedPlaceGroupId] = useState(preferredPlaceGroupId);
   const [suggestions, setSuggestions] = useState([]);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [searching, setSearching] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [searchError, setSearchError] = useState("");
-  const dropdownRef = useRef(null);
 
   const canSearchPlaces = api.canSearchPlaces();
-  const normalizedListNames = useMemo(() => listNames.map((listName) => normalizeListName(listName)), [listNames]);
+  const normalizedListOptions = useMemo(
+    () => buildListOptions(listOptions, defaultListName),
+    [defaultListName, listOptions]
+  );
+  const activityListOptions = useMemo(() => {
+    const filtered = normalizedListOptions.filter((list) => slugify(list.name) !== slugify(DESTINATION_LIST_NAME));
+    return filtered;
+  }, [normalizedListOptions]);
+  const activityListNames = useMemo(
+    () => activityListOptions.map((list) => list.name),
+    [activityListOptions]
+  );
+  const selectedList = useMemo(
+    () => (selectedListName ? activityListOptions.find((list) => list.name === selectedListName) || null : null),
+    [activityListOptions, selectedListName]
+  );
+  const normalizedPlaceGroups = useMemo(
+    () =>
+      (placeGroups || [])
+        .map((placeGroup) => ({
+          ...placeGroup,
+          title: String(placeGroup?.title || "").trim(),
+          locationLabel: String(placeGroup?.locationLabel || placeGroup?.location || "").trim()
+        }))
+        .filter((placeGroup) => placeGroup.id && placeGroup.title),
+    [placeGroups]
+  );
+  const selectedPlaceGroup = useMemo(
+    () => normalizedPlaceGroups.find((placeGroup) => placeGroup.id === selectedPlaceGroupId) || null,
+    [normalizedPlaceGroups, selectedPlaceGroupId]
+  );
+  const searchContextDestination = useMemo(() => {
+    if (mode === "destination") return null;
+    if (selectedPlaceGroup) {
+      return {
+        name: selectedPlaceGroup.title,
+        label: selectedPlaceGroup.locationLabel || selectedPlaceGroup.title
+      };
+    }
+    return destination;
+  }, [destination, mode, selectedPlaceGroup]);
+  const shouldShowSuggestions = Boolean(searching || suggestions.length || searchError);
+  const formGridClassName =
+    mode === "activity"
+      ? "mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.7fr),minmax(180px,0.9fr),minmax(180px,0.95fr),auto]"
+      : "mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr),auto]";
 
   useEffect(() => {
-    if (!defaultListName) return;
-    setSelectedListName(defaultListName);
+    if (preferredMode) {
+      setMode(preferredMode);
+    }
+  }, [preferredMode]);
+
+  useEffect(() => {
+    const normalizedDefaultListName = normalizeListName(defaultListName);
+    if (normalizedDefaultListName && slugify(normalizedDefaultListName) !== slugify(DESTINATION_LIST_NAME)) {
+      setSelectedListName(normalizedDefaultListName);
+    }
   }, [defaultListName]);
 
   useEffect(() => {
-    if (!normalizedListNames.length) return;
-    if (normalizedListNames.includes(selectedListName)) return;
-    setSelectedListName(normalizedListNames[0]);
-  }, [normalizedListNames, selectedListName]);
+    if (selectedListName && !activityListNames.includes(selectedListName)) {
+      setSelectedListName("");
+    }
+  }, [activityListNames, selectedListName]);
 
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (!dropdownRef.current?.contains(event.target)) {
-        setDropdownOpen(false);
-      }
-    };
+    if (preferredPlaceGroupId && normalizedPlaceGroups.some((placeGroup) => placeGroup.id === preferredPlaceGroupId)) {
+      setMode("activity");
+      setSelectedPlaceGroupId(preferredPlaceGroupId);
+    }
+  }, [normalizedPlaceGroups, preferredPlaceGroupId]);
 
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  useEffect(() => {
+    if (mode === "destination") {
+      setSelectedPlaceGroupId("");
+      return;
+    }
+
+    if (selectedPlaceGroupId && !normalizedPlaceGroups.some((placeGroup) => placeGroup.id === selectedPlaceGroupId)) {
+      setSelectedPlaceGroupId("");
+    }
+  }, [mode, normalizedPlaceGroups, selectedPlaceGroupId]);
+
+  useEffect(() => {
+    if (!selectedSuggestion) return;
+    if (query.trim() !== selectedSuggestion.title.trim()) {
+      setSelectedSuggestion(null);
+    }
+  }, [query, selectedSuggestion]);
 
   useEffect(() => {
     const trimmedQuery = query.trim();
     setSearchError("");
+
     if (!canSearchPlaces || trimmedQuery.length < 2) {
+      setSuggestions([]);
+      setHighlightedIndex(-1);
+      return;
+    }
+
+    if (selectedSuggestion && trimmedQuery === selectedSuggestion.title.trim()) {
       setSuggestions([]);
       setHighlightedIndex(-1);
       return;
@@ -94,15 +183,17 @@ export default function InlineIdeaComposer({
     const timer = window.setTimeout(async () => {
       setSearching(true);
       try {
-        const results = await api.searchPlaces(trimmedQuery, destination);
-        if (cancelled) return;
-        setSuggestions(results);
-        setHighlightedIndex(results.length ? 0 : -1);
+        const results = await api.searchPlaces(trimmedQuery, searchContextDestination);
+        if (!cancelled) {
+          setSuggestions(results);
+          setHighlightedIndex(results.length ? 0 : -1);
+        }
       } catch (error) {
-        if (cancelled) return;
-        setSuggestions([]);
-        setHighlightedIndex(-1);
-        setSearchError("Google Maps did not return a match, so you can add your text directly.");
+        if (!cancelled) {
+          setSuggestions([]);
+          setHighlightedIndex(-1);
+          setSearchError("Google Maps did not return a match. You can still add what you typed.");
+        }
       } finally {
         if (!cancelled) {
           setSearching(false);
@@ -114,22 +205,44 @@ export default function InlineIdeaComposer({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [canSearchPlaces, destination, query]);
+  }, [canSearchPlaces, query, searchContextDestination, selectedSuggestion]);
+
+  const handleSelectSuggestion = (suggestion) => {
+    setSelectedSuggestion(suggestion);
+    setQuery(suggestion.title);
+    setSuggestions([]);
+    setHighlightedIndex(-1);
+    setSearchError("");
+  };
 
   const handleCommit = async (placeMatch) => {
     const trimmedQuery = query.trim();
     if (!trimmedQuery || submitting || disabled) return;
 
+    const submissionContext = {
+      mode,
+      listId: selectedList?.id,
+      listName: selectedListName,
+      destination,
+      placeGroup: selectedPlaceGroup
+    };
+
     setSubmitting(true);
     try {
       const payload = placeMatch
-        ? buildResolvedPayload(placeMatch, selectedListName)
-        : buildFreeformPayload(trimmedQuery, selectedListName, destination);
-      await onAddIdea(payload);
+        ? buildResolvedIdeaPayload(placeMatch, submissionContext)
+        : buildFreeformIdeaPayload(trimmedQuery, submissionContext);
+      const createdIdea = await onAddIdea(payload);
       setQuery("");
+      setSelectedSuggestion(null);
       setSuggestions([]);
       setHighlightedIndex(-1);
       setSearchError("");
+
+      if (mode === "destination" && createdIdea?.id) {
+        setMode("activity");
+        setSelectedPlaceGroupId(createdIdea.id);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -137,175 +250,140 @@ export default function InlineIdeaComposer({
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    const selectedSuggestion =
-      highlightedIndex >= 0 && highlightedIndex < suggestions.length ? suggestions[highlightedIndex] : suggestions[0];
-    await handleCommit(selectedSuggestion || null);
+    await handleCommit(selectedSuggestion);
   };
 
-  const handleKeyDown = async (event) => {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      if (!suggestions.length) return;
-      setHighlightedIndex((current) => (current + 1) % suggestions.length);
-      return;
-    }
-
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      if (!suggestions.length) return;
-      setHighlightedIndex((current) => (current <= 0 ? suggestions.length - 1 : current - 1));
-      return;
-    }
-
-    if (event.key === "Enter") {
-      await handleSubmit(event);
-      return;
-    }
-
-    if (event.key === "Escape") {
-      setSuggestions([]);
-      setHighlightedIndex(-1);
-    }
-  };
-
-  const handleCreateList = () => {
-    const normalized = normalizeListName(newListName);
-    if (!normalized) return;
-    const createdList = onAddList(normalized) || normalized;
-    setSelectedListName(createdList);
-    setDropdownOpen(false);
-    setNewListName("");
-  };
+  const modeLabel = mode === "destination" ? "Destination group" : "Plan item";
+  const placeholder =
+    mode === "destination"
+      ? "Search a country, city, or region"
+      : "Search a place or type a custom activity";
 
   return (
-    <div className="relative min-w-0 rounded-[28px] border border-slate-200 bg-white/95 p-5 shadow-card">
-      <h3 className="text-lg font-semibold text-ink">Add a place, activity, or brand-new list</h3>
-      <form onSubmit={handleSubmit} className="mt-4 min-w-0">
-        <div className="flex min-w-0 flex-col gap-3 xl:flex-row">
-          <div className="relative min-w-0 flex-1">
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Search for a place or type a custom item"
-              disabled={disabled || submitting}
-              className="w-full rounded-2xl border border-slate-200 px-5 py-4 text-sm text-ink outline-none transition focus:border-ocean focus:ring-2 focus:ring-ocean/10 disabled:opacity-60"
-            />
+    <div className="relative min-w-0 rounded-[28px] border border-slate-200 bg-[#FBFCFF] p-4 shadow-soft">
+      <div className="flex flex-wrap items-center gap-2">
+        <ModeToggle active={mode === "destination"} title="Destination group" onClick={() => setMode("destination")} />
+        <ModeToggle active={mode === "activity"} title="Activity or place" onClick={() => setMode("activity")} />
+      </div>
 
-            {(searching || suggestions.length > 0 || searchError || query.trim()) && (
-              <div className="absolute left-0 right-0 top-[calc(100%+10px)] z-20 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card">
-                {searching ? (
-                  <div className="px-4 py-3 text-sm text-slate-500">Searching Google Maps...</div>
-                ) : suggestions.length ? (
-                  <div className="max-h-72 overflow-y-auto">
-                    {suggestions.map((suggestion, index) => (
-                      <button
-                        key={suggestion.id}
-                        type="button"
-                        onClick={() => handleCommit(suggestion)}
-                        className={`flex w-full items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 ${
-                          highlightedIndex === index ? "bg-[#F8FAFF]" : "bg-white"
-                        }`}
-                      >
-                        <div>
-                          <p className="text-sm font-semibold text-ink">{suggestion.title}</p>
-                          <p className="mt-1 text-xs text-slate-500">{suggestion.address}</p>
-                        </div>
-                        <span className="rounded-full bg-[#EEF2FF] px-3 py-1 text-[11px] font-semibold text-ocean">
-                          Google match
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="px-4 py-3 text-sm text-slate-500">
-                    {searchError ||
-                      (canSearchPlaces
-                        ? "No Google Maps match found. Press Enter to add exactly what you typed."
-                        : "Add your text directly, or set VITE_GOOGLE_MAPS_API_KEY to enable Google Maps matching.")}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+      <form onSubmit={handleSubmit} className={formGridClassName}>
+        <div className="relative min-w-0">
+          <label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{modeLabel}</label>
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={async (event) => {
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                if (suggestions.length) {
+                  setHighlightedIndex((current) => (current + 1) % suggestions.length);
+                }
+                return;
+              }
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                if (suggestions.length) {
+                  setHighlightedIndex((current) => (current <= 0 ? suggestions.length - 1 : current - 1));
+                }
+                return;
+              }
+              if (event.key === "Enter" && suggestions.length && highlightedIndex >= 0 && !selectedSuggestion) {
+                event.preventDefault();
+                handleSelectSuggestion(suggestions[highlightedIndex]);
+                return;
+              }
+              if (event.key === "Escape") {
+                setSuggestions([]);
+                setHighlightedIndex(-1);
+              }
+            }}
+            placeholder={placeholder}
+            disabled={disabled || submitting}
+            className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-ocean focus:ring-2 focus:ring-ocean/10 disabled:opacity-60"
+          />
 
-          <div className="flex min-w-0 flex-col gap-3 sm:flex-row xl:shrink-0">
-            <div ref={dropdownRef} className="relative min-w-0 w-full xl:w-[280px]">
-              <button
-                type="button"
-                onClick={() => setDropdownOpen((current) => !current)}
-                className="inline-flex w-full min-w-0 items-center justify-between rounded-2xl border border-slate-200 px-4 py-4 text-sm font-semibold text-ink"
-              >
-                <span className="truncate">{selectedListName}</span>
-                <span className="text-slate-400">v</span>
-              </button>
-
-              {dropdownOpen ? (
-                <div className="absolute left-0 top-[calc(100%+10px)] z-30 max-h-[min(24rem,calc(100vh-16rem))] w-full max-w-full overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
-                  <div className="max-h-52 overflow-y-auto">
-                    <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                      Save to list
-                    </p>
-                    <div className="grid gap-1">
-                      {normalizedListNames.map((listName) => (
-                        <button
-                          key={slugify(listName)}
-                          type="button"
-                          onClick={() => {
-                            setSelectedListName(listName);
-                            setDropdownOpen(false);
-                          }}
-                          className={`rounded-xl px-3 py-2 text-left text-sm font-semibold ${
-                            selectedListName === listName ? "bg-[#EEF2FF] text-ocean" : "text-ink hover:bg-mist"
-                          }`}
-                        >
-                          {listName}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="mt-3 border-t border-slate-100 pt-3">
-                    <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                      Add new list
-                    </p>
-                    <div className="flex gap-2">
-                      <input
-                        value={newListName}
-                        onChange={(event) => setNewListName(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            handleCreateList();
-                          }
-                        }}
-                        placeholder="Ex: Nightlife"
-                        className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-ocean"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleCreateList}
-                        className="rounded-xl bg-ocean px-3 py-2 text-xs font-semibold text-white"
-                      >
-                        Add
-                      </button>
-                    </div>
-                  </div>
+          {shouldShowSuggestions ? (
+            <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card">
+              {searching ? <div className="px-4 py-3 text-sm text-slate-500">Searching Google Maps...</div> : null}
+              {!searching && suggestions.length ? (
+                <div className="max-h-72 overflow-y-auto">
+                  {suggestions.map((suggestion, index) => (
+                    <button
+                      key={suggestion.id}
+                      type="button"
+                      onClick={() => handleSelectSuggestion(suggestion)}
+                      className={`flex w-full items-start gap-3 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 ${
+                        highlightedIndex === index ? "bg-[#F8FAFF]" : "bg-white"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-ink">{suggestion.title}</p>
+                        <p className="mt-1 truncate text-xs text-slate-500">{suggestion.address}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {!searching && !suggestions.length ? (
+                <div className="px-4 py-3 text-sm text-slate-500">
+                  {searchError ||
+                    (canSearchPlaces
+                      ? "No Google Maps match found. Add your text directly if it still works for the group."
+                      : "Add your text directly, or set VITE_GOOGLE_MAPS_API_KEY to enable Google Maps matching.")}
                 </div>
               ) : null}
             </div>
+          ) : null}
+        </div>
 
-            <button
-              type="submit"
-              disabled={disabled || submitting || !query.trim()}
-              className="w-full rounded-2xl bg-ocean px-5 py-4 text-sm font-semibold text-white disabled:opacity-60 sm:w-auto"
-            >
-              {submitting ? "Adding..." : "Add"}
-            </button>
-          </div>
+        {mode === "activity" ? (
+          <>
+            <div className="min-w-0">
+              <label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">List (optional)</label>
+              <select
+                value={selectedListName}
+                onChange={(event) => setSelectedListName(event.target.value)}
+                disabled={disabled || submitting}
+                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-ink outline-none transition focus:border-ocean focus:ring-2 focus:ring-ocean/10 disabled:opacity-60"
+              >
+                <option value="">No list</option>
+                {activityListOptions.map((list) => (
+                  <option key={list.id} value={list.name}>
+                    {list.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="min-w-0">
+              <label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Destination</label>
+              <select
+                value={selectedPlaceGroupId}
+                onChange={(event) => setSelectedPlaceGroupId(event.target.value)}
+                disabled={disabled || submitting}
+                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-ink outline-none transition focus:border-ocean focus:ring-2 focus:ring-ocean/10 disabled:opacity-60"
+              >
+                <option value="">Uncategorized</option>
+                {normalizedPlaceGroups.map((placeGroup) => (
+                  <option key={placeGroup.id} value={placeGroup.id}>
+                    {placeGroup.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        ) : null}
+
+        <div className="flex items-end">
+          <button
+            type="submit"
+            disabled={disabled || submitting || !query.trim()}
+            className="w-full rounded-2xl bg-ocean px-5 py-3 text-sm font-semibold text-white disabled:opacity-60 lg:w-auto"
+          >
+            {submitting ? "Saving..." : mode === "destination" ? "Add group" : "Add item"}
+          </button>
         </div>
       </form>
-
     </div>
   );
 }

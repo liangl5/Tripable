@@ -439,9 +439,11 @@ export default function TripMapPanel({
                   <p className="text-sm font-semibold text-ink">{idea.title}</p>
                   <p className="mt-1 text-xs text-slate-500">{idea.locationLabel}</p>
                 </div>
-                <span className="rounded-full bg-mist px-3 py-1 text-[11px] font-semibold text-slate-500">
-                  {idea.listName}
-                </span>
+                {idea.listName ? (
+                  <span className="rounded-full bg-mist px-3 py-1 text-[11px] font-semibold text-slate-500">
+                    {idea.listName}
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>

@@ -3,9 +3,11 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import AvailabilityCalendar from "../components/AvailabilityCalendar.jsx";
 import BudgetPanel from "../components/BudgetPanel.jsx";
 import IdeaCard from "../components/IdeaCard.jsx";
+import IdeaEditorModal from "../components/IdeaEditorModal.jsx";
 import InlineIdeaComposer from "../components/InlineIdeaComposer.jsx";
 import TripableLogoLink from "../components/TripableLogoLink.jsx";
 import TripMapPanel from "../components/TripMapPanel.jsx";
+import VoteButtons from "../components/VoteButtons.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
 import { api } from "../lib/api.js";
@@ -13,60 +15,21 @@ import {
   addCustomList,
   getRecommendations as getFallbackRecommendations,
   getTripLists,
-  isPlaceLikeList,
   normalizeListName,
   renameCustomList,
   removeCustomList,
   saveIdeaMeta,
   slugify
 } from "../lib/tripPlanning.js";
-import { formatDateRange } from "../lib/timeFormat.js";
+import { formatDateRange, formatRelativeTime } from "../lib/timeFormat.js";
 
 const DEFAULT_RECOMMENDATION_SEARCH = "Places to Visit";
 const RECOMMENDATION_PAGE_SIZE = 8;
 const INITIAL_RECOMMENDATION_FETCH_COUNT = RECOMMENDATION_PAGE_SIZE * 2;
-const TRIP_LIST_SELECTION_STORAGE_PREFIX = "tripable.trip-dashboard.selected-lists";
+const DESTINATION_LIST_ID = "destinations";
 
 function getRecommendationKey(recommendation) {
   return String(recommendation?.id || recommendation?.title || "").trim();
-}
-
-function getTripListSelectionStorageKey(tripId) {
-  return tripId ? `${TRIP_LIST_SELECTION_STORAGE_PREFIX}.${tripId}` : "";
-}
-
-function readStoredListSelection(tripId) {
-  if (typeof window === "undefined" || !tripId) {
-    return undefined;
-  }
-
-  try {
-    const raw = window.sessionStorage.getItem(getTripListSelectionStorageKey(tripId));
-    if (raw === null) {
-      return undefined;
-    }
-
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map((value) => String(value || "").trim()).filter(Boolean) : [];
-  } catch (error) {
-    console.error("Unable to read saved trip list selection", error);
-    return undefined;
-  }
-}
-
-function writeStoredListSelection(tripId, selectedListIds) {
-  if (typeof window === "undefined" || !tripId) {
-    return;
-  }
-
-  try {
-    window.sessionStorage.setItem(
-      getTripListSelectionStorageKey(tripId),
-      JSON.stringify(Array.isArray(selectedListIds) ? selectedListIds : [])
-    );
-  } catch (error) {
-    console.error("Unable to save trip list selection", error);
-  }
 }
 
 export default function TripDashboardPage() {
@@ -78,6 +41,7 @@ export default function TripDashboardPage() {
   const loadTrip = useTripStore((state) => state.loadTrip);
   const loadIdeas = useTripStore((state) => state.loadIdeas);
   const addIdea = useTripStore((state) => state.addIdea);
+  const updateIdea = useTripStore((state) => state.updateIdea);
   const voteIdea = useTripStore((state) => state.voteIdea);
   const deleteIdea = useTripStore((state) => state.deleteIdea);
   const deleteTrip = useTripStore((state) => state.deleteTrip);
@@ -94,8 +58,11 @@ export default function TripDashboardPage() {
   const [availabilitySaved, setAvailabilitySaved] = useState(false);
   const [surveyDatesSaved, setSurveyDatesSaved] = useState(false);
   const [ideaToDelete, setIdeaToDelete] = useState(null);
+  const [ideaToEdit, setIdeaToEdit] = useState(null);
   const [listActionLoadingId, setListActionLoadingId] = useState("");
-  const [listContextMenu, setListContextMenu] = useState(null);
+  const [listManagerOpen, setListManagerOpen] = useState(false);
+  const [newListName, setNewListName] = useState("");
+  const [newListError, setNewListError] = useState("");
   const [listToDelete, setListToDelete] = useState(null);
   const [listToRename, setListToRename] = useState(null);
   const [renameListName, setRenameListName] = useState("");
@@ -112,9 +79,12 @@ export default function TripDashboardPage() {
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
   const [recommendationsLoadingMore, setRecommendationsLoadingMore] = useState(false);
   const [recommendationsNotice, setRecommendationsNotice] = useState("");
+  const [collapsedDestinationIdeaIds, setCollapsedDestinationIdeaIds] = useState({});
+  const [composerPreferredMode, setComposerPreferredMode] = useState("destination");
+  const [composerPreferredPlaceGroupId, setComposerPreferredPlaceGroupId] = useState("");
+  const composerRef = useRef(null);
   const recommendationScrollerRef = useRef(null);
   const previousRecommendationQueryRef = useRef("");
-  const hasInitializedListSelectionRef = useRef(false);
 
   useEffect(() => {
     if (!session) {
@@ -157,8 +127,18 @@ export default function TripDashboardPage() {
   }, [currentTrip]);
 
   useEffect(() => {
-    hasInitializedListSelectionRef.current = false;
     setSelectedListIds([]);
+    setCollapsedDestinationIdeaIds({});
+    setComposerPreferredMode("destination");
+    setComposerPreferredPlaceGroupId("");
+    setIdeaToEdit(null);
+    setListManagerOpen(false);
+    setNewListName("");
+    setNewListError("");
+    setListToDelete(null);
+    setListToRename(null);
+    setRenameListName("");
+    setRenameListError("");
   }, [tripId]);
 
   const inviteLink = useMemo(() => {
@@ -178,17 +158,7 @@ export default function TripDashboardPage() {
     if (!lists.length) return;
     setSelectedListIds((current) => {
       const validSelections = current.filter((listId) => lists.some((list) => list.id === listId));
-      if (!hasInitializedListSelectionRef.current) {
-        const storedSelection = readStoredListSelection(tripId);
-        const validStoredSelection =
-          storedSelection?.filter((listId) => lists.some((list) => list.id === listId)) || [];
-
-        hasInitializedListSelectionRef.current = true;
-
-        if (storedSelection !== undefined) {
-          return validStoredSelection;
-        }
-
+      if (!current.length) {
         return lists.map((list) => list.id);
       }
       if (
@@ -202,12 +172,7 @@ export default function TripDashboardPage() {
       }
       return validSelections;
     });
-  }, [lists, tripId]);
-
-  useEffect(() => {
-    if (!tripId || !hasInitializedListSelectionRef.current) return;
-    writeStoredListSelection(tripId, selectedListIds);
-  }, [selectedListIds, tripId]);
+  }, [lists]);
 
   useEffect(() => {
     if (!selectedListIds.length) {
@@ -311,17 +276,68 @@ export default function TripDashboardPage() {
 
   const visibleIdeas = useMemo(() => {
     return [...ideas]
-      .filter((idea) => selectedListIdSet.has(idea.listId))
+      .filter((idea) => !idea.listId || idea.listId === DESTINATION_LIST_ID || selectedListIdSet.has(idea.listId))
       .sort((a, b) => {
       if (b.voteScore !== a.voteScore) return b.voteScore - a.voteScore;
       return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
       });
   }, [ideas, selectedListIdSet]);
 
+  const destinationIdeas = useMemo(
+    () =>
+      [...ideas]
+        .filter((idea) => idea.listId === DESTINATION_LIST_ID && idea.entryType === "place" && !idea.parentIdeaId)
+        .sort((a, b) => {
+          if (b.voteScore !== a.voteScore) return b.voteScore - a.voteScore;
+          return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+        }),
+    [ideas]
+  );
+  const destinationIdeasById = useMemo(
+    () => new Map(destinationIdeas.map((idea) => [idea.id, idea])),
+    [destinationIdeas]
+  );
+  const visibleDestinationGroups = useMemo(() => {
+    const childrenByParentId = new Map();
+
+    visibleIdeas.forEach((idea) => {
+      if (!idea.parentIdeaId) return;
+      const currentChildren = childrenByParentId.get(idea.parentIdeaId) || [];
+      childrenByParentId.set(idea.parentIdeaId, [...currentChildren, idea]);
+    });
+
+    return visibleIdeas
+      .filter((idea) => idea.listId === DESTINATION_LIST_ID && idea.entryType === "place" && !idea.parentIdeaId)
+      .map((idea) => ({
+        idea,
+        children: childrenByParentId.get(idea.id) || []
+      }));
+  }, [visibleIdeas]);
+  const visibleDestinationIdeaIdSet = useMemo(
+    () => new Set(visibleDestinationGroups.map((group) => group.idea.id)),
+    [visibleDestinationGroups]
+  );
+  const visibleUngroupedIdeas = useMemo(
+    () =>
+      visibleIdeas.filter((idea) => {
+        if (visibleDestinationIdeaIdSet.has(idea.id)) {
+          return false;
+        }
+        if (idea.parentIdeaId && visibleDestinationIdeaIdSet.has(idea.parentIdeaId)) {
+          return false;
+        }
+        return true;
+      }),
+    [visibleDestinationIdeaIdSet, visibleIdeas]
+  );
+
   const mappedIdeas = useMemo(
     () =>
       [...ideas]
-        .filter((idea) => idea.hasMapLocation && selectedListIdSet.has(idea.listId))
+        .filter(
+          (idea) =>
+            idea.hasMapLocation && (!idea.listId || idea.listId === DESTINATION_LIST_ID || selectedListIdSet.has(idea.listId))
+        )
         .sort((a, b) => {
           if (b.voteScore !== a.voteScore) return b.voteScore - a.voteScore;
           return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
@@ -346,8 +362,15 @@ export default function TripDashboardPage() {
     () => lists.filter((list) => selectedListIdSet.has(list.id)),
     [lists, selectedListIdSet]
   );
+  const hasDestinationListSelected = selectedListIdSet.has(DESTINATION_LIST_ID);
+  const defaultComposerListName = useMemo(() => {
+    return "";
+  }, []);
   const effectiveMapQuery = selectedListIds.length ? activeMapQuery : "";
   const emptyIdeasTitle = useMemo(() => {
+    if (!lists.length) {
+      return "Nothing on the board yet";
+    }
     if (!selectedLists.length) {
       return "No lists selected";
     }
@@ -357,11 +380,17 @@ export default function TripDashboardPage() {
     return "Nothing in the selected lists yet";
   }, [selectedLists]);
   const emptyIdeasDescription = useMemo(() => {
+    if (!lists.length) {
+      return "Add ideas directly, or create a list only when you want to categorize them.";
+    }
     if (!selectedLists.length) {
       return "Choose at least one list above to see its ideas on the board.";
     }
+    if (hasDestinationListSelected) {
+      return "Add destination options like Tokyo, France, or Florida, then group activities and food ideas underneath them.";
+    }
     return "Add a plan item or start from the recommended suggestions below.";
-  }, [selectedLists]);
+  }, [hasDestinationListSelected, selectedLists]);
 
   const tripTitle = useMemo(() => {
     if (!activeTrip?.name) return "Loading...";
@@ -391,9 +420,16 @@ export default function TripDashboardPage() {
   const handleAddIdea = async (formData) => {
     if (!tripId) return;
     const createdIdea = await addIdea(tripId, formData);
-    const nextListId = slugify(formData.category);
+    const nextListId = String(formData.listId || slugify(formData.category)).trim();
     if (nextListId) {
       setSelectedListIds((current) => (current.includes(nextListId) ? current : [...current, nextListId]));
+    }
+    if (nextListId === DESTINATION_LIST_ID && createdIdea?.id) {
+      setComposerPreferredMode("activity");
+      setComposerPreferredPlaceGroupId(createdIdea.id);
+    } else if (formData.parentIdeaId) {
+      setComposerPreferredMode("activity");
+      setComposerPreferredPlaceGroupId(formData.parentIdeaId);
     }
     return createdIdea;
   };
@@ -403,6 +439,7 @@ export default function TripDashboardPage() {
     const targetListName =
       normalizeListName(explicitTargetListName) || normalizeListName(getRecommendationTargetListName(recommendation));
     if (!targetListName) return false;
+    const targetList = lists.find((list) => list.name === targetListName) || null;
 
     try {
       await addIdea(tripId, {
@@ -410,6 +447,7 @@ export default function TripDashboardPage() {
         description: recommendation.description,
         location: recommendation.location,
         category: targetListName,
+        listId: targetList?.id || slugify(targetListName),
         entryType: recommendation.entryType,
         mapQuery: recommendation.mapQuery,
         coordinates: recommendation.coordinates || null,
@@ -450,6 +488,10 @@ export default function TripDashboardPage() {
   const handleDeleteIdea = async () => {
     if (!tripId || !ideaToDelete) return;
     try {
+      const nestedIdeas = ideas.filter((idea) => idea.parentIdeaId === ideaToDelete.id);
+      for (const nestedIdea of nestedIdeas) {
+        await deleteIdea(nestedIdea.id, tripId);
+      }
       await deleteIdea(ideaToDelete.id, tripId);
       setIdeaToDelete(null);
     } catch (deleteError) {
@@ -494,36 +536,74 @@ export default function TripDashboardPage() {
     return normalized;
   };
 
-  const handleListContextMenu = (event, list) => {
-    if (!list || list.isDefault) return;
-    event.preventDefault();
-    setListContextMenu({
-      list,
-      x: Math.min(event.clientX, window.innerWidth - 180),
-      y: Math.min(event.clientY, window.innerHeight - 120)
-    });
+  const handleRequestDeleteList = (list) => {
+    if (!list) return;
+    setListToRename(null);
+    setRenameListName("");
+    setRenameListError("");
+    setListToDelete(list);
+  };
+
+  const handleCreateList = () => {
+    const normalized = normalizeListName(newListName);
+    if (!normalized) {
+      setNewListError("Enter a list name.");
+      return;
+    }
+
+    if (lists.some((list) => slugify(list.name) === slugify(normalized))) {
+      setNewListError("That list already exists.");
+      return;
+    }
+
+    handleAddList(normalized);
+    setNewListName("");
+    setNewListError("");
+  };
+
+  const handleCloseListManager = () => {
+    setListManagerOpen(false);
+    setNewListName("");
+    setNewListError("");
+    setListToDelete(null);
+    setListToRename(null);
+    setRenameListName("");
+    setRenameListError("");
   };
 
   const handleDeleteList = async (list) => {
-    if (!tripId || !list || list.isDefault || listActionLoadingId) return;
+    if (!tripId || !list || listActionLoadingId) return;
 
     const ideasInList = ideas.filter((idea) => idea.listId === list.id);
+    const deletedParentIdeaIds = new Set(ideasInList.filter((idea) => !idea.parentIdeaId).map((idea) => idea.id));
     setListActionLoadingId(list.id);
 
     try {
-      for (const idea of ideasInList) {
-        await deleteIdea(idea.id, tripId);
-      }
+      const nextMeta = removeCustomList(tripId, list.id);
 
-      const nextMeta = removeCustomList(tripId, list.name);
+      ideasInList.forEach((idea) => {
+        saveIdeaMeta(tripId, idea.id, {
+          listId: "",
+          listName: "",
+          parentIdeaId: deletedParentIdeaIds.has(idea.parentIdeaId) ? null : idea.parentIdeaId
+        });
+      });
+
+      ideas
+        .filter((idea) => deletedParentIdeaIds.has(idea.parentIdeaId) && idea.listId !== list.id)
+        .forEach((idea) => {
+          saveIdeaMeta(tripId, idea.id, { parentIdeaId: null });
+        });
+
       setTripView((prev) => (prev ? { ...prev, ...nextMeta } : prev));
       setSelectedListIds((current) => current.filter((listId) => listId !== list.id));
       setRecommendationTargetByKey((current) =>
-        Object.fromEntries(Object.entries(current).filter(([, listName]) => slugify(listName) !== list.id))
+        Object.fromEntries(Object.entries(current).filter(([, listName]) => slugify(listName) !== slugify(list.name)))
       );
-      if (recommendationToAdd && slugify(getRecommendationTargetListName(recommendationToAdd)) === list.id) {
+      if (recommendationToAdd && slugify(getRecommendationTargetListName(recommendationToAdd)) === slugify(list.name)) {
         setRecommendationToAdd(null);
       }
+      await loadIdeas(tripId);
       setListToDelete(null);
     } catch (deleteListError) {
       console.error("Unable to delete list", deleteListError);
@@ -533,7 +613,7 @@ export default function TripDashboardPage() {
   };
 
   const handleOpenRenameListModal = (list) => {
-    setListContextMenu(null);
+    setListToDelete(null);
     setRenameListError("");
     setRenameListName(list.name);
     setListToRename(list);
@@ -548,14 +628,15 @@ export default function TripDashboardPage() {
       return;
     }
 
-    const nextListSlug = slugify(normalizedNextName);
-    const currentListSlug = listToRename.id;
-    if (nextListSlug !== currentListSlug && lists.some((list) => list.id === nextListSlug)) {
+    const hasNameConflict = lists.some(
+      (list) => list.id !== listToRename.id && slugify(list.name) === slugify(normalizedNextName)
+    );
+    if (hasNameConflict) {
       setRenameListError("That list name already exists.");
       return;
     }
 
-    if (nextListSlug === currentListSlug) {
+    if (slugify(normalizedNextName) === slugify(listToRename.name)) {
       setListToRename(null);
       setRenameListName("");
       setRenameListError("");
@@ -565,23 +646,19 @@ export default function TripDashboardPage() {
     setListActionLoadingId(listToRename.id);
 
     try {
-      const nextMeta = renameCustomList(tripId, listToRename.name, normalizedNextName);
+      const nextMeta = renameCustomList(tripId, listToRename.id, normalizedNextName);
       const ideasInList = ideas.filter((idea) => idea.listId === listToRename.id);
 
       ideasInList.forEach((idea) => {
-        saveIdeaMeta(tripId, idea.id, { listName: normalizedNextName });
+        saveIdeaMeta(tripId, idea.id, { listId: listToRename.id, listName: normalizedNextName });
       });
 
       setTripView((prev) => (prev ? { ...prev, ...nextMeta } : prev));
-      setSelectedListIds((current) => {
-        const nextSelections = current.map((listId) => (listId === listToRename.id ? nextListSlug : listId));
-        return Array.from(new Set(nextSelections));
-      });
       setRecommendationTargetByKey((current) =>
         Object.fromEntries(
           Object.entries(current).map(([recommendationKey, listName]) => [
             recommendationKey,
-            slugify(listName) === listToRename.id ? normalizedNextName : listName
+            slugify(listName) === slugify(listToRename.name) ? normalizedNextName : listName
           ])
         )
       );
@@ -617,6 +694,39 @@ export default function TripDashboardPage() {
       }
       return lists.map((list) => list.id);
     });
+  };
+
+  const handleToggleDestinationGroup = (ideaId) => {
+    if (!ideaId) return;
+    setCollapsedDestinationIdeaIds((current) => ({
+      ...current,
+      [ideaId]: !current[ideaId]
+    }));
+  };
+
+  const handleAddItemToDestinationGroup = (ideaId) => {
+    if (!ideaId) return;
+    setComposerPreferredMode("activity");
+    setComposerPreferredPlaceGroupId(ideaId);
+    composerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
+
+  const handleUpdateIdea = async (payload) => {
+    if (!tripId || !ideaToEdit) return;
+
+    await updateIdea(ideaToEdit.id, tripId, payload);
+
+    const nextListId = slugify(payload.category);
+    if (nextListId) {
+      setSelectedListIds((current) => (current.includes(nextListId) ? current : [...current, nextListId]));
+    }
+    if (payload.parentIdeaId) {
+      setCollapsedDestinationIdeaIds((current) => ({
+        ...current,
+        [payload.parentIdeaId]: false
+      }));
+    }
+    setIdeaToEdit(null);
   };
 
   const handleRecommendationSearch = (event) => {
@@ -767,69 +877,77 @@ export default function TripDashboardPage() {
               </div>
             </section>
 
-          <section className="mt-10 grid min-w-0 gap-6">
-            <section className="min-w-0 overflow-visible rounded-[32px] bg-white/95 p-6 shadow-card">
-              <div className="flex flex-wrap items-start justify-between gap-4">
+          <section className="mt-8 grid min-w-0 gap-5">
+            <section className="min-w-0 overflow-visible rounded-[32px] bg-white/95 p-5 shadow-card">
+              <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-semibold text-ink">Things to Do</h2>
                 </div>
               </div>
 
-            <div className="relative z-20 mt-6 min-w-0">
+            <div ref={composerRef} className="relative z-20 mt-4 min-w-0">
               <InlineIdeaComposer
                 destination={activeTrip?.destination}
-                listNames={lists.map((list) => list.name)}
-                defaultListName={lists[0]?.name}
+                listOptions={lists}
+                defaultListName={defaultComposerListName}
+                placeGroups={destinationIdeas}
+                preferredMode={composerPreferredMode}
+                preferredPlaceGroupId={composerPreferredPlaceGroupId}
                 onAddIdea={handleAddIdea}
-                onAddList={handleAddList}
                 disabled={!activeTrip}
               />
             </div>
 
-            <div className="mt-6 flex flex-wrap items-start justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                {lists.map((list) => {
-                  const isSelected = selectedListIdSet.has(list.id);
-                  return (
-                    <div
-                      key={list.id}
-                      onContextMenu={(event) => handleListContextMenu(event, list)}
-                      className={`flex items-center gap-1 rounded-full transition ${
-                        isSelected
-                          ? "bg-ocean text-white shadow-soft"
-                          : "bg-mist text-slate-600 hover:bg-[#E9EEF8]"
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        aria-pressed={isSelected}
-                        onClick={() => handleToggleListSelection(list.id)}
-                        className="rounded-full px-4 py-2 text-sm font-semibold"
+            <div className="mt-4 flex min-w-0 items-start gap-3">
+              <div className="min-w-0 flex-1 overflow-x-auto pb-2">
+                <div className="flex w-max min-w-full items-center gap-2">
+                  {lists.map((list) => {
+                    const isSelected = selectedListIdSet.has(list.id);
+                    return (
+                      <div
+                        key={list.id}
+                        className={`flex shrink-0 items-center gap-1 rounded-full transition ${
+                          isSelected
+                            ? "bg-ocean text-white shadow-soft"
+                            : "bg-mist text-slate-600 hover:bg-[#E9EEF8]"
+                        }`}
                       >
-                        {list.name}
-                      </button>
-                    </div>
-                  );
-                })}
+                        <button
+                          type="button"
+                          aria-pressed={isSelected}
+                          onClick={() => handleToggleListSelection(list.id)}
+                          className="rounded-full px-3.5 py-2 text-sm font-semibold whitespace-nowrap"
+                        >
+                          {list.name}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-2">
                 <button
                   type="button"
                   onClick={handleToggleAllLists}
-                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink shadow-soft"
+                  className="rounded-full border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-ink shadow-soft whitespace-nowrap"
                 >
                   {allListsSelected ? "Deselect all" : "Select all"}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewListError("");
+                    setListManagerOpen(true);
+                  }}
+                  className="rounded-full border border-ocean bg-ocean px-3.5 py-2 text-sm font-semibold text-white shadow-soft whitespace-nowrap transition hover:bg-[#4162F4]"
+                >
+                  Add / edit list
+                </button>
               </div>
-
-              <button
-                type="button"
-                onClick={() => loadIdeas(tripId)}
-                className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-ink shadow-soft"
-              >
-                Refresh
-              </button>
             </div>
 
-            <div className="mt-6 min-w-0 max-h-[640px] overflow-y-auto pr-2">
+            <div className="mt-4 min-w-0 max-h-[640px] overflow-y-auto pr-2">
               <div className="grid gap-4">
                 {ideaToDelete ? (
                   <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
@@ -837,7 +955,15 @@ export default function TripDashboardPage() {
                       <div>
                         <p className="font-semibold text-red-900">Delete item?</p>
                         <p className="mt-1 text-sm text-red-700">
-                          "{ideaToDelete.title}" will be permanently removed from the plan.
+                          {(() => {
+                            const nestedIdeaCount = ideas.filter((idea) => idea.parentIdeaId === ideaToDelete.id).length;
+                            if (!nestedIdeaCount) {
+                              return `"${ideaToDelete.title}" will be permanently removed from the plan.`;
+                            }
+                            return `"${ideaToDelete.title}" and ${nestedIdeaCount} nested item${
+                              nestedIdeaCount === 1 ? "" : "s"
+                            } will be permanently removed from the plan.`;
+                          })()}
                         </p>
                       </div>
                       <div className="flex gap-2">
@@ -861,16 +987,210 @@ export default function TripDashboardPage() {
                 ) : null}
 
                 {visibleIdeas.length ? (
-                  visibleIdeas.map((idea) => (
-                    <IdeaCard
-                      key={idea.id}
-                      idea={idea}
-                      onVote={(value) => voteIdea(idea.id, value)}
-                      onDeleteRequest={(ideaId, ideaTitle) => setIdeaToDelete({ id: ideaId, title: ideaTitle })}
-                      isOwner={activeTrip?.isViewerCreator}
-                      onFocusLocation={setActiveMapQuery}
-                    />
-                  ))
+                  <>
+                    {visibleDestinationGroups.length ? (
+                      <div className="grid gap-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              Destination groups
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => loadIdeas(tripId)}
+                            className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 shadow-soft transition hover:text-ink"
+                          >
+                            Refresh
+                          </button>
+                        </div>
+
+                        {visibleDestinationGroups.map((group) => {
+                          const isCollapsed = Boolean(collapsedDestinationIdeaIds[group.idea.id]);
+                          const childCount = group.children.length;
+                          const canDeleteGroupIdea = activeTrip?.isViewerCreator || group.idea.isCreator;
+                          const canEditGroupIdea = activeTrip?.isViewerCreator || group.idea.isCreator;
+
+                          return (
+                            <div
+                              key={`destination-group-${group.idea.id}`}
+                              className="rounded-[24px] border border-[#DCE6F6] bg-[linear-gradient(135deg,#FFFFFF_0%,#F8FBFF_100%)] p-3 shadow-soft"
+                            >
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                aria-expanded={!isCollapsed}
+                                onClick={() => handleToggleDestinationGroup(group.idea.id)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    handleToggleDestinationGroup(group.idea.id);
+                                  }
+                                }}
+                                className="flex cursor-pointer flex-wrap items-start justify-between gap-4 rounded-2xl border border-white/70 bg-white/90 px-4 py-3 transition hover:border-[#D6E4FF] hover:bg-white"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="rounded-full bg-[#EEF2FF] px-3 py-1 text-[11px] font-semibold text-ocean">
+                                      Destination group
+                                    </span>
+                                    <span className="rounded-full bg-mist px-3 py-1 text-[11px] font-semibold text-slate-500">
+                                      {childCount} item{childCount === 1 ? "" : "s"}
+                                    </span>
+                                  </div>
+
+                                  <h3 className="mt-2 text-left text-lg font-semibold text-ink">{group.idea.title}</h3>
+                                  {group.idea.locationLabel && group.idea.locationLabel !== group.idea.title ? (
+                                    <p className="mt-1 text-sm text-slate-500">{group.idea.locationLabel}</p>
+                                  ) : null}
+                                </div>
+
+                                <div
+                                  className="flex flex-wrap items-center justify-end gap-2"
+                                  onClick={(event) => event.stopPropagation()}
+                                  onKeyDown={(event) => event.stopPropagation()}
+                                >
+                                  <VoteButtons
+                                    score={group.idea.voteScore}
+                                    userVote={group.idea.userVote}
+                                    onVote={(value) => voteIdea(group.idea.id, value)}
+                                    compact
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddItemToDestinationGroup(group.idea.id)}
+                                    className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-ink transition hover:bg-mist"
+                                  >
+                                    Add item here
+                                  </button>
+                                  <span className={`text-sm text-slate-400 transition ${isCollapsed ? "rotate-0" : "rotate-180"}`}>
+                                    v
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="mt-2 flex flex-wrap items-center justify-between gap-3 px-1 text-xs">
+                                <p className="text-slate-400">
+                                  Submitted by {group.idea.submittedBy} | {formatRelativeTime(group.idea.createdAt)}
+                                </p>
+                                <div className="flex flex-wrap items-center gap-3">
+                                {group.idea.hasMapLocation ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveMapQuery(group.idea.mapQuery)}
+                                    className="font-semibold text-ocean transition hover:text-ocean/80"
+                                  >
+                                    Show on map
+                                  </button>
+                                ) : null}
+                                {canEditGroupIdea ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setIdeaToEdit(group.idea)}
+                                    className="inline-flex items-center gap-1 font-semibold text-slate-500 transition hover:text-ink"
+                                  >
+                                    <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
+                                      <path
+                                        d="M4.167 13.75V15.833H6.25L13.854 8.229L11.771 6.146L4.167 13.75Z"
+                                        stroke="currentColor"
+                                        strokeWidth="1.6"
+                                        strokeLinejoin="round"
+                                      />
+                                      <path
+                                        d="M10.729 7.188L12.813 9.271"
+                                        stroke="currentColor"
+                                        strokeWidth="1.6"
+                                        strokeLinecap="round"
+                                      />
+                                      <path
+                                        d="M12.396 3.958C12.791 3.562 13.328 3.34 13.888 3.34C14.448 3.34 14.985 3.562 15.38 3.958C15.776 4.353 15.998 4.89 15.998 5.45C15.998 6.01 15.776 6.547 15.38 6.942L13.854 8.469L11.771 6.385L13.297 4.859L12.396 3.958Z"
+                                        stroke="currentColor"
+                                        strokeWidth="1.6"
+                                        strokeLinejoin="round"
+                                      />
+                                    </svg>
+                                    Edit
+                                  </button>
+                                ) : null}
+                                {canDeleteGroupIdea ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setIdeaToDelete({ id: group.idea.id, title: group.idea.title })}
+                                    className="font-semibold text-red-600 transition hover:text-red-700"
+                                  >
+                                    Delete
+                                  </button>
+                                ) : null}
+                                </div>
+                              </div>
+
+                              {!isCollapsed ? (
+                                <div className="mt-4 border-t border-slate-200 pt-4">
+                                  {group.children.length ? (
+                                    <div className="grid gap-3 pl-2">
+                                      {group.children.map((idea) => (
+                                        <IdeaCard
+                                          key={idea.id}
+                                          idea={idea}
+                                          onVote={(value) => voteIdea(idea.id, value)}
+                                          onDeleteRequest={(ideaId, ideaTitle) => setIdeaToDelete({ id: ideaId, title: ideaTitle })}
+                                          onEditRequest={setIdeaToEdit}
+                                          isOwner={activeTrip?.isViewerCreator}
+                                          onFocusLocation={setActiveMapQuery}
+                                        />
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-5 text-sm text-slate-500">
+                                      No activities or food ideas are grouped under this destination yet.
+                                    </div>
+                                  )}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+
+                    {visibleUngroupedIdeas.length ? (
+                      <div className="grid gap-4">
+                        {visibleDestinationGroups.length ? (
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              Other items
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              Ideas
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => loadIdeas(tripId)}
+                              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 shadow-soft transition hover:text-ink"
+                            >
+                              Refresh
+                            </button>
+                          </div>
+                        )}
+
+                        {visibleUngroupedIdeas.map((idea) => (
+                          <IdeaCard
+                            key={idea.id}
+                            idea={idea}
+                            parentLabel={destinationIdeasById.get(idea.parentIdeaId)?.title || ""}
+                            onVote={(value) => voteIdea(idea.id, value)}
+                            onDeleteRequest={(ideaId, ideaTitle) => setIdeaToDelete({ id: ideaId, title: ideaTitle })}
+                            onEditRequest={setIdeaToEdit}
+                            isOwner={activeTrip?.isViewerCreator}
+                            onFocusLocation={setActiveMapQuery}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
                 ) : (
                   <div className="rounded-2xl border border-dashed border-slate-300 bg-mist px-4 py-8 text-center">
                     <p className="text-base font-semibold text-ink">{emptyIdeasTitle}</p>
@@ -1056,136 +1376,194 @@ export default function TripDashboardPage() {
           </div>
         </aside>
 
-        {listContextMenu ? (
-          <div
-            className="fixed inset-0 z-50"
-            onClick={() => setListContextMenu(null)}
-            onContextMenu={(event) => event.preventDefault()}
-          >
-            <div
-              className="absolute w-40 overflow-hidden rounded-2xl border border-slate-200 bg-white py-2 shadow-card"
-              style={{ left: `${listContextMenu.x}px`, top: `${listContextMenu.y}px` }}
-              onClick={(event) => event.stopPropagation()}
-            >
-              <button
-                type="button"
-                onClick={() => handleOpenRenameListModal(listContextMenu.list)}
-                className="flex w-full items-center px-4 py-3 text-left text-sm font-semibold text-ink transition hover:bg-mist"
-              >
-                Rename
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setListToDelete(listContextMenu.list);
-                  setListContextMenu(null);
-                }}
-                className="flex w-full items-center px-4 py-3 text-left text-sm font-semibold text-coral transition hover:bg-red-50"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
+        {ideaToEdit ? (
+          <IdeaEditorModal
+            idea={ideaToEdit}
+            destination={activeTrip?.destination}
+            listOptions={lists}
+            placeGroups={destinationIdeas}
+            onClose={() => setIdeaToEdit(null)}
+            onSave={handleUpdateIdea}
+          />
         ) : null}
 
-        {listToDelete ? (
+        {listManagerOpen ? (
           <div
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/35 px-4 py-6"
-            onClick={() => setListToDelete(null)}
+            className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/35 px-4 py-6"
+            onClick={handleCloseListManager}
           >
             <div
-              className="w-full max-w-md rounded-[28px] bg-white p-6 shadow-card"
+              className="w-full max-w-lg rounded-[28px] bg-white p-6 shadow-card"
               onClick={(event) => event.stopPropagation()}
             >
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Delete list</p>
-              <h3 className="mt-2 text-xl font-semibold text-ink">{listToDelete.name}</h3>
-              <p className="mt-3 text-sm text-slate-500">
-                {(() => {
-                  const itemCount = ideas.filter((idea) => idea.listId === listToDelete.id).length;
-                  return itemCount
-                    ? `This will also delete ${itemCount} item${itemCount === 1 ? "" : "s"} in that list.`
-                    : "This will remove the list from this trip.";
-                })()}
-              </p>
-              <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-xl font-semibold text-ink">Add or edit lists</h3>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setListToDelete(null)}
-                  className="rounded-full bg-mist px-4 py-2 text-sm font-semibold text-slate-600"
+                  onClick={handleCloseListManager}
+                  className="rounded-full bg-mist px-3 py-2 text-xs font-semibold text-slate-500"
                 >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteList(listToDelete)}
-                  disabled={listActionLoadingId === listToDelete.id}
-                  className="rounded-full bg-[#F56565] px-5 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-70"
-                >
-                  {listActionLoadingId === listToDelete.id ? "Deleting..." : "Delete"}
+                  Close
                 </button>
               </div>
-            </div>
-          </div>
-        ) : null}
 
-        {listToRename ? (
-          <div
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/35 px-4 py-6"
-            onClick={() => {
-              setListToRename(null);
-              setRenameListName("");
-              setRenameListError("");
-            }}
-          >
-            <div
-              className="w-full max-w-md rounded-[28px] bg-white p-6 shadow-card"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Rename list</p>
-              <h3 className="mt-2 text-xl font-semibold text-ink">{listToRename.name}</h3>
-              <div className="mt-5">
-                <label htmlFor="rename-list-name" className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                  New name
-                </label>
-                <input
-                  id="rename-list-name"
-                  value={renameListName}
-                  onChange={(event) => {
-                    setRenameListName(event.target.value);
-                    if (renameListError) {
-                      setRenameListError("");
-                    }
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      handleRenameList();
-                    }
-                  }}
-                  className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-ink outline-none transition focus:border-ocean focus:ring-2 focus:ring-ocean/10"
-                />
-                {renameListError ? <p className="mt-2 text-sm text-coral">{renameListError}</p> : null}
-              </div>
-              <div className="mt-6 flex flex-wrap justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setListToRename(null);
-                    setRenameListName("");
-                    setRenameListError("");
-                  }}
-                  className="rounded-full bg-mist px-4 py-2 text-sm font-semibold text-slate-600"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRenameList}
-                  disabled={listActionLoadingId === listToRename.id}
-                  className="rounded-full bg-ocean px-5 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-70"
-                >
-                  {listActionLoadingId === listToRename.id ? "Saving..." : "Save"}
-                </button>
+              <div className="mt-5 max-h-[60vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2">
+                <div className="grid gap-3">
+                  <div className="rounded-2xl bg-[#FBFCFF] px-4 py-4">
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr),auto]">
+                      <input
+                        id="new-list-name"
+                        aria-label="New list name"
+                        value={newListName}
+                        onChange={(event) => {
+                          setNewListName(event.target.value);
+                          if (newListError) {
+                            setNewListError("");
+                          }
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            handleCreateList();
+                          }
+                        }}
+                        placeholder="New list name"
+                        className="min-w-0 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-ink outline-none transition focus:border-ocean focus:ring-2 focus:ring-ocean/10"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleCreateList}
+                        className="rounded-2xl bg-ocean px-5 py-3 text-sm font-semibold text-white"
+                      >
+                        Add list
+                      </button>
+                    </div>
+                    {newListError ? <p className="mt-2 text-sm text-coral">{newListError}</p> : null}
+                  </div>
+
+                  {lists.length ? (
+                    lists.map((list) => {
+                      const itemCount = ideas.filter((idea) => idea.listId === list.id).length;
+                      const isRenaming = listToRename?.id === list.id;
+                      const isDeleteConfirming = listToDelete?.id === list.id;
+                      const isLoading = listActionLoadingId === list.id;
+
+                      return (
+                        <div key={`manage-list-${list.id}`} className="rounded-2xl bg-[#FBFCFF] px-4 py-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 pt-2">
+                              <p className="truncate text-sm font-semibold text-ink">
+                                {list.name}
+                                <span className="ml-2 text-xs font-medium text-slate-400">
+                                  {itemCount} item{itemCount === 1 ? "" : "s"}
+                                </span>
+                              </p>
+                            </div>
+
+                            {!isRenaming && !isDeleteConfirming ? (
+                              <div className="flex shrink-0 items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenRenameListModal(list)}
+                                  className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-ocean shadow-soft"
+                                >
+                                  Rename
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRequestDeleteList(list)}
+                                  className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-red-600 shadow-soft"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+
+                          {isRenaming ? (
+                            <div className="mt-4">
+                              <input
+                                id={`rename-list-name-${list.id}`}
+                                aria-label={`Rename ${list.name}`}
+                                value={renameListName}
+                                onChange={(event) => {
+                                  setRenameListName(event.target.value);
+                                  if (renameListError) {
+                                    setRenameListError("");
+                                  }
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    handleRenameList();
+                                  }
+                                }}
+                                placeholder="New list name"
+                                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-ink outline-none transition focus:border-ocean focus:ring-2 focus:ring-ocean/10"
+                              />
+                              {renameListError ? <p className="mt-2 text-sm text-coral">{renameListError}</p> : null}
+                              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setListToRename(null);
+                                    setRenameListName("");
+                                    setRenameListError("");
+                                  }}
+                                  className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-soft"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleRenameList}
+                                  disabled={isLoading}
+                                  className="rounded-full bg-ocean px-5 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-70"
+                                >
+                                  {isLoading ? "Saving..." : "Save"}
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {isDeleteConfirming ? (
+                            <div className="mt-4 rounded-2xl border border-red-100 bg-white px-4 py-4">
+                              <p className="text-sm font-semibold text-ink">Delete this list?</p>
+                              <p className="mt-1 text-sm text-slate-500">
+                                {itemCount
+                                  ? `${itemCount} item${itemCount === 1 ? "" : "s"} in that list will become uncategorized.`
+                                  : "This will remove the list from this trip."}
+                              </p>
+                              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setListToDelete(null)}
+                                  className="rounded-full bg-mist px-4 py-2 text-sm font-semibold text-slate-600"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteList(list)}
+                                  disabled={isLoading}
+                                  className="rounded-full bg-[#F56565] px-5 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-70"
+                                >
+                                  {isLoading ? "Deleting..." : "Delete"}
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="rounded-2xl bg-[#FBFCFF] px-4 py-6 text-sm text-slate-500">
+                      No lists yet.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
