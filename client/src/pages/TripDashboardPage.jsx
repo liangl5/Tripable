@@ -1045,6 +1045,15 @@ export default function TripDashboardPage() {
             </div>
 
             <div className="mt-4 min-w-0 max-h-[640px] overflow-y-auto pr-2">
+              <div className="sticky top-0 z-10 -mr-2 flex justify-end bg-white/95 pb-3 pr-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => loadIdeas(tripId)}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 shadow-soft transition hover:text-ink"
+                >
+                  Refresh
+                </button>
+              </div>
               <div className="grid gap-4">
                 {ideaToDelete ? (
                   <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
@@ -1087,19 +1096,10 @@ export default function TripDashboardPage() {
                   <>
                     {visibleDestinationGroups.length ? (
                       <div className="grid gap-4">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                              Destination groups
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => loadIdeas(tripId)}
-                            className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 shadow-soft transition hover:text-ink"
-                          >
-                            Refresh
-                          </button>
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                            Destination groups
+                          </p>
                         </div>
 
                         {visibleDestinationGroups.map((group) => {
@@ -1263,17 +1263,10 @@ export default function TripDashboardPage() {
                             </p>
                           </div>
                         ) : (
-                          <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
                             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                               Ideas
                             </p>
-                            <button
-                              type="button"
-                              onClick={() => loadIdeas(tripId)}
-                              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 shadow-soft transition hover:text-ink"
-                            >
-                              Refresh
-                            </button>
                           </div>
                         )}
 
