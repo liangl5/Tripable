@@ -35,6 +35,10 @@ CREATE TABLE "Trip" (
   id TEXT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   destination JSONB,
+  lists JSONB,
+  invitees JSONB,
+  "budgetTotal" TEXT,
+  expenses JSONB,
   "startDate" TIMESTAMPTZ,
   "endDate" TIMESTAMPTZ,
   "createdById" TEXT NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
@@ -68,6 +72,12 @@ CREATE TABLE "Idea" (
   category VARCHAR(50),
   "entryType" VARCHAR(20) CHECK ("entryType" IN ('place', 'activity')),
   "parentIdeaId" TEXT REFERENCES "Idea"(id) ON DELETE CASCADE,
+  "listId" TEXT,
+  "mapQuery" TEXT,
+  coordinates JSONB,
+  "photoUrl" TEXT,
+  "photoAttributions" JSONB,
+  "recommendationSource" TEXT,
   "createdById" TEXT NOT NULL REFERENCES "User"(id),
   "createdAt" TIMESTAMPTZ DEFAULT NOW()
 );
@@ -116,11 +126,11 @@ CREATE INDEX idx_availability_user ON "UserAvailability"("userId");
 
 ---
 
-## Step 1.5: (OPTIONAL) If Tables Already Exist - Update Timestamps, Optional Trip Destination, And Idea Hierarchy
+## Step 1.5: (OPTIONAL) If Tables Already Exist - Update Timestamps, Trip Metadata, And Idea Metadata
 
 **⚠️ Only run this if you have an existing Supabase project with tables created before March 2026.** 
 
-If you've already created the tables with `TIMESTAMP` instead of `TIMESTAMPTZ`, your `Trip` table does not yet have a `destination` column, or your `Idea` table does not yet support nested destination groupings, run this SQL:
+If you've already created the tables with `TIMESTAMP` instead of `TIMESTAMPTZ`, your `Trip` table does not yet have shared metadata columns, or your `Idea` table does not yet support nested destination groupings and map metadata, run this SQL:
 
 ```sql
 -- Update existing tables to use TIMESTAMPTZ for proper timezone handling
@@ -128,6 +138,10 @@ ALTER TABLE "User" ALTER COLUMN "created_at" TYPE TIMESTAMPTZ;
 ALTER TABLE "User" ALTER COLUMN "created_at" SET DEFAULT NOW();
 
 ALTER TABLE "Trip" ADD COLUMN IF NOT EXISTS destination JSONB;
+ALTER TABLE "Trip" ADD COLUMN IF NOT EXISTS lists JSONB;
+ALTER TABLE "Trip" ADD COLUMN IF NOT EXISTS invitees JSONB;
+ALTER TABLE "Trip" ADD COLUMN IF NOT EXISTS "budgetTotal" TEXT;
+ALTER TABLE "Trip" ADD COLUMN IF NOT EXISTS expenses JSONB;
 ALTER TABLE "Trip" ALTER COLUMN "createdAt" TYPE TIMESTAMPTZ;
 ALTER TABLE "Trip" ALTER COLUMN "createdAt" SET DEFAULT NOW();
 ALTER TABLE "Trip" ALTER COLUMN "startDate" TYPE TIMESTAMPTZ;
@@ -137,6 +151,12 @@ ALTER TABLE "Idea" ALTER COLUMN "createdAt" TYPE TIMESTAMPTZ;
 ALTER TABLE "Idea" ALTER COLUMN "createdAt" SET DEFAULT NOW();
 ALTER TABLE "Idea" ADD COLUMN IF NOT EXISTS "entryType" VARCHAR(20);
 ALTER TABLE "Idea" ADD COLUMN IF NOT EXISTS "parentIdeaId" TEXT REFERENCES "Idea"(id) ON DELETE CASCADE;
+ALTER TABLE "Idea" ADD COLUMN IF NOT EXISTS "listId" TEXT;
+ALTER TABLE "Idea" ADD COLUMN IF NOT EXISTS "mapQuery" TEXT;
+ALTER TABLE "Idea" ADD COLUMN IF NOT EXISTS coordinates JSONB;
+ALTER TABLE "Idea" ADD COLUMN IF NOT EXISTS "photoUrl" TEXT;
+ALTER TABLE "Idea" ADD COLUMN IF NOT EXISTS "photoAttributions" JSONB;
+ALTER TABLE "Idea" ADD COLUMN IF NOT EXISTS "recommendationSource" TEXT;
 
 ALTER TABLE "Idea" DROP CONSTRAINT IF EXISTS "Idea_entryType_check";
 ALTER TABLE "Idea"
@@ -183,6 +203,27 @@ DROP POLICY IF EXISTS "Only creator can update trip" ON "Trip";
 DROP POLICY IF EXISTS "Only creator can insert trip" ON "Trip";
 DROP POLICY IF EXISTS "Only creator can delete trip" ON "Trip";
 DROP POLICY IF EXISTS "Anyone authenticated can view trips" ON "Trip";
+DROP POLICY IF EXISTS "Users can view all trip memberships" ON "TripMember";
+DROP POLICY IF EXISTS "Users can join trips" ON "TripMember";
+DROP POLICY IF EXISTS "Users can leave trips" ON "TripMember";
+DROP POLICY IF EXISTS "Users can view all ideas" ON "Idea";
+DROP POLICY IF EXISTS "Users can create ideas" ON "Idea";
+DROP POLICY IF EXISTS "Idea creator or trip owner can update" ON "Idea";
+DROP POLICY IF EXISTS "Idea creator or trip owner can delete" ON "Idea";
+DROP POLICY IF EXISTS "Users can view all votes" ON "Vote";
+DROP POLICY IF EXISTS "Users can vote" ON "Vote";
+DROP POLICY IF EXISTS "Users can update their votes" ON "Vote";
+DROP POLICY IF EXISTS "Users can delete their votes" ON "Vote";
+DROP POLICY IF EXISTS "Users can view survey dates" ON "SurveyDate";
+DROP POLICY IF EXISTS "Only creator can manage survey dates" ON "SurveyDate";
+DROP POLICY IF EXISTS "Users can view all availability" ON "UserAvailability";
+DROP POLICY IF EXISTS "Users can set their availability" ON "UserAvailability";
+DROP POLICY IF EXISTS "Users can update their availability" ON "UserAvailability";
+DROP POLICY IF EXISTS "Users can delete their availability" ON "UserAvailability";
+DROP POLICY IF EXISTS "Trip members can view itinerary" ON "ItineraryDay";
+DROP POLICY IF EXISTS "Trip owner can delete itinerary days" ON "ItineraryDay";
+DROP POLICY IF EXISTS "Trip members can view itinerary items" ON "ItineraryItem";
+DROP POLICY IF EXISTS "Trip owner or creator can delete itinerary items" ON "ItineraryItem";
 
 -- Create User policies
 CREATE POLICY "Users can read their own profile" ON "User" FOR SELECT USING (true);
@@ -191,36 +232,43 @@ CREATE POLICY "Anyone can create user" ON "User" FOR INSERT WITH CHECK (true);
 
 -- Create Trip policies (allows any authenticated user to view, but only creator can modify)
 CREATE POLICY "Anyone authenticated can view trips" ON "Trip" FOR SELECT USING (auth.uid() IS NOT NULL);
-CREATE POLICY "Only creator can update trip" ON "Trip" FOR UPDATE USING (auth.uid()::text = "createdById");
+CREATE POLICY "Only creator can update trip" ON "Trip" FOR UPDATE USING (auth.uid()::text = "createdById") WITH CHECK (auth.uid()::text = "createdById");
 CREATE POLICY "Only creator can insert trip" ON "Trip" FOR INSERT WITH CHECK (auth.uid()::text = "createdById");
 CREATE POLICY "Only creator can delete trip" ON "Trip" FOR DELETE USING (auth.uid()::text = "createdById");
 
 -- Create remaining policies
-CREATE POLICY IF NOT EXISTS "Users can view all trip memberships" ON "TripMember" FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Users can join trips" ON "TripMember" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
+CREATE POLICY "Users can view all trip memberships" ON "TripMember" FOR SELECT USING (true);
+CREATE POLICY "Users can join trips" ON "TripMember" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
 CREATE POLICY "Users can leave trips" ON "TripMember" FOR DELETE USING (auth.uid()::text = "userId");
-CREATE POLICY IF NOT EXISTS "Users can view all ideas" ON "Idea" FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Users can create ideas" ON "Idea" FOR INSERT WITH CHECK (auth.uid()::text = "createdById");
-CREATE POLICY IF NOT EXISTS "Idea creator or trip owner can delete" ON "Idea" FOR DELETE USING (
+CREATE POLICY "Users can view all ideas" ON "Idea" FOR SELECT USING (true);
+CREATE POLICY "Users can create ideas" ON "Idea" FOR INSERT WITH CHECK (auth.uid()::text = "createdById");
+CREATE POLICY "Idea creator or trip owner can update" ON "Idea" FOR UPDATE USING (
+  auth.uid()::text = "createdById" OR
+  auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "Idea"."tripId")
+) WITH CHECK (
   auth.uid()::text = "createdById" OR
   auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "Idea"."tripId")
 );
-CREATE POLICY IF NOT EXISTS "Users can view all votes" ON "Vote" FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Users can vote" ON "Vote" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
-CREATE POLICY IF NOT EXISTS "Users can update their votes" ON "Vote" FOR UPDATE USING (auth.uid()::text = "userId");
-CREATE POLICY IF NOT EXISTS "Users can delete their votes" ON "Vote" FOR DELETE USING (auth.uid()::text = "userId");
-CREATE POLICY IF NOT EXISTS "Users can view survey dates" ON "SurveyDate" FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Only creator can manage survey dates" ON "SurveyDate" FOR INSERT WITH CHECK (true);
-CREATE POLICY IF NOT EXISTS "Users can view all availability" ON "UserAvailability" FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Users can set their availability" ON "UserAvailability" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
-CREATE POLICY IF NOT EXISTS "Users can update their availability" ON "UserAvailability" FOR UPDATE USING (auth.uid()::text = "userId");
-CREATE POLICY IF NOT EXISTS "Users can delete their availability" ON "UserAvailability" FOR DELETE USING (auth.uid()::text = "userId");
-CREATE POLICY IF NOT EXISTS "Trip members can view itinerary" ON "ItineraryDay" FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Trip owner can delete itinerary days" ON "ItineraryDay" FOR DELETE USING (
+CREATE POLICY "Idea creator or trip owner can delete" ON "Idea" FOR DELETE USING (
+  auth.uid()::text = "createdById" OR
+  auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "Idea"."tripId")
+);
+CREATE POLICY "Users can view all votes" ON "Vote" FOR SELECT USING (true);
+CREATE POLICY "Users can vote" ON "Vote" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
+CREATE POLICY "Users can update their votes" ON "Vote" FOR UPDATE USING (auth.uid()::text = "userId");
+CREATE POLICY "Users can delete their votes" ON "Vote" FOR DELETE USING (auth.uid()::text = "userId");
+CREATE POLICY "Users can view survey dates" ON "SurveyDate" FOR SELECT USING (true);
+CREATE POLICY "Only creator can manage survey dates" ON "SurveyDate" FOR INSERT WITH CHECK (true);
+CREATE POLICY "Users can view all availability" ON "UserAvailability" FOR SELECT USING (true);
+CREATE POLICY "Users can set their availability" ON "UserAvailability" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
+CREATE POLICY "Users can update their availability" ON "UserAvailability" FOR UPDATE USING (auth.uid()::text = "userId");
+CREATE POLICY "Users can delete their availability" ON "UserAvailability" FOR DELETE USING (auth.uid()::text = "userId");
+CREATE POLICY "Trip members can view itinerary" ON "ItineraryDay" FOR SELECT USING (true);
+CREATE POLICY "Trip owner can delete itinerary days" ON "ItineraryDay" FOR DELETE USING (
   auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "ItineraryDay"."tripId")
 );
-CREATE POLICY IF NOT EXISTS "Trip members can view itinerary items" ON "ItineraryItem" FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Trip owner or creator can delete itinerary items" ON "ItineraryItem" FOR DELETE USING (
+CREATE POLICY "Trip members can view itinerary items" ON "ItineraryItem" FOR SELECT USING (true);
+CREATE POLICY "Trip owner or creator can delete itinerary items" ON "ItineraryItem" FOR DELETE USING (
   auth.uid()::text IN (
     SELECT "createdById" FROM "Trip" 
     WHERE id = (SELECT "tripId" FROM "ItineraryDay" WHERE id = "ItineraryItem"."itineraryDayId")

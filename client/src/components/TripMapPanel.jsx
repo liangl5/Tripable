@@ -30,11 +30,30 @@ function createMarkerTooltipContent(value) {
   return node;
 }
 
-function createAdvancedMarkerContent(PinElement, title) {
-  const pin = new PinElement({
+function getMarkerColors(idea) {
+  const isDestinationGroup = idea?.entryType === "place" && !idea?.parentIdeaId;
+
+  if (isDestinationGroup) {
+    return {
+      background: "#EF4444",
+      borderColor: "#DC2626",
+      glyphColor: "#FFFFFF"
+    };
+  }
+
+  return {
     background: "#4F68F5",
     borderColor: "#3B4ED6",
-    glyphColor: "#FFFFFF",
+    glyphColor: "#FFFFFF"
+  };
+}
+
+function createAdvancedMarkerContent(PinElement, idea, title) {
+  const colors = getMarkerColors(idea);
+  const pin = new PinElement({
+    background: colors.background,
+    borderColor: colors.borderColor,
+    glyphColor: colors.glyphColor,
     glyphText: String(title || "").trim().slice(0, 1).toUpperCase()
   });
 
@@ -201,7 +220,7 @@ export default function TripMapPanel({
 
         const markerLabel = String(idea.title || idea.locationLabel || idea.mapQuery || "Plan item").trim();
         const markerTitle = truncateMarkerTitle(markerLabel);
-        const markerContent = createAdvancedMarkerContent(PinElement, markerLabel);
+        const markerContent = createAdvancedMarkerContent(PinElement, idea, markerLabel);
         const marker = new AdvancedMarkerElement({
           map,
           position,

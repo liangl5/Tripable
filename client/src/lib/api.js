@@ -1,7 +1,9 @@
 import { supabase } from "./supabase.js";
 import {
+  clearIdeaMeta,
   clearGeneratedItinerary,
   createItineraryDraft,
+  DEFAULT_LISTS,
   getGeneratedItinerary,
   hydrateIdea,
   hydrateIdeas,
@@ -9,9 +11,12 @@ import {
   isPlaceLikeList,
   normalizeDestination,
   normalizeListName,
+  pruneTripMeta,
   removeIdeaMeta,
+  removeTripMeta,
   saveGeneratedItinerary,
   saveIdeaMeta,
+  saveTripMeta,
   slugify
 } from "./tripPlanning.js";
 
@@ -487,6 +492,13 @@ function isMissingTripDestinationColumnError(error) {
   return /destination/i.test(message) && /(column|schema cache|PGRST204|not found)/i.test(message);
 }
 
+function isMissingTripMetaColumnsError(error) {
+  const message = [error?.message, error?.details, error?.hint, error?.code]
+    .filter(Boolean)
+    .join(" ");
+  return /(lists|invitees|budgettotal|expenses)/i.test(message) && /(column|schema cache|PGRST204|not found)/i.test(message);
+}
+
 function isMissingIdeaHierarchyColumnError(error) {
   const message = [error?.message, error?.details, error?.hint, error?.code]
     .filter(Boolean)
@@ -494,29 +506,213 @@ function isMissingIdeaHierarchyColumnError(error) {
   return /(entrytype|parentideaid)/i.test(message) && /(column|schema cache|PGRST204|not found)/i.test(message);
 }
 
-async function persistTripDestination(tripId, createdById, destination) {
-  const normalizedDestination = normalizeDestination(destination);
-  if (!tripId || !createdById || !normalizedDestination) {
-    return false;
+function isMissingIdeaDetailsColumnError(error) {
+  const message = [error?.message, error?.details, error?.hint, error?.code]
+    .filter(Boolean)
+    .join(" ");
+  return /(listid|mapquery|coordinates|photourl|photoattributions|recommendationsource)/i.test(message) &&
+    /(column|schema cache|PGRST204|not found)/i.test(message);
+}
+
+function normalizeTripListsForDatabase(lists) {
+  return (Array.isArray(lists) ? lists : [])
+    .map((list) => {
+      const name = normalizeListName(list?.name);
+      const id = String(list?.id || slugify(name)).trim();
+      return name && id ? { id, name } : null;
+    })
+    .filter(Boolean);
+}
+
+function buildTripMetaRecord(payload) {
+  const record = {};
+  const hasOwn = (key) => Object.prototype.hasOwnProperty.call(payload || {}, key);
+
+  if (hasOwn("destination")) {
+    record.destination = normalizeDestination(payload.destination);
+  }
+  if (hasOwn("lists")) {
+    record.lists = normalizeTripListsForDatabase(payload.lists);
+  }
+  if (hasOwn("invitees")) {
+    record.invitees = Array.isArray(payload.invitees)
+      ? payload.invitees.map((invitee) => String(invitee || "").trim().toLowerCase()).filter(Boolean)
+      : [];
+  }
+  if (hasOwn("budgetTotal")) {
+    record.budgetTotal = payload.budgetTotal === "" ? "" : String(payload.budgetTotal ?? "");
+  }
+  if (hasOwn("expenses")) {
+    record.expenses = Array.isArray(payload.expenses) ? payload.expenses : [];
   }
 
-  const { error } = await supabase
-    .from("Trip")
-    .update({ destination: normalizedDestination })
-    .eq("id", tripId)
-    .eq("createdById", createdById);
+  return record;
+}
 
-  if (!error) {
+async function persistTripMetaPatch(tripId, createdById, payload) {
+  const record = buildTripMetaRecord(payload);
+  if (!tripId || !createdById || !Object.keys(record).length) {
     return true;
   }
 
-  if (isMissingTripDestinationColumnError(error)) {
-    console.warn('Trip.destination column is missing. Run the destination migration to persist trip locations.');
+  const { data, error } = await supabase
+    .from("Trip")
+    .update(record)
+    .eq("id", tripId)
+    .eq("createdById", createdById)
+    .select("id")
+    .maybeSingle();
+
+  if (!error) {
+    if (!data?.id) {
+      throw new Error(
+        "Trip metadata update did not reach Supabase. Re-run the Trip UPDATE RLS policy in SUPABASE_SETUP_GUIDE.md."
+      );
+    }
+    return true;
+  }
+
+  if (isMissingTripDestinationColumnError(error) || isMissingTripMetaColumnsError(error)) {
+    console.warn(
+      'Trip metadata columns are missing. Run the trip metadata migration to persist destinations, lists, invitees, and budget data in Supabase.'
+    );
     return false;
   }
 
-  console.error("Unable to persist trip destination", error);
-  return false;
+  throw error;
+}
+
+async function persistTripDestination(tripId, createdById, destination) {
+  if (!normalizeDestination(destination)) {
+    return false;
+  }
+
+  try {
+    return await persistTripMetaPatch(tripId, createdById, { destination });
+  } catch (error) {
+    console.error("Unable to persist trip destination", error);
+    return false;
+  }
+}
+
+async function syncTripMetaPersistence(tripId, createdById, payload, options = {}) {
+  const persisted = await persistTripMetaPatch(tripId, createdById, payload);
+
+  if (persisted) {
+    pruneTripMeta(tripId, Object.keys(payload || {}));
+  } else if (options.allowLocalFallback !== false) {
+    saveTripMeta(tripId, payload);
+  }
+
+  return persisted;
+}
+
+function buildIdeaDetailsRecord(payload) {
+  return {
+    entryType: payload.entryType || null,
+    parentIdeaId: payload.parentIdeaId || null,
+    listId: payload.listId || null,
+    mapQuery: payload.mapQuery || null,
+    coordinates: payload.coordinates || null,
+    photoUrl: payload.photoUrl || null,
+    photoAttributions: Array.isArray(payload.photoAttributions) ? payload.photoAttributions : [],
+    recommendationSource: payload.recommendationSource || null
+  };
+}
+
+function buildIdeaRecordVariants(baseIdeaRecord, payload) {
+  return {
+    full: {
+      ...baseIdeaRecord,
+      ...buildIdeaDetailsRecord(payload)
+    },
+    hierarchy: {
+      ...baseIdeaRecord,
+      entryType: payload.entryType || null,
+      parentIdeaId: payload.parentIdeaId || null
+    }
+  };
+}
+
+async function insertIdeaRecord(baseIdeaRecord, payload) {
+  const variants = buildIdeaRecordVariants(baseIdeaRecord, payload);
+  let data;
+  let error;
+  let persistedDetails = true;
+
+  ({ data, error } = await supabase
+    .from("Idea")
+    .insert([variants.full])
+    .select("*, User(*)")
+    .single());
+
+  if (error && isMissingIdeaDetailsColumnError(error)) {
+    persistedDetails = false;
+    ({ data, error } = await supabase
+      .from("Idea")
+      .insert([variants.hierarchy])
+      .select("*, User(*)")
+      .single());
+  }
+
+  if (error && isMissingIdeaHierarchyColumnError(error)) {
+    persistedDetails = false;
+    console.warn(
+      'Idea hierarchy or detail columns are missing. Run the idea metadata migration to persist grouping and map details in Supabase.'
+    );
+    ({ data, error } = await supabase
+      .from("Idea")
+      .insert([baseIdeaRecord])
+      .select("*, User(*)")
+      .single());
+  }
+
+  return { data, error, persistedDetails };
+}
+
+async function updateIdeaRecord(ideaId, baseIdeaRecord, payload) {
+  const variants = buildIdeaRecordVariants(baseIdeaRecord, payload);
+  let error;
+  let persistedDetails = true;
+  let updatedIdeaId = null;
+
+  ({ data: updatedIdeaId, error } = await supabase
+    .from("Idea")
+    .update(variants.full)
+    .eq("id", ideaId)
+    .select("id")
+    .maybeSingle());
+
+  if (error && isMissingIdeaDetailsColumnError(error)) {
+    persistedDetails = false;
+    ({ data: updatedIdeaId, error } = await supabase
+      .from("Idea")
+      .update(variants.hierarchy)
+      .eq("id", ideaId)
+      .select("id")
+      .maybeSingle());
+  }
+
+  if (error && isMissingIdeaHierarchyColumnError(error)) {
+    persistedDetails = false;
+    console.warn(
+      'Idea hierarchy or detail columns are missing. Run the idea metadata migration to persist grouping and map details in Supabase.'
+    );
+    ({ data: updatedIdeaId, error } = await supabase
+      .from("Idea")
+      .update(baseIdeaRecord)
+      .eq("id", ideaId)
+      .select("id")
+      .maybeSingle());
+  }
+
+  if (!error && !updatedIdeaId?.id) {
+    error = new Error(
+      "Idea update did not reach Supabase. Re-run the Idea UPDATE RLS policy in SUPABASE_SETUP_GUIDE.md."
+    );
+  }
+
+  return { error, persistedDetails };
 }
 
 async function getOrCreateUser() {
@@ -575,6 +771,10 @@ function formatTrip(trip, memberCount = 0) {
     startDate: toISODate(trip.startDate),
     endDate: toISODate(trip.endDate),
     destination: trip.destination || null,
+    lists: trip.lists || null,
+    invitees: trip.invitees || [],
+    budgetTotal: trip.budgetTotal ?? "",
+    expenses: trip.expenses || [],
     memberCount,
     createdById: trip.createdById
   });
@@ -590,6 +790,10 @@ async function formatTripDetails(trip, viewerUserId, members, leaders, availabil
     startDate: toISODate(trip.startDate),
     endDate: toISODate(trip.endDate),
     destination: trip.destination || null,
+    lists: trip.lists || null,
+    invitees: trip.invitees || [],
+    budgetTotal: trip.budgetTotal ?? "",
+    expenses: trip.expenses || [],
     memberCount: members?.length || 0,
     createdById: trip.createdById,
     isViewerCreator: trip.createdById === viewerUserId,
@@ -616,6 +820,12 @@ function formatIdea(tripId, idea, userId, votes = []) {
     category: idea.category,
     entryType: idea.entryType,
     parentIdeaId: idea.parentIdeaId || null,
+    listId: idea.listId || null,
+    mapQuery: idea.mapQuery || null,
+    coordinates: idea.coordinates || null,
+    photoUrl: idea.photoUrl || null,
+    photoAttributions: idea.photoAttributions || [],
+    recommendationSource: idea.recommendationSource || null,
     createdAt: idea.createdAt,
     createdById: idea.createdById,
     submittedBy: idea.User?.name || "Traveler",
@@ -624,6 +834,106 @@ function formatIdea(tripId, idea, userId, votes = []) {
     userVote,
     isCreator
   });
+}
+
+function formatIdeaWithPersistedDetails(tripId, idea, userId, votes = [], payload = {}) {
+  return formatIdea(
+    tripId,
+    {
+      ...idea,
+      category: idea.category ?? payload.category ?? null,
+      entryType: idea.entryType ?? payload.entryType ?? null,
+      parentIdeaId: idea.parentIdeaId ?? payload.parentIdeaId ?? null,
+      listId: idea.listId ?? payload.listId ?? null,
+      mapQuery: idea.mapQuery ?? payload.mapQuery ?? null,
+      coordinates: idea.coordinates ?? payload.coordinates ?? null,
+      photoUrl: idea.photoUrl ?? payload.photoUrl ?? null,
+      photoAttributions: Array.isArray(idea.photoAttributions)
+        ? idea.photoAttributions
+        : Array.isArray(payload.photoAttributions)
+          ? payload.photoAttributions
+          : [],
+      recommendationSource: idea.recommendationSource ?? payload.recommendationSource ?? null
+    },
+    userId,
+    votes
+  );
+}
+
+function buildHydratedIdeaPersistencePayload(idea) {
+  const payload = {
+    title: idea.title,
+    description: idea.description || "",
+    location: idea.location || "",
+    category: idea.category || idea.listName || null,
+    entryType: idea.entryType || null,
+    parentIdeaId: idea.parentIdeaId || null,
+    listId: idea.listId || null,
+    mapQuery: idea.mapQuery || null,
+    coordinates: idea.coordinates || null,
+    photoUrl: idea.photoUrl || null,
+    photoAttributions: Array.isArray(idea.photoAttributions) ? idea.photoAttributions : [],
+    recommendationSource: idea.recommendationSource || null
+  };
+
+  const shouldPersist =
+    (!idea.category && Boolean(payload.category)) ||
+    (!idea.entryType && Boolean(payload.entryType)) ||
+    (!idea.parentIdeaId && Boolean(payload.parentIdeaId)) ||
+    (!idea.listId && Boolean(payload.listId)) ||
+    (!idea.mapQuery && Boolean(payload.mapQuery)) ||
+    (!idea.coordinates && Boolean(payload.coordinates)) ||
+    (!idea.photoUrl && Boolean(payload.photoUrl)) ||
+    (!(Array.isArray(idea.photoAttributions) && idea.photoAttributions.length) && payload.photoAttributions.length > 0) ||
+    (!idea.recommendationSource && Boolean(payload.recommendationSource));
+
+  return shouldPersist ? payload : null;
+}
+
+async function migrateHydratedIdeas(tripId, viewerUserId, tripOwnerId, ideas) {
+  const syncableIdeas = (ideas || []).filter((idea) => {
+    const canEdit = tripOwnerId === viewerUserId || idea.createdById === viewerUserId;
+    return canEdit && buildHydratedIdeaPersistencePayload(idea);
+  });
+
+  if (!syncableIdeas.length) {
+    return;
+  }
+
+  await Promise.all(
+    syncableIdeas.map(async (idea) => {
+      const payload = buildHydratedIdeaPersistencePayload(idea);
+      if (!payload) return;
+
+      const baseIdeaRecord = {
+        title: payload.title,
+        description: payload.description,
+        location: payload.location,
+        category: payload.category || null
+      };
+
+      const { error, persistedDetails } = await updateIdeaRecord(idea.id, baseIdeaRecord, payload);
+      if (error) {
+        throw error;
+      }
+
+      if (persistedDetails) {
+        removeIdeaMeta(tripId, idea.id);
+      } else {
+        saveIdeaMeta(tripId, idea.id, {
+          entryType: payload.entryType,
+          parentIdeaId: payload.parentIdeaId,
+          mapQuery: payload.mapQuery,
+          coordinates: payload.coordinates,
+          photoUrl: payload.photoUrl,
+          photoAttributions: payload.photoAttributions,
+          listId: payload.listId,
+          listName: payload.category,
+          recommendationSource: payload.recommendationSource
+        });
+      }
+    })
+  );
 }
 
 export const api = {
@@ -865,8 +1175,30 @@ export const api = {
 
     const formattedTrip = await formatTripDetails(trip, userId, members, leaders, availability, surveyDates);
 
-    if (!normalizeDestination(trip.destination) && formattedTrip.destination && trip.createdById === userId) {
-      void persistTripDestination(tripId, userId, formattedTrip.destination);
+    if (trip.createdById === userId) {
+      const tripMetaPatch = {};
+
+      if (!normalizeDestination(trip.destination) && formattedTrip.destination) {
+        tripMetaPatch.destination = formattedTrip.destination;
+      }
+      if (!Array.isArray(trip.lists) && formattedTrip.lists?.length) {
+        tripMetaPatch.lists = formattedTrip.lists;
+      }
+      if (!Array.isArray(trip.invitees) && formattedTrip.invitees?.length) {
+        tripMetaPatch.invitees = formattedTrip.invitees;
+      }
+      if ((trip.budgetTotal === undefined || trip.budgetTotal === null || trip.budgetTotal === "") && formattedTrip.budgetTotal) {
+        tripMetaPatch.budgetTotal = formattedTrip.budgetTotal;
+      }
+      if (!Array.isArray(trip.expenses) && formattedTrip.expenses?.length) {
+        tripMetaPatch.expenses = formattedTrip.expenses;
+      }
+
+      if (Object.keys(tripMetaPatch).length) {
+        void syncTripMetaPersistence(tripId, userId, tripMetaPatch).catch((error) => {
+          console.error("Unable to migrate trip metadata into Supabase", error);
+        });
+      }
     }
 
     return formattedTrip;
@@ -875,19 +1207,45 @@ export const api = {
   async createTrip(payload) {
     const user = await getOrCreateUser();
     const tripId = crypto.randomUUID();
+    const initialLists = Array.isArray(payload.lists) && payload.lists.length ? payload.lists : DEFAULT_LISTS;
+    const initialInvitees = Array.isArray(payload.invitees) ? payload.invitees : [];
+    const tripInsert = {
+      id: tripId,
+      name: payload.name,
+      createdById: user.id,
+      startDate: null,
+      endDate: null,
+      ...buildTripMetaRecord({
+        destination: payload.destination || null,
+        lists: initialLists,
+        invitees: initialInvitees,
+        budgetTotal: "",
+        expenses: []
+      })
+    };
 
     // Create trip
-    const { data: trip, error: tripError } = await supabase
+    let trip;
+    let tripError;
+    ({ data: trip, error: tripError } = await supabase
       .from("Trip")
-      .insert([{
-        id: tripId,
-        name: payload.name,
-        createdById: user.id,
-        startDate: null,
-        endDate: null
-      }])
+      .insert([tripInsert])
       .select()
-      .single();
+      .single());
+
+    if (tripError && (isMissingTripDestinationColumnError(tripError) || isMissingTripMetaColumnsError(tripError))) {
+      ({ data: trip, error: tripError } = await supabase
+        .from("Trip")
+        .insert([{
+          id: tripId,
+          name: payload.name,
+          createdById: user.id,
+          startDate: null,
+          endDate: null
+        }])
+        .select()
+        .single());
+    }
 
     if (tripError) throw tripError;
 
@@ -902,9 +1260,25 @@ export const api = {
 
     if (memberError) throw memberError;
 
-    await persistTripDestination(tripId, user.id, payload.destination);
+    await syncTripMetaPersistence(tripId, user.id, {
+      destination: payload.destination || null,
+      invitees: initialInvitees,
+      lists: initialLists,
+      budgetTotal: "",
+      expenses: []
+    });
 
-    return formatTrip({ ...trip, destination: payload.destination || null }, 1);
+    return formatTrip(
+      {
+        ...trip,
+        destination: payload.destination || null,
+        lists: initialLists,
+        invitees: initialInvitees,
+        budgetTotal: "",
+        expenses: []
+      },
+      1
+    );
   },
 
   async deleteTrip(tripId) {
@@ -935,6 +1309,10 @@ export const api = {
       .eq("id", tripId);
 
     if (error) throw error;
+
+    removeTripMeta(tripId);
+    clearIdeaMeta(tripId);
+    clearGeneratedItinerary(tripId);
   },
 
   async updateTripDates(tripId, payload) {
@@ -1039,6 +1417,36 @@ export const api = {
         .insert(records);
 
       if (error) throw error;
+    }
+
+    return this.getTrip(tripId);
+  },
+
+  async updateTripMeta(tripId, payload) {
+    const user = await getOrCreateUser();
+
+    const { data: trip } = await supabase
+      .from("Trip")
+      .select("createdById")
+      .eq("id", tripId)
+      .single();
+
+    if (trip.createdById !== user.id) {
+      throw new Error("Only the trip owner can update trip settings");
+    }
+
+    try {
+      const persisted = await syncTripMetaPersistence(tripId, user.id, payload, {
+        allowLocalFallback: false
+      });
+      if (!persisted) {
+        throw new Error(
+          "Trip metadata columns are missing in Supabase. Run Step 1.5 from SUPABASE_SETUP_GUIDE.md."
+        );
+      }
+    } catch (error) {
+      console.error("Unable to persist trip metadata", error);
+      throw error;
     }
 
     return this.getTrip(tripId);
@@ -1155,6 +1563,8 @@ export const api = {
     if (itineraryDeleteError) throw itineraryDeleteError;
 
     clearGeneratedItinerary(tripId);
+    removeTripMeta(tripId);
+    clearIdeaMeta(tripId);
   },
 
   async getIdeas(tripId) {
@@ -1168,10 +1578,22 @@ export const api = {
 
     if (error) throw error;
 
-    return hydrateIdeas(
+    const formattedIdeas = hydrateIdeas(
       tripId,
       ideas?.map((idea) => formatIdea(tripId, idea, user.id, idea.votes)) || []
     );
+
+    const { data: trip } = await supabase
+      .from("Trip")
+      .select("createdById")
+      .eq("id", tripId)
+      .single();
+
+    void migrateHydratedIdeas(tripId, user.id, trip?.createdById, formattedIdeas).catch((migrationError) => {
+      console.error("Unable to migrate legacy idea metadata into Supabase", migrationError);
+    });
+
+    return formattedIdeas;
   },
 
   async createIdea(tripId, payload) {
@@ -1187,45 +1609,30 @@ export const api = {
       category: payload.category || null
     };
 
-    let idea;
-    let error;
-    ({ data: idea, error } = await supabase
-      .from("Idea")
-      .insert([{
-        ...baseIdeaRecord,
-        entryType: payload.entryType || null,
-        parentIdeaId: payload.parentIdeaId || null
-      }])
-      .select("*, User(*)")
-      .single());
-
-    if (error && isMissingIdeaHierarchyColumnError(error)) {
-      console.warn('Idea.entryType or Idea.parentIdeaId is missing. Run the hierarchy migration to share grouped destination ideas across collaborators.');
-      ({ data: idea, error } = await supabase
-        .from("Idea")
-        .insert([baseIdeaRecord])
-        .select("*, User(*)")
-        .single());
-    }
+    const { data: idea, error, persistedDetails } = await insertIdeaRecord(baseIdeaRecord, payload);
 
     if (error) throw error;
 
     // Invalidate itinerary
     await supabase.from("ItineraryDay").delete().eq("tripId", tripId);
     clearGeneratedItinerary(tripId);
-    saveIdeaMeta(tripId, ideaId, {
-      entryType: payload.entryType,
-      parentIdeaId: payload.parentIdeaId || null,
-      mapQuery: payload.mapQuery,
-      coordinates: payload.coordinates || null,
-      photoUrl: payload.photoUrl || "",
-      photoAttributions: payload.photoAttributions || [],
-      listId: payload.listId || "",
-      listName: payload.category,
-      recommendationSource: payload.recommendationSource || null
-    });
+    if (persistedDetails) {
+      removeIdeaMeta(tripId, ideaId);
+    } else {
+      saveIdeaMeta(tripId, ideaId, {
+        entryType: payload.entryType,
+        parentIdeaId: payload.parentIdeaId || null,
+        mapQuery: payload.mapQuery,
+        coordinates: payload.coordinates || null,
+        photoUrl: payload.photoUrl || "",
+        photoAttributions: payload.photoAttributions || [],
+        listId: payload.listId || "",
+        listName: payload.category,
+        recommendationSource: payload.recommendationSource || null
+      });
+    }
 
-    return formatIdea(tripId, idea, user.id, []);
+    return formatIdeaWithPersistedDetails(tripId, idea, user.id, [], payload);
   },
 
   async updateIdea(ideaId, tripId, payload) {
@@ -1259,39 +1666,27 @@ export const api = {
       category: payload.category || null
     };
 
-    let error;
-    ({ error } = await supabase
-      .from("Idea")
-      .update({
-        ...baseIdeaRecord,
-        entryType: payload.entryType || null,
-        parentIdeaId: payload.parentIdeaId || null
-      })
-      .eq("id", ideaId));
-
-    if (error && isMissingIdeaHierarchyColumnError(error)) {
-      console.warn('Idea.entryType or Idea.parentIdeaId is missing. Run the hierarchy migration to share grouped destination ideas across collaborators.');
-      ({ error } = await supabase
-        .from("Idea")
-        .update(baseIdeaRecord)
-        .eq("id", ideaId));
-    }
+    const { error, persistedDetails } = await updateIdeaRecord(ideaId, baseIdeaRecord, payload);
 
     if (error) throw error;
 
     await supabase.from("ItineraryDay").delete().eq("tripId", tripId);
     clearGeneratedItinerary(tripId);
-    saveIdeaMeta(tripId, ideaId, {
-      entryType: payload.entryType,
-      parentIdeaId: payload.parentIdeaId || null,
-      mapQuery: payload.mapQuery,
-      coordinates: payload.coordinates || null,
-      photoUrl: payload.photoUrl || "",
-      photoAttributions: payload.photoAttributions || [],
-      listId: payload.listId || "",
-      listName: payload.category,
-      recommendationSource: payload.recommendationSource || null
-    });
+    if (persistedDetails) {
+      removeIdeaMeta(tripId, ideaId);
+    } else {
+      saveIdeaMeta(tripId, ideaId, {
+        entryType: payload.entryType,
+        parentIdeaId: payload.parentIdeaId || null,
+        mapQuery: payload.mapQuery,
+        coordinates: payload.coordinates || null,
+        photoUrl: payload.photoUrl || "",
+        photoAttributions: payload.photoAttributions || [],
+        listId: payload.listId || "",
+        listName: payload.category,
+        recommendationSource: payload.recommendationSource || null
+      });
+    }
 
     const { data: updatedIdea, error: updatedIdeaError } = await supabase
       .from("Idea")
@@ -1303,7 +1698,7 @@ export const api = {
       throw updatedIdeaError || new Error("Unable to load the updated item");
     }
 
-    return formatIdea(tripId, updatedIdea, user.id, updatedIdea.votes || []);
+    return formatIdeaWithPersistedDetails(tripId, updatedIdea, user.id, updatedIdea.votes || [], payload);
   },
 
   async deleteIdea(ideaId, tripId) {

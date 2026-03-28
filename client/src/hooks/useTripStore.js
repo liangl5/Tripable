@@ -185,15 +185,32 @@ export const useTripStore = create((set, get) => ({
     }
   },
 
+  updateTripMeta: async (tripId, payload) => {
+    set({ tripLoading: true, error: null });
+    try {
+      const trip = await api.updateTripMeta(tripId, payload);
+      set((state) => ({
+        currentTrip: state.currentTrip?.id === trip.id ? trip : state.currentTrip,
+        trips: state.trips.map((candidate) => (candidate.id === trip.id ? { ...candidate, ...trip } : candidate)),
+        tripLoading: false
+      }));
+      return trip;
+    } catch (error) {
+      set({ error: error.message, tripLoading: false });
+      throw error;
+    }
+  },
+
   updateIdea: async (ideaId, tripId, payload) => {
     set({ updateIdeaLoading: true, error: null });
     try {
       const updatedIdea = await api.updateIdea(ideaId, tripId, payload);
-      const ideas = await api.getIdeas(tripId);
-      set({
-        ideas,
+      set((state) => ({
+        ideas: state.ideas.some((idea) => idea.id === updatedIdea.id)
+          ? state.ideas.map((idea) => (idea.id === updatedIdea.id ? updatedIdea : idea))
+          : [updatedIdea, ...state.ideas],
         updateIdeaLoading: false
-      });
+      }));
       return updatedIdea;
     } catch (error) {
       set({ error: error.message, updateIdeaLoading: false });

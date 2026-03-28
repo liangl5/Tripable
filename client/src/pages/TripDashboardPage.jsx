@@ -12,13 +12,9 @@ import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
 import { api } from "../lib/api.js";
 import {
-  addCustomList,
   getRecommendations as getFallbackRecommendations,
   getTripLists,
   normalizeListName,
-  renameCustomList,
-  removeCustomList,
-  saveIdeaMeta,
   slugify
 } from "../lib/tripPlanning.js";
 import { formatDateRange, formatRelativeTime } from "../lib/timeFormat.js";
@@ -48,6 +44,7 @@ export default function TripDashboardPage() {
   const leaveTrip = useTripStore((state) => state.leaveTrip);
   const updateTripSurveyDates = useTripStore((state) => state.updateTripSurveyDates);
   const updateTripAvailability = useTripStore((state) => state.updateTripAvailability);
+  const updateTripMeta = useTripStore((state) => state.updateTripMeta);
   const generateItinerary = useTripStore((state) => state.generateItinerary);
   const tripLoading = useTripStore((state) => state.tripLoading);
   const itineraryLoading = useTripStore((state) => state.itineraryLoading);
@@ -85,6 +82,7 @@ export default function TripDashboardPage() {
   const composerRef = useRef(null);
   const recommendationScrollerRef = useRef(null);
   const previousRecommendationQueryRef = useRef("");
+  const previousListIdsRef = useRef([]);
 
   useEffect(() => {
     if (!session) {
@@ -147,7 +145,12 @@ export default function TripDashboardPage() {
   }, [tripId]);
 
   const activeTrip = tripView || currentTrip;
-  const lists = useMemo(() => getTripLists(activeTrip || tripId), [activeTrip, tripId]);
+  const lists = useMemo(() => {
+    if (!activeTrip) {
+      return [];
+    }
+    return getTripLists(activeTrip);
+  }, [activeTrip]);
   const selectedListIdSet = useMemo(() => new Set(selectedListIds), [selectedListIds]);
   const allListsSelected = useMemo(
     () => lists.length > 0 && lists.every((list) => selectedListIdSet.has(list.id)),
@@ -155,23 +158,35 @@ export default function TripDashboardPage() {
   );
 
   useEffect(() => {
-    if (!lists.length) return;
+    if (!lists.length) {
+      previousListIdsRef.current = [];
+      return;
+    }
+
+    const currentListIds = lists.map((list) => list.id);
+    const previousListIds = previousListIdsRef.current;
+
     setSelectedListIds((current) => {
-      const validSelections = current.filter((listId) => lists.some((list) => list.id === listId));
+      const validSelections = current.filter((listId) => currentListIds.includes(listId));
       if (!current.length) {
-        return lists.map((list) => list.id);
+        return currentListIds;
       }
+
+      const newListIds = currentListIds.filter((listId) => !previousListIds.includes(listId));
+      if (newListIds.length) {
+        return [...validSelections, ...newListIds];
+      }
+
       if (
         validSelections.length === current.length &&
         validSelections.every((listId, index) => listId === current[index])
       ) {
         return current;
       }
-      if (!validSelections.length) {
-        return [];
-      }
       return validSelections;
     });
+
+    previousListIdsRef.current = currentListIds;
   }, [lists]);
 
   useEffect(() => {
@@ -525,12 +540,59 @@ export default function TripDashboardPage() {
     setTimeout(() => setSurveyDatesSaved(false), 2000);
   };
 
-  const handleAddList = (listName) => {
+  const buildIdeaUpdatePayload = (idea, overrides = {}) => {
+    const hasOverride = (key) => Object.prototype.hasOwnProperty.call(overrides, key);
+    return {
+      title: hasOverride("title") ? overrides.title : idea.title,
+      description: hasOverride("description") ? overrides.description : idea.description || "",
+      location: hasOverride("location") ? overrides.location : idea.location || "",
+      category: hasOverride("category") ? overrides.category : idea.listName || "",
+      listId: hasOverride("listId") ? overrides.listId : idea.listId || "",
+      entryType: hasOverride("entryType") ? overrides.entryType : idea.entryType,
+      parentIdeaId: hasOverride("parentIdeaId") ? overrides.parentIdeaId : idea.parentIdeaId || null,
+      mapQuery: hasOverride("mapQuery") ? overrides.mapQuery : idea.mapQuery || "",
+      coordinates: hasOverride("coordinates") ? overrides.coordinates : idea.coordinates || null,
+      photoUrl: hasOverride("photoUrl") ? overrides.photoUrl : idea.photoUrl || "",
+      photoAttributions: hasOverride("photoAttributions")
+        ? overrides.photoAttributions
+        : idea.photoAttributions || [],
+      recommendationSource: hasOverride("recommendationSource")
+        ? overrides.recommendationSource
+        : idea.recommendationSource || null
+    };
+  };
+
+  const cloneTripState = (trip) => {
+    if (!trip) return trip;
+    if (typeof structuredClone === "function") {
+      return structuredClone(trip);
+    }
+    return JSON.parse(JSON.stringify(trip));
+  };
+
+  const handlePersistTripMeta = async (patch) => {
+    if (!tripId) return null;
+    const previousTrip = cloneTripState(activeTrip);
+
+    setTripView((prev) => (prev ? { ...prev, ...patch } : prev));
+
+    try {
+      const persistedTrip = await updateTripMeta(tripId, patch);
+      setTripView(persistedTrip);
+      return persistedTrip;
+    } catch (error) {
+      setTripView(previousTrip);
+      throw error;
+    }
+  };
+
+  const handleAddList = async (listName) => {
     if (!tripId) return "";
     const normalized = normalizeListName(listName);
     if (!normalized) return "";
-    const nextMeta = addCustomList(tripId, normalized);
-    setTripView((prev) => (prev ? { ...prev, ...nextMeta } : prev));
+    const nextList = { id: slugify(normalized), name: normalized };
+    const nextLists = [...lists, nextList];
+    await handlePersistTripMeta({ lists: nextLists });
     const nextListId = slugify(normalized);
     setSelectedListIds((current) => (current.includes(nextListId) ? current : [...current, nextListId]));
     return normalized;
@@ -544,7 +606,7 @@ export default function TripDashboardPage() {
     setListToDelete(list);
   };
 
-  const handleCreateList = () => {
+  const handleCreateList = async () => {
     const normalized = normalizeListName(newListName);
     if (!normalized) {
       setNewListError("Enter a list name.");
@@ -556,9 +618,14 @@ export default function TripDashboardPage() {
       return;
     }
 
-    handleAddList(normalized);
-    setNewListName("");
-    setNewListError("");
+    try {
+      await handleAddList(normalized);
+      setNewListName("");
+      setNewListError("");
+    } catch (createListError) {
+      console.error("Unable to add list", createListError);
+      setNewListError("Unable to add this list right now.");
+    }
   };
 
   const handleCloseListManager = () => {
@@ -579,23 +646,36 @@ export default function TripDashboardPage() {
     setListActionLoadingId(list.id);
 
     try {
-      const nextMeta = removeCustomList(tripId, list.id);
+      await handlePersistTripMeta({ lists: lists.filter((candidate) => candidate.id !== list.id) });
 
-      ideasInList.forEach((idea) => {
-        saveIdeaMeta(tripId, idea.id, {
-          listId: "",
-          listName: "",
-          parentIdeaId: deletedParentIdeaIds.has(idea.parentIdeaId) ? null : idea.parentIdeaId
-        });
-      });
+      await Promise.all(
+        ideasInList.map((idea) =>
+          api.updateIdea(
+            idea.id,
+            tripId,
+            buildIdeaUpdatePayload(idea, {
+              category: "",
+              listId: "",
+              parentIdeaId: deletedParentIdeaIds.has(idea.parentIdeaId) ? null : idea.parentIdeaId || null
+            })
+          )
+        )
+      );
 
-      ideas
-        .filter((idea) => deletedParentIdeaIds.has(idea.parentIdeaId) && idea.listId !== list.id)
-        .forEach((idea) => {
-          saveIdeaMeta(tripId, idea.id, { parentIdeaId: null });
-        });
+      await Promise.all(
+        ideas
+          .filter((idea) => deletedParentIdeaIds.has(idea.parentIdeaId) && idea.listId !== list.id)
+          .map((idea) =>
+            api.updateIdea(
+              idea.id,
+              tripId,
+              buildIdeaUpdatePayload(idea, {
+                parentIdeaId: null
+              })
+            )
+          )
+      );
 
-      setTripView((prev) => (prev ? { ...prev, ...nextMeta } : prev));
       setSelectedListIds((current) => current.filter((listId) => listId !== list.id));
       setRecommendationTargetByKey((current) =>
         Object.fromEntries(Object.entries(current).filter(([, listName]) => slugify(listName) !== slugify(list.name)))
@@ -646,14 +726,31 @@ export default function TripDashboardPage() {
     setListActionLoadingId(listToRename.id);
 
     try {
-      const nextMeta = renameCustomList(tripId, listToRename.id, normalizedNextName);
       const ideasInList = ideas.filter((idea) => idea.listId === listToRename.id);
-
-      ideasInList.forEach((idea) => {
-        saveIdeaMeta(tripId, idea.id, { listId: listToRename.id, listName: normalizedNextName });
+      await handlePersistTripMeta({
+        lists: lists.map((candidate) =>
+          candidate.id === listToRename.id
+            ? {
+                ...candidate,
+                name: normalizedNextName
+              }
+            : candidate
+        )
       });
 
-      setTripView((prev) => (prev ? { ...prev, ...nextMeta } : prev));
+      await Promise.all(
+        ideasInList.map((idea) =>
+          api.updateIdea(
+            idea.id,
+            tripId,
+            buildIdeaUpdatePayload(idea, {
+              category: normalizedNextName,
+              listId: listToRename.id
+            })
+          )
+        )
+      );
+
       setRecommendationTargetByKey((current) =>
         Object.fromEntries(
           Object.entries(current).map(([recommendationKey, listName]) => [
@@ -711,12 +808,12 @@ export default function TripDashboardPage() {
     composerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   };
 
-  const handleUpdateIdea = async (payload) => {
-    if (!tripId || !ideaToEdit) return;
+  const handleUpdateIdea = async (ideaId, payload) => {
+    if (!tripId || !ideaId) return;
 
-    await updateIdea(ideaToEdit.id, tripId, payload);
+    await updateIdea(ideaId, tripId, payload);
 
-    const nextListId = slugify(payload.category);
+    const nextListId = String(payload.listId || slugify(payload.category)).trim();
     if (nextListId) {
       setSelectedListIds((current) => (current.includes(nextListId) ? current : [...current, nextListId]));
     }
@@ -726,7 +823,7 @@ export default function TripDashboardPage() {
         [payload.parentIdeaId]: false
       }));
     }
-    setIdeaToEdit(null);
+    setIdeaToEdit((current) => (current?.id === ideaId ? null : current));
   };
 
   const handleRecommendationSearch = (event) => {
@@ -1086,7 +1183,11 @@ export default function TripDashboardPage() {
                                 {canEditGroupIdea ? (
                                   <button
                                     type="button"
-                                    onClick={() => setIdeaToEdit(group.idea)}
+                                    onMouseDown={(event) => event.stopPropagation()}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setIdeaToEdit(group.idea);
+                                    }}
                                     className="inline-flex items-center gap-1 font-semibold text-slate-500 transition hover:text-ink"
                                   >
                                     <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
@@ -1341,7 +1442,13 @@ export default function TripDashboardPage() {
               }
             />
 
-            {activeTrip ? <BudgetPanel trip={activeTrip} onChange={handleBudgetChange} /> : null}
+            {activeTrip ? (
+              <BudgetPanel
+                trip={activeTrip}
+                onChange={handleBudgetChange}
+                onPersistMeta={handlePersistTripMeta}
+              />
+            ) : null}
 
             <section className="rounded-[28px] border border-slate-200 bg-white/95 p-6 shadow-card">
               <p className="text-sm font-semibold text-slate-500">Itinerary</p>

@@ -177,26 +177,40 @@ export default function IdeaEditorModal({
   const handleSave = async () => {
     if (!query.trim() || saving) return;
 
+    const selectedListId =
+      activityListOptions.find((list) => list.name === selectedListName)?.id || slugify(selectedListName);
+    const nextMode = isDestinationGroup ? "destination" : "activity";
+    const trimmedQuery = query.trim();
+    const isTitleUnchanged = trimmedQuery === String(idea.title || "").trim();
+    const freeformPayload = buildFreeformIdeaPayload(trimmedQuery, {
+      mode: nextMode,
+      listId: selectedListId,
+      listName: selectedListName,
+      destination,
+      placeGroup: selectedPlaceGroup
+    });
+
     const payload = selectedSuggestion
       ? buildResolvedIdeaPayload(selectedSuggestion, {
-          mode: isDestinationGroup ? "destination" : "activity",
-          listId:
-            activityListOptions.find((list) => list.name === selectedListName)?.id || slugify(selectedListName),
+          mode: nextMode,
+          listId: selectedListId,
           listName: selectedListName,
           placeGroup: selectedPlaceGroup
         })
-      : buildFreeformIdeaPayload(query.trim(), {
-          mode: isDestinationGroup ? "destination" : "activity",
-          listId:
-            activityListOptions.find((list) => list.name === selectedListName)?.id || slugify(selectedListName),
-          listName: selectedListName,
-          destination,
-          placeGroup: selectedPlaceGroup
-        });
+      : {
+          ...freeformPayload,
+          description: idea.description || "",
+          location: isTitleUnchanged ? idea.location : freeformPayload.location,
+          mapQuery: isTitleUnchanged ? idea.mapQuery : freeformPayload.mapQuery,
+          coordinates: isTitleUnchanged ? idea.coordinates || null : null,
+          photoUrl: isTitleUnchanged ? idea.photoUrl || "" : "",
+          photoAttributions: isTitleUnchanged ? idea.photoAttributions || [] : [],
+          recommendationSource: isTitleUnchanged ? idea.recommendationSource || null : null
+        };
 
     setSaving(true);
     try {
-      await onSave(payload);
+      await onSave(idea.id, payload);
     } finally {
       setSaving(false);
     }
@@ -205,11 +219,16 @@ export default function IdeaEditorModal({
   return (
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/35 px-4 py-6"
-      onClick={onClose}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
     >
       <div
         className="w-full max-w-xl rounded-[28px] bg-white p-6 shadow-card"
         onClick={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">
           <div>

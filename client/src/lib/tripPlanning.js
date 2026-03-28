@@ -764,6 +764,35 @@ export function saveTripMeta(tripId, patch) {
   return nextMeta;
 }
 
+export function pruneTripMeta(tripId, fields = []) {
+  if (!tripId) return;
+  const allMeta = readStorage(TRIP_META_STORAGE_KEY, {});
+  const tripMeta = { ...(allMeta[tripId] || {}) };
+  const normalizedFields = Array.isArray(fields) ? fields : [];
+
+  normalizedFields.forEach((field) => {
+    delete tripMeta[field];
+    if (field === "lists") {
+      delete tripMeta.customLists;
+    }
+  });
+
+  if (!Object.keys(tripMeta).length) {
+    delete allMeta[tripId];
+  } else {
+    allMeta[tripId] = tripMeta;
+  }
+
+  writeStorage(TRIP_META_STORAGE_KEY, allMeta);
+}
+
+export function removeTripMeta(tripId) {
+  if (!tripId) return;
+  const allMeta = readStorage(TRIP_META_STORAGE_KEY, {});
+  delete allMeta[tripId];
+  writeStorage(TRIP_META_STORAGE_KEY, allMeta);
+}
+
 export function addCustomList(tripId, listName) {
   const normalized = normalizeListName(listName);
   if (!normalized) return getTripMeta(tripId);
@@ -851,14 +880,25 @@ export function hydrateTrip(trip) {
   if (!trip?.id) return trip;
   const meta = getTripMeta(trip.id);
   const persistedDestination = normalizeDestination(trip.destination);
+  const persistedLists = Array.isArray(trip.lists) ? normalizeTripLists(trip.lists) : null;
+  const lists = persistedLists || meta.lists;
+  const invitees = Array.isArray(trip.invitees) ? sanitizeInvitees(trip.invitees) : meta.invitees;
+  const expenses = Array.isArray(trip.expenses) ? sanitizeExpenses(trip.expenses) : meta.expenses;
+  const budgetTotal =
+    trip.budgetTotal === undefined || trip.budgetTotal === null
+      ? meta.budgetTotal
+      : trip.budgetTotal === ""
+        ? ""
+        : String(trip.budgetTotal);
+
   return {
     ...trip,
     destination: persistedDestination || meta.destination,
-    invitees: meta.invitees,
-    lists: meta.lists,
-    customLists: meta.customLists,
-    budgetTotal: meta.budgetTotal,
-    expenses: meta.expenses
+    invitees,
+    lists,
+    customLists: lists.map((list) => list.name),
+    budgetTotal,
+    expenses
   };
 }
 
@@ -897,6 +937,13 @@ export function removeIdeaMeta(tripId, ideaId) {
   writeStorage(IDEA_META_STORAGE_KEY, allMeta);
 }
 
+export function clearIdeaMeta(tripId) {
+  if (!tripId) return;
+  const allMeta = getAllIdeaMeta();
+  delete allMeta[tripId];
+  writeStorage(IDEA_META_STORAGE_KEY, allMeta);
+}
+
 function inferEntryType(idea, meta) {
   if (idea?.entryType === "place" || idea?.entryType === "activity") {
     return idea.entryType;
@@ -915,12 +962,19 @@ export function hydrateIdea(tripId, idea) {
   if (!idea?.id) return idea;
   const meta = getIdeaMeta(tripId, idea.id);
   const entryType = inferEntryType(idea, meta);
-  const listName = normalizeListName(meta.listName || idea.category || "");
-  const listId = String(meta.listId || slugify(listName)).trim();
-  const mapQuery = String(meta.mapQuery || (entryType === "place" ? idea.location || "" : "")).trim();
+  const listName = normalizeListName(idea.category || meta.listName || "");
+  const listId = String(idea.listId || meta.listId || slugify(listName)).trim();
+  const mapQuery = String(idea.mapQuery || meta.mapQuery || (entryType === "place" ? idea.location || "" : "")).trim();
   const locationLabel = String(idea.location || (entryType === "activity" ? "Flexible activity" : "")).trim();
-  const coordinates = normalizeCoordinates(meta.coordinates);
-  const parentIdeaId = String(meta.parentIdeaId || idea.parentIdeaId || "").trim();
+  const coordinates = normalizeCoordinates(idea.coordinates || meta.coordinates);
+  const parentIdeaId = String(idea.parentIdeaId || meta.parentIdeaId || "").trim();
+  const photoUrl = String(idea.photoUrl || meta.photoUrl || "").trim();
+  const photoAttributions = Array.isArray(idea.photoAttributions)
+    ? idea.photoAttributions
+    : Array.isArray(meta.photoAttributions)
+      ? meta.photoAttributions
+      : [];
+  const recommendationSource = idea.recommendationSource || meta.recommendationSource || null;
 
   return {
     ...idea,
@@ -931,10 +985,10 @@ export function hydrateIdea(tripId, idea) {
     hasMapLocation: Boolean(mapQuery || coordinates),
     mapQuery,
     coordinates,
-    photoUrl: String(meta.photoUrl || "").trim(),
-    photoAttributions: Array.isArray(meta.photoAttributions) ? meta.photoAttributions : [],
+    photoUrl,
+    photoAttributions,
     locationLabel,
-    recommendationSource: meta.recommendationSource || null
+    recommendationSource
   };
 }
 

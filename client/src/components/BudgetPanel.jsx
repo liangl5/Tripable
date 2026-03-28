@@ -1,11 +1,5 @@
 import { useState } from "react";
-import {
-  addTripExpense,
-  formatCurrency,
-  getBudgetSummary,
-  removeTripExpense,
-  updateTripBudget
-} from "../lib/tripPlanning.js";
+import { formatCurrency, getBudgetSummary, normalizeListName } from "../lib/tripPlanning.js";
 
 const initialExpense = {
   title: "",
@@ -15,13 +9,17 @@ const initialExpense = {
   notes: ""
 };
 
-export default function BudgetPanel({ trip, onChange }) {
+export default function BudgetPanel({ trip, onChange, onPersistMeta }) {
   const [expenseForm, setExpenseForm] = useState(initialExpense);
   const summary = getBudgetSummary(trip);
 
   const handleBudgetChange = (event) => {
-    const nextMeta = updateTripBudget(trip.id, event.target.value);
-    onChange(nextMeta);
+    const nextBudgetTotal = event.target.value === "" ? "" : String(event.target.value);
+    onChange({ budgetTotal: nextBudgetTotal });
+    const persistence = onPersistMeta?.({ budgetTotal: nextBudgetTotal });
+    if (persistence?.catch) {
+      persistence.catch(() => {});
+    }
   };
 
   const handleExpenseChange = (event) => {
@@ -31,14 +29,36 @@ export default function BudgetPanel({ trip, onChange }) {
 
   const handleAddExpense = (event) => {
     event.preventDefault();
-    const nextMeta = addTripExpense(trip.id, expenseForm);
-    onChange(nextMeta);
+    const nextExpense = {
+      id: crypto.randomUUID(),
+      title: String(expenseForm.title || "").trim(),
+      amount: Number(expenseForm.amount) || 0,
+      paidBy: String(expenseForm.paidBy || "").trim() || "Group",
+      category: normalizeListName(expenseForm.category) || "General",
+      notes: String(expenseForm.notes || "").trim(),
+      createdAt: new Date().toISOString()
+    };
+
+    if (!nextExpense.title || nextExpense.amount <= 0) {
+      return;
+    }
+
+    const nextExpenses = [nextExpense, ...(Array.isArray(trip.expenses) ? trip.expenses : [])];
+    onChange({ expenses: nextExpenses });
+    const persistence = onPersistMeta?.({ expenses: nextExpenses });
+    if (persistence?.catch) {
+      persistence.catch(() => {});
+    }
     setExpenseForm(initialExpense);
   };
 
   const handleRemoveExpense = (expenseId) => {
-    const nextMeta = removeTripExpense(trip.id, expenseId);
-    onChange(nextMeta);
+    const nextExpenses = (Array.isArray(trip.expenses) ? trip.expenses : []).filter((expense) => expense.id !== expenseId);
+    onChange({ expenses: nextExpenses });
+    const persistence = onPersistMeta?.({ expenses: nextExpenses });
+    if (persistence?.catch) {
+      persistence.catch(() => {});
+    }
   };
 
   return (

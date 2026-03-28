@@ -97,7 +97,11 @@ export default function IdeaCard({
           {canEdit ? (
             <button
               type="button"
-              onClick={() => onEditRequest?.(idea)}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onEditRequest?.(idea);
+              }}
               className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 transition hover:text-ink"
             >
               <EditIcon />

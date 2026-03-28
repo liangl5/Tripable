@@ -4,7 +4,7 @@ import DestinationAutocomplete from "../components/DestinationAutocomplete.jsx";
 import TripableLogoLink from "../components/TripableLogoLink.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
-import { parseInvitees, saveTripMeta } from "../lib/tripPlanning.js";
+import { parseInvitees } from "../lib/tripPlanning.js";
 
 function addInvitee(invitees, invitee) {
   const normalized = String(invitee || "").trim().toLowerCase();
@@ -106,15 +106,12 @@ export default function CreateTripPage() {
 
     const payload = {
       name: tripName,
-      destination: destination || null
+      destination: destination || null,
+      invitees: nextInvitees
     };
 
     try {
       const trip = await createTrip(payload);
-      saveTripMeta(trip.id, {
-        destination,
-        invitees: nextInvitees
-      });
 
       if (form.startDate && form.endDate) {
         await updateTripDates(trip.id, {
