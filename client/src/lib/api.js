@@ -561,10 +561,6 @@ async function getOrCreateUser() {
   }
 }
 
-function getMemberCount(tripId, members) {
-  return members?.length || 0;
-}
-
 function formatTrip(trip, memberCount = 0) {
   return hydrateTrip({
     id: trip.id,

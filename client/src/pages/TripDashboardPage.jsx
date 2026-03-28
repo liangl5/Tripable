@@ -27,22 +27,6 @@ const RECOMMENDATION_PAGE_SIZE = 8;
 const INITIAL_RECOMMENDATION_FETCH_COUNT = RECOMMENDATION_PAGE_SIZE * 2;
 const TRIP_LIST_SELECTION_STORAGE_PREFIX = "tripable.trip-dashboard.selected-lists";
 
-function looksFoodRelated(value) {
-  return /food|restaurant|cafe|coffee|bakery|brunch|breakfast|lunch|dinner|bar|drink|ramen|sushi|pizza|eat/.test(
-    slugify(value)
-  );
-}
-
-function looksActivityRelated(value) {
-  return /activit|tour|class|workshop|nightlife|show|event|experience|lesson|crawl/.test(slugify(value));
-}
-
-function looksPlaceRelated(value) {
-  return /place|visit|landmark|museum|neighborhood|district|park|garden|temple|shrine|view|market/.test(
-    slugify(value)
-  );
-}
-
 function getRecommendationKey(recommendation) {
   return String(recommendation?.id || recommendation?.title || "").trim();
 }

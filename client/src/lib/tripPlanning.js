@@ -638,26 +638,6 @@ export function isPlaceLikeList(listName) {
   ].some((token) => normalized.includes(token));
 }
 
-export function searchDestinations(query) {
-  const trimmed = String(query || "").trim().toLowerCase();
-  if (!trimmed) {
-    return DESTINATION_OPTIONS.slice(0, 8);
-  }
-
-  return DESTINATION_OPTIONS.filter((destination) => {
-    const haystack = [
-      destination.label,
-      destination.name,
-      destination.type,
-      destination.region,
-      destination.country
-    ]
-      .join(" ")
-      .toLowerCase();
-    return haystack.includes(trimmed);
-  }).slice(0, 8);
-}
-
 export function getDestinationById(id) {
   return DESTINATION_OPTIONS.find((destination) => destination.id === id) || null;
 }

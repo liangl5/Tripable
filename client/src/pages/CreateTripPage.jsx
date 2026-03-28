@@ -12,6 +12,10 @@ function addInvitee(invitees, invitee) {
   return [...invitees, normalized];
 }
 
+function getDestinationDisplayValue(destination) {
+  return String(destination?.mapQuery || destination?.summary || destination?.label || destination?.name || "").trim();
+}
+
 export default function CreateTripPage() {
   const navigate = useNavigate();
   const session = useSession();
@@ -26,6 +30,7 @@ export default function CreateTripPage() {
   });
   const [destinationQuery, setDestinationQuery] = useState("");
   const [selectedDestination, setSelectedDestination] = useState(null);
+  const [selectedDestinationDisplay, setSelectedDestinationDisplay] = useState("");
   const [inviteDraft, setInviteDraft] = useState("");
   const [invitees, setInvitees] = useState([]);
   const [formError, setFormError] = useState("");
@@ -41,15 +46,18 @@ export default function CreateTripPage() {
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSelectDestination = (destination) => {
+  const handleSelectDestination = (destination, displayValue) => {
+    const nextDisplayValue = String(displayValue || getDestinationDisplayValue(destination)).trim();
     setSelectedDestination(destination);
-    setDestinationQuery(destination.label);
+    setSelectedDestinationDisplay(nextDisplayValue);
+    setDestinationQuery(nextDisplayValue);
   };
 
   const handleDestinationQueryChange = (value) => {
     setDestinationQuery(value);
-    if (selectedDestination && value !== selectedDestination.label) {
+    if (selectedDestination && value !== selectedDestinationDisplay) {
       setSelectedDestination(null);
+      setSelectedDestinationDisplay("");
     }
   };
 
