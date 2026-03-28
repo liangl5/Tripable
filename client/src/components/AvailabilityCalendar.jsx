@@ -246,11 +246,6 @@ export default function AvailabilityCalendar({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold text-ink">Availability</h2>
-          <p className="mt-2 max-w-2xl text-sm text-slate-500">
-            {editSurveyDates
-              ? "Choose a simple start and end date for the trip window, then save the range."
-              : "Click on the dates you're available to mark when you are free."}
-          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -479,12 +474,6 @@ export default function AvailabilityCalendar({
               ? "No selectable date range set"
               : `${draftSurveyDates.length} selectable day${draftSurveyDates.length === 1 ? "" : "s"}`
             : `${selectedDates.size} day${selectedDates.size === 1 ? "" : "s"} marked free`}
-        </p>
-        <p className="mt-1 text-xs text-slate-500">
-          {monthStatusText ||
-            (editSurveyDates
-              ? "Use a single start date and end date in mm/dd/yyyy format, then save once."
-              : "Your availability saves automatically when you finish dragging.")}
         </p>
 
         {editSurveyDates ? (

@@ -17,14 +17,15 @@ export default function TripList({ trips, onDeleteTrip, deletingTripId }) {
         <div key={trip.id} className="rounded-3xl bg-white/90 p-6 shadow-card">
           <Link to={`/trips/${trip.id}`} className="block transition hover:-translate-y-1">
             <div className="flex items-center justify-between">
-              <h3 className="text-xl font-semibold text-ink">{trip.name}</h3>
+              <h3 className="text-3xl font-semibold tracking-tight text-ink">
+                {trip.destination?.name || trip.destination?.label
+                  ? `${trip.name} at ${trip.destination.name || trip.destination.label}`
+                  : trip.name}
+              </h3>
               <span className="rounded-full bg-sand px-3 py-1 text-xs font-semibold text-slateblue">
                 {trip.memberCount} members
               </span>
             </div>
-            {trip.destination ? (
-              <p className="mt-3 text-sm font-semibold text-ocean">{trip.destination.label}</p>
-            ) : null}
             <p className="mt-3 text-sm text-slate-500">
               {trip.startDate && trip.endDate ? formatDateRange(trip.startDate, trip.endDate) : "Dates TBD"}
             </p>

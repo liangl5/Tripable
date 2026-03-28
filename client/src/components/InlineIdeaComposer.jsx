@@ -180,9 +180,6 @@ export default function InlineIdeaComposer({
   return (
     <div className="relative min-w-0 rounded-[28px] border border-slate-200 bg-white/95 p-5 shadow-card">
       <h3 className="text-lg font-semibold text-ink">Add a place, activity, or brand-new list</h3>
-      <p className="mt-2 text-sm text-slate-500">
-        Search Google Maps for a strong match, or type your own idea and save it directly.
-      </p>
       <form onSubmit={handleSubmit} className="mt-4 min-w-0">
         <div className="flex min-w-0 flex-col gap-3 xl:flex-row">
           <div className="relative min-w-0 flex-1">

@@ -160,7 +160,7 @@ export default function CreateTripPage() {
 
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="text-sm font-semibold text-ink">Start date</label>
+                <label className="text-sm font-semibold text-ink">Start date (optional)</label>
                 <input
                   type="date"
                   name="startDate"
@@ -170,7 +170,7 @@ export default function CreateTripPage() {
                 />
               </div>
               <div>
-                <label className="text-sm font-semibold text-ink">End date</label>
+                <label className="text-sm font-semibold text-ink">End date (optional)</label>
                 <input
                   type="date"
                   name="endDate"
@@ -179,40 +179,6 @@ export default function CreateTripPage() {
                   className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm"
                 />
               </div>
-            </div>
-
-            <div>
-              <label className="text-sm font-semibold text-ink">Invite people</label>
-              <div className="mt-2 rounded-2xl border border-slate-200 px-4 py-3">
-                <div className="flex flex-wrap gap-2">
-                  {invitees.map((invitee) => (
-                    <span
-                      key={invitee}
-                      className="inline-flex items-center gap-2 rounded-full bg-[#EEF2FF] px-3 py-1 text-xs font-semibold text-ocean"
-                    >
-                      {invitee}
-                      <button
-                        type="button"
-                        onClick={() => setInvitees((prev) => prev.filter((candidate) => candidate !== invitee))}
-                        className="text-ocean/70"
-                      >
-                        x
-                      </button>
-                    </span>
-                  ))}
-                  <input
-                    value={inviteDraft}
-                    onChange={(event) => setInviteDraft(event.target.value)}
-                    onKeyDown={handleInviteKeyDown}
-                    onBlur={commitInviteDraft}
-                    placeholder="Type an email and press Enter"
-                    className="min-w-[220px] flex-1 border-0 p-0 text-sm outline-none"
-                  />
-                </div>
-              </div>
-              <p className="mt-2 text-xs text-slate-500">
-                These are saved with the trip so you know who still needs the invite link.
-              </p>
             </div>
 
             <button
