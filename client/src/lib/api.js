@@ -15,7 +15,23 @@ import {
 } from "./tripPlanning.js";
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-const GOOGLE_PLACE_SEARCH_FIELDS = [
+const GOOGLE_DESTINATION_AUTOCOMPLETE_FIELDS = [
+  "suggestions.placePrediction.place",
+  "suggestions.placePrediction.placeId",
+  "suggestions.placePrediction.text.text",
+  "suggestions.placePrediction.structuredFormat.mainText.text",
+  "suggestions.placePrediction.structuredFormat.secondaryText.text",
+  "suggestions.placePrediction.types"
+].join(",");
+const GOOGLE_DESTINATION_DETAILS_FIELDS = [
+  "id",
+  "displayName",
+  "formattedAddress",
+  "location",
+  "types",
+  "addressComponents"
+].join(",");
+const GOOGLE_PLACE_BASE_FIELDS = [
   "places.id",
   "places.displayName",
   "places.formattedAddress",
@@ -235,11 +251,7 @@ async function runPlacesTextSearch(textQuery, maxResultCount = 5, fieldMask = GO
 
   const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
-      "X-Goog-FieldMask": GOOGLE_PLACE_SEARCH_FIELDS
-    },
+    headers: buildGoogleMapsHeaders(fieldMask),
     body: JSON.stringify({
       textQuery,
       maxResultCount: Math.max(1, Math.min(20, Number(maxResultCount) || 5))

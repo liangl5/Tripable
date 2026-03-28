@@ -185,6 +185,10 @@ export default function TripDashboardPage() {
   const activeTrip = tripView || currentTrip;
   const lists = useMemo(() => getTripLists(activeTrip || tripId), [activeTrip, tripId]);
   const selectedListIdSet = useMemo(() => new Set(selectedListIds), [selectedListIds]);
+  const allListsSelected = useMemo(
+    () => lists.length > 0 && lists.every((list) => selectedListIdSet.has(list.id)),
+    [lists, selectedListIdSet]
+  );
 
   useEffect(() => {
     if (!lists.length) return;
@@ -220,6 +224,12 @@ export default function TripDashboardPage() {
     if (!tripId || !hasInitializedListSelectionRef.current) return;
     writeStoredListSelection(tripId, selectedListIds);
   }, [selectedListIds, tripId]);
+
+  useEffect(() => {
+    if (!selectedListIds.length) {
+      setActiveMapQuery("");
+    }
+  }, [selectedListIds]);
 
   useEffect(() => {
     const validListNames = new Set(lists.map((list) => list.name));
@@ -348,12 +358,45 @@ export default function TripDashboardPage() {
   );
   const canLoadMoreRecommendations = recommendations.length > recommendationVisibleCount;
   const showViewMoreCard = canLoadMoreRecommendations || recommendationsLoadingMore;
+  const selectedLists = useMemo(
+    () => lists.filter((list) => selectedListIdSet.has(list.id)),
+    [lists, selectedListIdSet]
+  );
+  const effectiveMapQuery = selectedListIds.length ? activeMapQuery : "";
+  const emptyIdeasTitle = useMemo(() => {
+    if (!selectedLists.length) {
+      return "No lists selected";
+    }
+    if (selectedLists.length === 1) {
+      return `Nothing in ${selectedLists[0].name} yet`;
+    }
+    return "Nothing in the selected lists yet";
+  }, [selectedLists]);
+  const emptyIdeasDescription = useMemo(() => {
+    if (!selectedLists.length) {
+      return "Choose at least one list above to see its ideas on the board.";
+    }
+    return "Add a plan item or start from the recommended suggestions below.";
+  }, [selectedLists]);
 
   const tripTitle = useMemo(() => {
     if (!activeTrip?.name) return "Loading...";
     const locationLabel = activeTrip?.destination?.name || activeTrip?.destination?.label;
     return locationLabel ? `${activeTrip.name} at ${locationLabel}` : activeTrip.name;
   }, [activeTrip?.destination?.label, activeTrip?.destination?.name, activeTrip?.name]);
+
+  const collaborators = useMemo(() => {
+    const members = Array.isArray(activeTrip?.members) ? [...activeTrip.members] : [];
+    return members.sort((left, right) => {
+      if (left.isLeader !== right.isLeader) {
+        return Number(right.isLeader) - Number(left.isLeader);
+      }
+      if (left.isViewer !== right.isViewer) {
+        return Number(right.isViewer) - Number(left.isViewer);
+      }
+      return String(left.name || "").localeCompare(String(right.name || ""));
+    });
+  }, [activeTrip?.members]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(inviteLink);
@@ -977,7 +1020,7 @@ export default function TripDashboardPage() {
             <div className="xl:hidden">
               <TripMapPanel
                 destination={activeTrip?.destination}
-                activeQuery={activeMapQuery}
+                activeQuery={effectiveMapQuery}
                 mappedIdeas={mappedIdeas}
                 onFocusLocation={setActiveMapQuery}
               />
@@ -1059,7 +1102,7 @@ export default function TripDashboardPage() {
           <div className="h-full">
             <TripMapPanel
               destination={activeTrip?.destination}
-              activeQuery={activeMapQuery}
+              activeQuery={effectiveMapQuery}
               mappedIdeas={mappedIdeas}
               onFocusLocation={setActiveMapQuery}
               immersive
