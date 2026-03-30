@@ -6,12 +6,12 @@ Collaborative trip planning MVP for groups to collect ideas, vote, and generate 
 https://www.tripable.pro/
 
 ## Dev Links
-https://github.com/users/liangl5/projects/1 - backlog
-https://supabase.com/dashboard/project/xgunssqwbacuwysbwhkp - supabase
-https://vercel.com/liangl5s-projects/tripable-client - vercel
-https://resend.com - SMTP service
-https://porkbun.com/ - DNS service
-https://github.com/liangl5/Tripable - GitHub
+- https://github.com/users/liangl5/projects/1 - backlog
+- https://supabase.com/dashboard/project/xgunssqwbacuwysbwhkp - supabase
+- https://vercel.com/liangl5s-projects/tripable-client - vercel
+- https://resend.com - SMTP service
+- https://porkbun.com/ - DNS service
+- https://github.com/liangl5/Tripable - GitHub
 
 ## Tech stack
 
