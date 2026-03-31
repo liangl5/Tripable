@@ -61,6 +61,25 @@ function buildDateRange(startValue, endValue) {
   return dates;
 }
 
+function normalizeRange(startValue, endValue) {
+  if (!startValue || !endValue) return { start: "", end: "" };
+  if (startValue <= endValue) return { start: startValue, end: endValue };
+  return { start: endValue, end: startValue };
+}
+
+function buildRangeFromDates(dates, allowedDateSet) {
+  const filtered = (dates || []).filter((date) => !allowedDateSet || allowedDateSet.has(date)).sort();
+  if (!filtered.length) return { start: "", end: "" };
+  return { start: filtered[0], end: filtered[filtered.length - 1] };
+}
+
+function distanceInDays(firstISO, secondISO) {
+  const first = parseISODate(firstISO);
+  const second = parseISODate(secondISO);
+  if (!first || !second) return Number.MAX_SAFE_INTEGER;
+  return Math.abs(first.getTime() - second.getTime());
+}
+
 function buildMonthCells(monthDate) {
   const year = monthDate.getFullYear();
   const month = monthDate.getMonth();
@@ -113,9 +132,12 @@ export default function AvailabilityCalendar({
   const [mode, setMode] = useState("edit");
   const [editSurveyDates, setEditSurveyDates] = useState(false);
   const [surveyRange, setSurveyRange] = useState(() => originalSurveyRange);
-  const [selectedDates, setSelectedDates] = useState(() => new Set(viewerAvailability));
+  const [availabilityRange, setAvailabilityRange] = useState(() => buildRangeFromDates(viewerAvailability));
   const [isSavingSurveyDates, setIsSavingSurveyDates] = useState(false);
+  const [isSavingAvailability, setIsSavingAvailability] = useState(false);
   const [dirtyAvailability, setDirtyAvailability] = useState(false);
+  const [pendingRangeStart, setPendingRangeStart] = useState("");
+  const [activeRangeHandle, setActiveRangeHandle] = useState(null);
   const [localMessage, setLocalMessage] = useState("");
   const [showDetailedView, setShowDetailedView] = useState(false);
   const [memberViewMode, setMemberViewMode] = useState("table"); // "table" or "list"
@@ -129,6 +151,13 @@ export default function AvailabilityCalendar({
     () => new Set(editSurveyDates ? draftSurveyDates : surveyDatesFromTrip),
     [draftSurveyDates, editSurveyDates, surveyDatesKey]
   );
+  const selectedDates = useMemo(() => {
+    if (!availabilityRange.start || !availabilityRange.end) return new Set();
+    return new Set(
+      buildDateRange(availabilityRange.start, availabilityRange.end).filter((date) => surveyDateSet.has(date))
+    );
+  }, [availabilityRange.end, availabilityRange.start, surveyDateSet]);
+  const selectedDateList = useMemo(() => [...selectedDates].sort(), [selectedDates]);
   const surveyRangeDirty = surveyRange.start !== originalSurveyRange.start || surveyRange.end !== originalSurveyRange.end;
   const surveyRangeError = useMemo(() => {
     if (!editSurveyDates) return "";
@@ -147,26 +176,33 @@ export default function AvailabilityCalendar({
   }, [originalSurveyRange, trip?.id]);
 
   useEffect(() => {
-    setSelectedDates(new Set(viewerAvailability));
-  }, [viewer?.id, viewerAvailabilityKey]);
+    if (dirtyAvailability || pendingRangeStart || activeRangeHandle) return;
+    setAvailabilityRange(buildRangeFromDates(viewerAvailability, surveyDateSet));
+  }, [activeRangeHandle, dirtyAvailability, pendingRangeStart, surveyDateSet, viewer?.id, viewerAvailabilityKey]);
 
   useEffect(() => {
-    if (!dirtyAvailability || !trip?.id || editSurveyDates) return;
+    if (!dirtyAvailability || !trip?.id || editSurveyDates || pendingRangeStart || activeRangeHandle || isSavingAvailability) return;
 
-    const saveAvailability = async () => {
-      try {
-        await onSaveAvailability([...selectedDates].sort());
-        setLocalMessage("Availability updated.");
-      } catch (error) {
-        setLocalMessage("Failed to save availability. Please try again.");
-        console.error("Availability save error:", error);
-      } finally {
-        setDirtyAvailability(false);
-      }
-    };
+    const timeoutId = window.setTimeout(() => {
+      const saveAvailability = async () => {
+        setIsSavingAvailability(true);
+        try {
+          await onSaveAvailability(selectedDateList);
+          setLocalMessage("Availability updated.");
+        } catch (error) {
+          setLocalMessage("Failed to save availability. Please try again.");
+          console.error("Availability save error:", error);
+        } finally {
+          setIsSavingAvailability(false);
+          setDirtyAvailability(false);
+        }
+      };
 
-    saveAvailability();
-  }, [dirtyAvailability, editSurveyDates, onSaveAvailability, selectedDates, trip?.id]);
+      saveAvailability();
+    }, 400);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [activeRangeHandle, dirtyAvailability, editSurveyDates, isSavingAvailability, onSaveAvailability, pendingRangeStart, selectedDateList, trip?.id]);
 
   const monthCells = useMemo(() => buildMonthCells(displayedMonth), [displayedMonth]);
   const overlapByDate = useMemo(() => {
@@ -186,18 +222,111 @@ export default function AvailabilityCalendar({
   }, [overlapByDate]);
 
   const toggleDate = (isoDate) => {
-    if (editSurveyDates || !surveyDateSet.has(isoDate)) return;
+    if (isSavingAvailability || editSurveyDates || !surveyDateSet.has(isoDate)) return;
 
-    setSelectedDates((current) => {
-      const next = new Set(current);
-      if (next.has(isoDate)) {
-        next.delete(isoDate);
-      } else {
-        next.add(isoDate);
-      }
-      return next;
-    });
+    if (!availabilityRange.start || !availabilityRange.end) {
+      setAvailabilityRange({ start: isoDate, end: isoDate });
+      setPendingRangeStart(isoDate);
+      setActiveRangeHandle("end");
+      setLocalMessage("Start date selected. Choose an end date.");
+      return;
+    }
+
+    if (pendingRangeStart) {
+      const nextRange = normalizeRange(pendingRangeStart, isoDate);
+      const rangeDates = buildDateRange(nextRange.start, nextRange.end).filter((date) => surveyDateSet.has(date));
+
+      setAvailabilityRange(nextRange);
+      setPendingRangeStart("");
+      setActiveRangeHandle(null);
+      setDirtyAvailability(true);
+      setLocalMessage(`${rangeDates.length} day${rangeDates.length === 1 ? "" : "s"} selected.`);
+      return;
+    }
+
+    if (activeRangeHandle) {
+      const nextRange = normalizeRange(
+        activeRangeHandle === "start" ? isoDate : availabilityRange.start,
+        activeRangeHandle === "end" ? isoDate : availabilityRange.end
+      );
+      setAvailabilityRange(nextRange);
+      setActiveRangeHandle(null);
+      setDirtyAvailability(true);
+      setLocalMessage("Range updated.");
+      return;
+    }
+
+    if (availabilityRange.start === isoDate && availabilityRange.end === isoDate) {
+      setAvailabilityRange({ start: "", end: "" });
+      setDirtyAvailability(true);
+      setLocalMessage("Availability cleared.");
+      return;
+    }
+
+    if (isoDate === availabilityRange.start) {
+      setActiveRangeHandle("start");
+      setLocalMessage("Choose a new start date.");
+      return;
+    }
+
+    if (isoDate === availabilityRange.end) {
+      setActiveRangeHandle("end");
+      setLocalMessage("Choose a new end date.");
+      return;
+    }
+
+    if (selectedDates.has(isoDate)) {
+      const distanceToStart = distanceInDays(isoDate, availabilityRange.start);
+      const distanceToEnd = distanceInDays(isoDate, availabilityRange.end);
+      const nextRange = normalizeRange(
+        distanceToStart <= distanceToEnd ? isoDate : availabilityRange.start,
+        distanceToStart <= distanceToEnd ? availabilityRange.end : isoDate
+      );
+      setAvailabilityRange(nextRange);
+      setDirtyAvailability(true);
+      setLocalMessage("Range updated.");
+      return;
+    }
+
+    const distanceToStart = distanceInDays(isoDate, availabilityRange.start);
+    const distanceToEnd = distanceInDays(isoDate, availabilityRange.end);
+    const nextRange = normalizeRange(
+      distanceToStart <= distanceToEnd ? isoDate : availabilityRange.start,
+      distanceToStart <= distanceToEnd ? availabilityRange.end : isoDate
+    );
+    setAvailabilityRange(nextRange);
     setDirtyAvailability(true);
+    setLocalMessage("Range updated.");
+  };
+
+  const clearAvailability = () => {
+    if (isSavingAvailability) return;
+    if (!availabilityRange.start && !availabilityRange.end) return;
+    setAvailabilityRange({ start: "", end: "" });
+    setPendingRangeStart("");
+    setActiveRangeHandle(null);
+    setDirtyAvailability(true);
+    setLocalMessage("Availability cleared.");
+  };
+
+  const handlePickRangeHandle = (handle) => {
+    if (isSavingAvailability) return;
+    if (!availabilityRange.start || !availabilityRange.end) {
+      setLocalMessage("Select a start date first.");
+      return;
+    }
+    const isClearingSelection = activeRangeHandle === handle;
+    setPendingRangeStart("");
+    setActiveRangeHandle((current) => (current === handle ? null : handle));
+    if (isClearingSelection) {
+      setLocalMessage("Handle selection cleared.");
+      return;
+    }
+    if (handle === "start") {
+      setLocalMessage("Start handle selected. Click a tile to move start.");
+    } else {
+      setLocalMessage("End handle selected. Click a tile to move end.");
+    }
   };
 
   const handleResetSurveyDates = () => {
@@ -242,7 +371,14 @@ export default function AvailabilityCalendar({
   const monthStatusText = surveyRangeError || statusMessage || localMessage;
 
   return (
-    <div className="rounded-3xl bg-white/95 p-6 shadow-card">
+    <div className="relative rounded-3xl bg-white/95 p-6 shadow-card">
+      {isSavingAvailability ? (
+        <div className="absolute inset-0 z-20 flex items-center justify-center rounded-3xl bg-white/60 backdrop-blur-[1px]">
+          <div className="rounded-full bg-[#4C6FFF] px-4 py-2 text-xs font-semibold text-white shadow-card">
+            Autosaving availability...
+          </div>
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold text-ink">Availability</h2>
@@ -372,6 +508,46 @@ export default function AvailabilityCalendar({
               Your selected availability
             </span>
           )}
+
+          {!editSurveyDates && mode === "edit" ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handlePickRangeHandle("start")}
+                disabled={isSavingAvailability}
+                className={classNames(
+                  "rounded-full px-3 py-1.5 text-xs font-semibold transition",
+                  activeRangeHandle === "start" ? "bg-[#4C6FFF] text-white" : "bg-white text-ink shadow-soft",
+                  isSavingAvailability ? "opacity-60 cursor-not-allowed" : ""
+                )}
+              >
+                Adjust start
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePickRangeHandle("end")}
+                disabled={isSavingAvailability}
+                className={classNames(
+                  "rounded-full px-3 py-1.5 text-xs font-semibold transition",
+                  activeRangeHandle === "end" ? "bg-[#4C6FFF] text-white" : "bg-white text-ink shadow-soft",
+                  isSavingAvailability ? "opacity-60 cursor-not-allowed" : ""
+                )}
+              >
+                Adjust end
+              </button>
+              <button
+                type="button"
+                onClick={clearAvailability}
+                disabled={isSavingAvailability}
+                className={classNames(
+                  "rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-ink shadow-soft transition hover:bg-slate-50",
+                  isSavingAvailability ? "opacity-60 cursor-not-allowed" : ""
+                )}
+              >
+                Clear
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -402,6 +578,9 @@ export default function AvailabilityCalendar({
               const overlapStrength = maxOverlap > 0 ? overlap / maxOverlap : 0;
               const isToday = isoDate === formatISO(new Date());
               const disabled = !editSurveyDates && !inSurvey;
+              const isRangeStart = mode === "edit" && availabilityRange.start === isoDate;
+              const isRangeEnd = mode === "edit" && availabilityRange.end === isoDate;
+              const isPendingStart = mode === "edit" && pendingRangeStart === isoDate;
 
               let cellStyle = "border-slate-200/70 bg-white text-ink";
               let inlineStyle;
@@ -423,13 +602,16 @@ export default function AvailabilityCalendar({
                 <button
                   key={isoDate}
                   type="button"
-                  disabled={mode === "group" || editSurveyDates || disabled}
+                  disabled={isSavingAvailability || mode === "group" || editSurveyDates || disabled}
                   onClick={() => toggleDate(isoDate)}
                   className={classNames(
                     "relative aspect-square rounded-2xl border p-2 text-left transition",
                     cellStyle,
                     disabled || mode === "group" ? "cursor-default" : "cursor-pointer",
-                    disabled ? "opacity-35" : ""
+                    disabled ? "opacity-35" : "",
+                    isPendingStart ? "ring-2 ring-[#4C6FFF]/70 ring-offset-2 ring-offset-[#FBFCFF]" : "",
+                    isRangeStart ? "rounded-l-[1.2rem]" : "",
+                    isRangeEnd ? "rounded-r-[1.2rem]" : ""
                   )}
                   style={inlineStyle}
                 >
@@ -446,6 +628,23 @@ export default function AvailabilityCalendar({
                     <span className="absolute bottom-1 right-1 h-2 w-2 rounded-full bg-[#6BCB77]" aria-label="Selected" />
                   ) : inSurvey ? (
                     <span className="absolute bottom-1 right-1 h-2 w-2 rounded-full bg-[#F56565]" aria-label="Available to select" />
+                  ) : null}
+
+                  {!editSurveyDates && mode === "edit" && isRangeStart ? (
+                    <span
+                      className="absolute left-1 top-1 rounded-full bg-white/85 px-1.5 py-0.5 text-[10px] font-semibold text-[#4C6FFF]"
+                      aria-label="Start"
+                    >
+                      S
+                    </span>
+                  ) : null}
+                  {!editSurveyDates && mode === "edit" && isRangeEnd ? (
+                    <span
+                      className="absolute right-1 top-1 rounded-full bg-white/85 px-1.5 py-0.5 text-[10px] font-semibold text-[#4C6FFF]"
+                      aria-label="End"
+                    >
+                      E
+                    </span>
                   ) : null}
 
                   {isToday ? (
