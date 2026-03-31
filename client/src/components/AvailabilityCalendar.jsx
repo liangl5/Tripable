@@ -180,30 +180,6 @@ export default function AvailabilityCalendar({
     setAvailabilityRange(buildRangeFromDates(viewerAvailability, surveyDateSet));
   }, [activeRangeHandle, dirtyAvailability, pendingRangeStart, surveyDateSet, viewer?.id, viewerAvailabilityKey]);
 
-  useEffect(() => {
-    if (!dirtyAvailability || !trip?.id || editSurveyDates || pendingRangeStart || activeRangeHandle || isSavingAvailability) return;
-
-    const timeoutId = window.setTimeout(() => {
-      const saveAvailability = async () => {
-        setIsSavingAvailability(true);
-        try {
-          await onSaveAvailability(selectedDateList);
-          setLocalMessage("Availability updated.");
-        } catch (error) {
-          setLocalMessage("Failed to save availability. Please try again.");
-          console.error("Availability save error:", error);
-        } finally {
-          setIsSavingAvailability(false);
-          setDirtyAvailability(false);
-        }
-      };
-
-      saveAvailability();
-    }, 400);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [activeRangeHandle, dirtyAvailability, editSurveyDates, isSavingAvailability, onSaveAvailability, pendingRangeStart, selectedDateList, trip?.id]);
-
   const monthCells = useMemo(() => buildMonthCells(displayedMonth), [displayedMonth]);
   const overlapByDate = useMemo(() => {
     const entries = new Map();
@@ -307,6 +283,32 @@ export default function AvailabilityCalendar({
     setActiveRangeHandle(null);
     setDirtyAvailability(true);
     setLocalMessage("Availability cleared.");
+  };
+
+  const handleSaveAvailability = async () => {
+    if (!trip?.id || !dirtyAvailability || isSavingAvailability) return;
+    setIsSavingAvailability(true);
+    try {
+      await onSaveAvailability(selectedDateList);
+      setDirtyAvailability(false);
+      setPendingRangeStart("");
+      setActiveRangeHandle(null);
+      setLocalMessage("Availability updated.");
+    } catch (error) {
+      setLocalMessage("Failed to save availability. Please try again.");
+      console.error("Availability save error:", error);
+    } finally {
+      setIsSavingAvailability(false);
+    }
+  };
+
+  const handleDiscardAvailability = () => {
+    if (isSavingAvailability) return;
+    setAvailabilityRange(buildRangeFromDates(viewerAvailability, surveyDateSet));
+    setDirtyAvailability(false);
+    setPendingRangeStart("");
+    setActiveRangeHandle(null);
+    setLocalMessage("Unsaved availability changes discarded.");
   };
 
   const handlePickRangeHandle = (handle) => {
@@ -698,6 +700,25 @@ export default function AvailabilityCalendar({
               className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-ink shadow-soft"
             >
               Cancel
+            </button>
+          </div>
+        ) : mode === "edit" ? (
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={handleSaveAvailability}
+              disabled={!dirtyAvailability || isSavingAvailability || loading}
+              className="rounded-full bg-[#4C6FFF] px-5 py-2.5 text-sm font-semibold text-white shadow-card disabled:opacity-60"
+            >
+              {isSavingAvailability ? "Saving..." : "Save availability"}
+            </button>
+            <button
+              type="button"
+              onClick={handleDiscardAvailability}
+              disabled={!dirtyAvailability || isSavingAvailability}
+              className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-ink shadow-soft disabled:opacity-60"
+            >
+              Discard changes
             </button>
           </div>
         ) : null}
