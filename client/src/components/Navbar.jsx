@@ -52,7 +52,7 @@ export default function Navbar() {
             </>
           ) : (
             <>
-              <Link to="/trips" className="rounded-full px-4 py-2 transition hover:bg-white hover:shadow-soft">
+              <Link to="/" className="rounded-full px-4 py-2 transition hover:bg-white hover:shadow-soft">
                 My Trips
               </Link>
               <div ref={menuRef} className="relative flex items-center gap-2 border-l border-slate-200 pl-3">

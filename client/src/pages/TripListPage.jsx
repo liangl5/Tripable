@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import Header from "../components/Header.jsx";
 import TripList from "../components/TripList.jsx";
-import TripableLogoLink from "../components/TripableLogoLink.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
 
@@ -36,8 +36,6 @@ export default function TripListPage() {
   );
 
   const handleDeleteTrip = async (tripId) => {
-    const confirmed = window.confirm("Delete this trip? This cannot be undone.");
-    if (!confirmed) return;
     setDeletingTripId(tripId);
     try {
       await deleteTrip(tripId);
@@ -47,32 +45,34 @@ export default function TripListPage() {
   };
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-12">
-      <header className="mb-10 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <TripableLogoLink className="w-fit" compact />
-          <h1 className="mt-4 text-3xl font-semibold text-ink">Your trips</h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <Link to="/" className="rounded-full bg-white/80 px-5 py-3 text-sm font-semibold text-ink shadow-card">
-            Home
-          </Link>
-          <Link
-            to="/trips/new"
-            className="rounded-full bg-ocean px-5 py-3 text-sm font-semibold text-white shadow-card"
-          >
-            Create new trip
-          </Link>
-        </div>
-      </header>
+    <div className="min-h-screen bg-slate-50">
+      <Header />
+      <div className="mx-auto flex max-w-6xl flex-col px-6 py-12">
+        <header className="mb-10 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-semibold text-ink">Your trips</h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link to="/" className="rounded-full bg-white/80 px-5 py-3 text-sm font-semibold text-ink shadow-card">
+              Home
+            </Link>
+            <Link
+              to="/trips/new"
+              className="rounded-full bg-ocean px-5 py-3 text-sm font-semibold text-white shadow-card"
+            >
+              Create new trip
+            </Link>
+          </div>
+        </header>
 
-      {tripsLoading ? <p className="text-sm">Loading trips...</p> : null}
-      {error ? <p className="text-sm text-coral">{error}</p> : null}
-      <TripList
-        trips={tripsWithOwnership}
-        onDeleteTrip={handleDeleteTrip}
-        deletingTripId={deleteTripLoading ? deletingTripId : null}
-      />
+        {tripsLoading ? <p className="text-sm">Loading trips...</p> : null}
+        {error ? <p className="text-sm text-coral">{error}</p> : null}
+        <TripList
+          trips={tripsWithOwnership}
+          onDeleteTrip={handleDeleteTrip}
+          deletingTripId={deleteTripLoading ? deletingTripId : null}
+        />
+      </div>
     </div>
   );
 }

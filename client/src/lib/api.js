@@ -9,7 +9,6 @@ import {
   hydrateIdeas,
   hydrateTrip,
   isPlaceLikeList,
-  normalizeDestination,
   normalizeListName,
   pruneTripMeta,
   removeIdeaMeta,
@@ -70,6 +69,32 @@ function buildGoogleMapsHeaders(fieldMask) {
 export async function getCurrentUserId() {
   const { data: { session } } = await supabase.auth.getSession();
   return session?.user?.id || null;
+}
+
+function normalizeTripRole(role) {
+  if (role === "owner" || role === "editor") return role;
+  return "suggestor";
+}
+
+async function getTripRoleForUser(tripId, userId) {
+  const { data: trip } = await supabase
+    .from("Trip")
+    .select("createdById")
+    .eq("id", tripId)
+    .single();
+
+  if (trip?.createdById === userId) {
+    return "owner";
+  }
+
+  const { data: roleRow } = await supabase
+    .from("UserTripRole")
+    .select("role")
+    .eq("tripId", tripId)
+    .eq("userId", userId)
+    .maybeSingle();
+
+  return normalizeTripRole(roleRow?.role);
 }
 
 function buildPlaceSearchQuery(textQuery, destination) {
@@ -1086,27 +1111,42 @@ export const api = {
     const userId = user.id;
 
     // Get trips created by user
-    const { data: createdTripsData } = await supabase
+    const { data: createdTripsData, error: createdError } = await supabase
       .from("Trip")
       .select("*")
       .eq("createdById", userId)
       .order("createdAt", { ascending: false });
 
-    // Get trips user is a member of
-    const { data: memberTripsData } = await supabase
+    if (createdError) throw createdError;
+
+    // Get trip IDs where user is a member
+    const { data: membershipData, error: memberError } = await supabase
       .from("TripMember")
-      .select("trip:tripId(*)")
+      .select("tripId")
       .eq("userId", userId);
 
+    if (memberError) throw memberError;
+
+    // Fetch those trips if any memberships exist
+    let memberTripsData = [];
+    if (membershipData && membershipData.length > 0) {
+      const tripIds = membershipData.map(m => m.tripId);
+      const { data: trips, error: tripError } = await supabase
+        .from("Trip")
+        .select("*")
+        .in("id", tripIds)
+        .order("createdAt", { ascending: false });
+      
+      if (tripError) throw tripError;
+      memberTripsData = trips || [];
+    }
+
     const createdTrips = createdTripsData ?? [];
-    const memberTrips = memberTripsData ?? [];
 
     // Combine and deduplicate
     const tripMap = new Map();
     createdTrips.forEach(trip => tripMap.set(trip.id, trip));
-    memberTrips.forEach(member => {
-      if (member.trip) tripMap.set(member.trip.id, member.trip);
-    });
+    memberTripsData.forEach(trip => tripMap.set(trip.id, trip));
 
     // Get member counts
     const trips = Array.from(tripMap.values())
@@ -1175,77 +1215,62 @@ export const api = {
 
     const formattedTrip = await formatTripDetails(trip, userId, members, leaders, availability, surveyDates);
 
-    if (trip.createdById === userId) {
-      const tripMetaPatch = {};
-
-      if (!normalizeDestination(trip.destination) && formattedTrip.destination) {
-        tripMetaPatch.destination = formattedTrip.destination;
-      }
-      if (!Array.isArray(trip.lists) && formattedTrip.lists?.length) {
-        tripMetaPatch.lists = formattedTrip.lists;
-      }
-      if (!Array.isArray(trip.invitees) && formattedTrip.invitees?.length) {
-        tripMetaPatch.invitees = formattedTrip.invitees;
-      }
-      if ((trip.budgetTotal === undefined || trip.budgetTotal === null || trip.budgetTotal === "") && formattedTrip.budgetTotal) {
-        tripMetaPatch.budgetTotal = formattedTrip.budgetTotal;
-      }
-      if (!Array.isArray(trip.expenses) && formattedTrip.expenses?.length) {
-        tripMetaPatch.expenses = formattedTrip.expenses;
-      }
-
-      if (Object.keys(tripMetaPatch).length) {
-        void syncTripMetaPersistence(tripId, userId, tripMetaPatch).catch((error) => {
-          console.error("Unable to migrate trip metadata into Supabase", error);
-        });
-      }
-    }
+    // NOTE: Legacy metadata persistence removed in v2.0
+    // Trip now uses normalized tables (TripDestination, List, Transaction) instead of JSONB
+    // Migration from localStorage happens at create time in createTrip()
 
     return formattedTrip;
+  },
+
+  async getTripInvitePreview(tripId) {
+    const { data: trip, error } = await supabase
+      .from("Trip")
+      .select("id, name, createdAt, createdById")
+      .eq("id", tripId)
+      .single();
+
+    if (error || !trip) {
+      throw new Error("Trip not found");
+    }
+
+    let ownerDisplayName = "Trip owner";
+    if (trip.createdById) {
+      const { data: owner } = await supabase
+        .from("User")
+        .select("name")
+        .eq("id", trip.createdById)
+        .maybeSingle();
+      ownerDisplayName = owner?.name || ownerDisplayName;
+    }
+
+    return {
+      id: trip.id,
+      name: trip.name,
+      startDate: null,
+      endDate: null,
+      memberCount: null,
+      createdAt: trip.createdAt,
+      ownerDisplayName
+    };
   },
 
   async createTrip(payload) {
     const user = await getOrCreateUser();
     const tripId = crypto.randomUUID();
     const initialLists = Array.isArray(payload.lists) && payload.lists.length ? payload.lists : DEFAULT_LISTS;
-    const initialInvitees = Array.isArray(payload.invitees) ? payload.invitees : [];
+    
+    // Create trip with clean schema (no JSONB)
     const tripInsert = {
       id: tripId,
       name: payload.name,
-      createdById: user.id,
-      startDate: null,
-      endDate: null,
-      ...buildTripMetaRecord({
-        destination: payload.destination || null,
-        lists: initialLists,
-        invitees: initialInvitees,
-        budgetTotal: "",
-        expenses: []
-      })
+      createdById: user.id
     };
 
-    // Create trip
-    let trip;
-    let tripError;
-    ({ data: trip, error: tripError } = await supabase
+    const { data: trip, error: tripError } = await supabase
       .from("Trip")
       .insert([tripInsert])
       .select()
-      .single());
-
-    if (tripError && (isMissingTripDestinationColumnError(tripError) || isMissingTripMetaColumnsError(tripError))) {
-      ({ data: trip, error: tripError } = await supabase
-        .from("Trip")
-        .insert([{
-          id: tripId,
-          name: payload.name,
-          createdById: user.id,
-          startDate: null,
-          endDate: null
-        }])
-        .select()
-        .single());
-    }
+      .single();
 
     if (tripError) throw tripError;
 
@@ -1260,25 +1285,105 @@ export const api = {
 
     if (memberError) throw memberError;
 
-    await syncTripMetaPersistence(tripId, user.id, {
-      destination: payload.destination || null,
-      invitees: initialInvitees,
+    // Create UserTripRole for creator as owner
+    const { error: roleError } = await supabase
+      .from("UserTripRole")
+      .insert([{
+        id: crypto.randomUUID(),
+        tripId,
+        userId: user.id,
+        role: "owner"
+      }]);
+
+    if (roleError) throw roleError;
+
+    // Create default lists
+    if (initialLists && initialLists.length > 0) {
+      const listsToInsert = initialLists.map((listName, index) => ({
+        id: crypto.randomUUID(),
+        tripId,
+        name: typeof listName === 'string' ? listName : listName.name,
+        order: index
+      }));
+
+      await supabase
+        .from("List")
+        .insert(listsToInsert)
+        .select();
+    }
+
+    return {
+      ...trip,
+      destination: null,
       lists: initialLists,
+      invitees: Array.isArray(payload.invitees) ? payload.invitees : [],
       budgetTotal: "",
       expenses: []
+    };
+  },
+
+  async sendTripInvites(payload) {
+    const user = await getOrCreateUser();
+    const invitees = Array.isArray(payload?.invitees)
+      ? payload.invitees
+          .map((invitee) => {
+            if (typeof invitee === "string") return invitee;
+            if (invitee && typeof invitee === "object") return invitee.email;
+            return "";
+          })
+          .map((email) => String(email || "").trim().toLowerCase())
+          .filter(Boolean)
+      : [];
+
+    if (!payload?.tripId || !payload?.tripName || invitees.length === 0) {
+      return {
+        sent: 0,
+        failed: 0,
+        total: 0,
+        results: []
+      };
+    }
+
+    const inviteUrl = payload.inviteUrl || `${window.location.origin}/trips/${payload.tripId}/invite`;
+
+    const response = await fetch("/api/send-trip-invites", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        tripId: payload.tripId,
+        tripName: payload.tripName,
+        invitees,
+        inviterName: user?.name || "A teammate",
+        inviteUrl
+      })
     });
 
-    return formatTrip(
-      {
-        ...trip,
-        destination: payload.destination || null,
-        lists: initialLists,
-        invitees: initialInvitees,
-        budgetTotal: "",
-        expenses: []
-      },
-      1
-    );
+    const contentType = response.headers.get("content-type") || "";
+    const rawBody = await response.text();
+    let result = {};
+    if (rawBody) {
+      if (contentType.includes("application/json")) {
+        try {
+          result = JSON.parse(rawBody);
+        } catch {
+          throw new Error("Invite service returned invalid JSON.");
+        }
+      } else {
+        // Local Vite dev often serves index.html for /api routes unless using Vercel dev.
+        if (!response.ok) {
+          throw new Error("Invite service endpoint unavailable. Use Vercel deployment or run with `vercel dev`.");
+        }
+        throw new Error("Invite service returned an unexpected response format.");
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error(result?.error || "Unable to send invites right now.");
+    }
+
+    return result;
   },
 
   async deleteTrip(tripId) {
@@ -1294,15 +1399,44 @@ export const api = {
       throw new Error("Only the trip owner can delete this trip");
     }
 
-    // Delete all related data
-    await supabase.from("Vote").delete().eq("idea(tripId)", tripId);
+    // Delete all related data in correct dependency order
+    // 1. Get all idea IDs for this trip, then delete their votes
+    const { data: ideas } = await supabase
+      .from("Idea")
+      .select("id")
+      .eq("tripId", tripId);
+
+    if (ideas && ideas.length > 0) {
+      const ideaIds = ideas.map(idea => idea.id);
+      await supabase.from("Vote").delete().in("ideaId", ideaIds);
+    }
+
+    // 2. Delete ideas
     await supabase.from("Idea").delete().eq("tripId", tripId);
+
+    // 3. Get all itinerary day IDs, then delete their items
+    const { data: days } = await supabase
+      .from("ItineraryDay")
+      .select("id")
+      .eq("tripId", tripId);
+
+    if (days && days.length > 0) {
+      const dayIds = days.map(day => day.id);
+      await supabase.from("ItineraryItem").delete().in("itineraryDayId", dayIds);
+    }
+
+    // 4. Delete other trip data
+    await supabase.from("ItineraryDay").delete().eq("tripId", tripId);
     await supabase.from("UserAvailability").delete().eq("tripId", tripId);
     await supabase.from("SurveyDate").delete().eq("tripId", tripId);
-    await supabase.from("ItineraryItem").delete().eq("itineraryDay(tripId)", tripId);
-    await supabase.from("ItineraryDay").delete().eq("tripId", tripId);
     await supabase.from("TripMember").delete().eq("tripId", tripId);
+    await supabase.from("UserTripRole").delete().eq("tripId", tripId);
+    await supabase.from("List").delete().eq("tripId", tripId);
+    await supabase.from("TripTabConfiguration").delete().eq("tripId", tripId);
+    await supabase.from("AvailabilityTabData").delete().eq("tripId", tripId);
+    await supabase.from("Transaction").delete().eq("tripId", tripId);
 
+    // 5. Finally delete the trip
     const { error } = await supabase
       .from("Trip")
       .delete()
@@ -1318,27 +1452,31 @@ export const api = {
   async updateTripDates(tripId, payload) {
     const user = await getOrCreateUser();
 
-    const { data: trip } = await supabase
-      .from("Trip")
-      .select("createdById")
-      .eq("id", tripId)
-      .single();
-
-    if (trip.createdById !== user.id) {
-      throw new Error("Only the trip owner can update the trip dates");
+    const role = await getTripRoleForUser(tripId, user.id);
+    if (role !== "owner" && role !== "editor") {
+      throw new Error("Only trip owners and editors can update trip dates");
     }
 
-    const { data: updated, error } = await supabase
-      .from("Trip")
-      .update({
-        startDate: new Date(payload.startDate).toISOString(),
-        endDate: new Date(payload.endDate).toISOString()
-      })
-      .eq("id", tripId)
-      .select()
-      .single();
+    if (!payload?.startDate || !payload?.endDate) {
+      throw new Error("Both start and end date are required.");
+    }
 
-    if (error) throw error;
+    // Store the selected window as survey dates since Trip.startDate/endDate are deprecated.
+    await supabase.from("SurveyDate").delete().eq("tripId", tripId);
+
+    const records = [payload.startDate, payload.endDate]
+      .map((date) => String(date || "").trim())
+      .filter(Boolean)
+      .map((date) => ({
+        id: crypto.randomUUID(),
+        tripId,
+        date: new Date(date).toISOString()
+      }));
+
+    if (records.length > 0) {
+      const { error } = await supabase.from("SurveyDate").insert(records);
+      if (error) throw error;
+    }
 
     // Invalidate itinerary
     await supabase.from("ItineraryDay").delete().eq("tripId", tripId);
@@ -1350,14 +1488,9 @@ export const api = {
   async updateTripSurveyDates(tripId, payload) {
     const user = await getOrCreateUser();
 
-    const { data: trip } = await supabase
-      .from("Trip")
-      .select("createdById")
-      .eq("id", tripId)
-      .single();
-
-    if (trip.createdById !== user.id) {
-      throw new Error("Only the trip owner can edit selectable dates");
+    const role = await getTripRoleForUser(tripId, user.id);
+    if (role !== "owner" && role !== "editor") {
+      throw new Error("Only trip owners and editors can edit selectable dates");
     }
 
     // Delete existing survey dates
@@ -1377,16 +1510,6 @@ export const api = {
 
       if (error) throw error;
     }
-
-    // Update trip dates
-    const sortedDates = [...payload.dates].sort();
-    await supabase
-      .from("Trip")
-      .update({
-        startDate: sortedDates[0] ? new Date(sortedDates[0]).toISOString() : null,
-        endDate: sortedDates[sortedDates.length - 1] ? new Date(sortedDates[sortedDates.length - 1]).toISOString() : null
-      })
-      .eq("id", tripId);
 
     clearGeneratedItinerary(tripId);
 
@@ -1425,35 +1548,40 @@ export const api = {
   async updateTripMeta(tripId, payload) {
     const user = await getOrCreateUser();
 
-    const { data: trip } = await supabase
-      .from("Trip")
-      .select("createdById")
-      .eq("id", tripId)
-      .single();
-
-    if (trip.createdById !== user.id) {
-      throw new Error("Only the trip owner can update trip settings");
+    const role = await getTripRoleForUser(tripId, user.id);
+    if (role !== "owner" && role !== "editor") {
+      throw new Error("Only trip owners and editors can update trip settings");
     }
 
-    try {
-      const persisted = await syncTripMetaPersistence(tripId, user.id, payload, {
-        allowLocalFallback: false
-      });
-      if (!persisted) {
-        throw new Error(
-          "Trip metadata columns are missing in Supabase. Run Step 1.5 from SUPABASE_SETUP_GUIDE.md."
-        );
-      }
-    } catch (error) {
-      console.error("Unable to persist trip metadata", error);
-      throw error;
-    }
+    // NOTE: Trip metadata now stored in normalized tables
+    // - destination → TripDestination table
+    // - lists → List table  
+    // - expenses → Transaction + TransactionSplit tables
+    // This updateTripMeta function is deprecated and kept for backwards compatibility
 
     return this.getTrip(tripId);
   },
 
   async joinTrip(tripId) {
     const user = await getOrCreateUser();
+    const normalizedEmail = String(user?.email || "").trim().toLowerCase();
+    let pendingInvite = null;
+
+    if (normalizedEmail) {
+      const { data: pendingRow, error: pendingError } = await supabase
+        .from("PendingTripInvite")
+        .select("id, role, status")
+        .eq("tripId", tripId)
+        .ilike("email", normalizedEmail)
+        .eq("status", "pending")
+        .maybeSingle();
+
+      // Ignore missing-table errors for backwards compatibility.
+      if (pendingError && !String(pendingError.message || "").includes("PendingTripInvite")) {
+        throw pendingError;
+      }
+      pendingInvite = pendingRow || null;
+    }
 
     // Check trip exists
     const { data: trip, error: tripError } = await supabase
@@ -1484,6 +1612,41 @@ export const api = {
       }]);
 
     if (error) throw error;
+
+    // Create UserTripRole for invited user based on pending invite role.
+    const desiredRole = pendingInvite?.role === "editor" ? "editor" : "suggestor";
+    const { error: roleError } = await supabase
+      .from("UserTripRole")
+      .insert([{
+        id: crypto.randomUUID(),
+        tripId,
+        userId: user.id,
+        role: desiredRole
+      }])
+      .select()
+      .single();
+
+    // Duplicate role rows are harmless. Any other failure leaves the trip in a partial state,
+    // so roll back membership and surface a real error to the caller.
+    if (roleError && !roleError.message?.toLowerCase?.().includes("duplicate")) {
+      await supabase
+        .from("TripMember")
+        .delete()
+        .eq("tripId", tripId)
+        .eq("userId", user.id);
+      throw new Error("Unable to complete trip join permissions. Please contact the trip owner.");
+    }
+
+    if (pendingInvite?.id) {
+      await supabase
+        .from("PendingTripInvite")
+        .update({
+          status: "accepted",
+          acceptedAt: new Date().toISOString(),
+          acceptedByUserId: user.id
+        })
+        .eq("id", pendingInvite.id);
+    }
   },
 
   async leaveTrip(tripId) {
@@ -1555,12 +1718,13 @@ export const api = {
       if (voteDeleteError) throw voteDeleteError;
     }
 
-    const { error: itineraryDeleteError } = await supabase
-      .from("ItineraryDay")
+    const { error: roleDeleteError } = await supabase
+      .from("UserTripRole")
       .delete()
-      .eq("tripId", tripId);
+      .eq("tripId", tripId)
+      .eq("userId", user.id);
 
-    if (itineraryDeleteError) throw itineraryDeleteError;
+    if (roleDeleteError) throw roleDeleteError;
 
     clearGeneratedItinerary(tripId);
     removeTripMeta(tripId);
@@ -1646,17 +1810,13 @@ export const api = {
 
     if (fetchError || !existingIdea) throw new Error("Idea not found");
 
-    const { data: trip } = await supabase
-      .from("Trip")
-      .select("createdById")
-      .eq("id", tripId)
-      .single();
-
-    const isOwner = trip?.createdById === user.id;
+    const role = await getTripRoleForUser(tripId, user.id);
+    const isOwner = role === "owner";
+    const isEditor = role === "editor";
     const isCreator = existingIdea.createdById === user.id;
 
-    if (!isOwner && !isCreator) {
-      throw new Error("Only the trip owner or item creator can edit this item");
+    if (!isOwner && !isEditor && !isCreator) {
+      throw new Error("Only the trip owner, editor, or item creator can edit this item");
     }
 
     const baseIdeaRecord = {
@@ -1714,17 +1874,13 @@ export const api = {
     if (fetchError || !idea) throw new Error("Idea not found");
 
     // Check if user is trip owner or idea creator
-    const { data: trip } = await supabase
-      .from("Trip")
-      .select("createdById")
-      .eq("id", tripId)
-      .single();
-
-    const isOwner = trip?.createdById === user.id;
+    const role = await getTripRoleForUser(tripId, user.id);
+    const isOwner = role === "owner";
+    const isEditor = role === "editor";
     const isCreator = idea.createdById === user.id;
 
-    if (!isOwner && !isCreator) {
-      throw new Error("Only the trip owner or activity creator can delete this activity");
+    if (!isOwner && !isEditor && !isCreator) {
+      throw new Error("Only the trip owner, editor, or activity creator can delete this activity");
     }
 
     // Delete votes first
@@ -1819,9 +1975,6 @@ export const api = {
 
     if (!trip) throw new Error("Trip not found");
 
-    if (!trip.startDate || !trip.endDate) {
-      throw new Error("Set trip dates before generating an itinerary");
-    }
     const ideas = await this.getIdeas(tripId);
     const itinerary = createItineraryDraft(trip, ideas);
     return saveGeneratedItinerary(tripId, itinerary);

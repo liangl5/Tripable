@@ -36,6 +36,18 @@ npm run dev
 
 Client runs on `http://localhost:5173` and API on `http://localhost:3001`.
 
+## Invite Email Setup (Resend + Vercel)
+
+Trip invite emails are sent through a Vercel serverless endpoint at `/api/send-trip-invites`.
+
+Required Vercel environment variables:
+- `RESEND_API_KEY`: API key from Resend dashboard.
+- `RESEND_FROM_EMAIL`: Verified sender identity, for example `Tripable <noreply@yourdomain.com>`.
+
+Notes:
+- If `RESEND_FROM_EMAIL` is not set, the API falls back to `Tripable <onboarding@resend.dev>` for initial testing.
+- In production, use a verified domain sender in Resend to improve delivery.
+
 ## Core user flow
 
 1. Create a trip

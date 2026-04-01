@@ -5,11 +5,11 @@ import { AuthStatus } from "./components/AuthStatus";
 import { ensureUserProfile } from "./lib/userProfile.js";
 
 const HomePage = lazy(() => import("./pages/HomePage.jsx"));
-const TripListPage = lazy(() => import("./pages/TripListPage.jsx"));
 const CreateTripPage = lazy(() => import("./pages/CreateTripPage.jsx"));
 const TripDashboardPage = lazy(() => import("./pages/TripDashboardPage.jsx"));
 const TripInvitePage = lazy(() => import("./pages/TripInvitePage.jsx"));
 const ItineraryPage = lazy(() => import("./pages/ItineraryPage.jsx"));
+const UserProfilePage = lazy(() => import("./pages/UserProfilePage.jsx"));
 
 export const SessionContext = createContext(null);
 export function useSession() {
@@ -99,7 +99,7 @@ export default function App() {
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route path="/auth" element={<AuthStatus />} />
-              <Route path="/trips" element={<TripListPage />} />
+              <Route path="/profile" element={<UserProfilePage />} />
               <Route path="/trips/new" element={<CreateTripPage />} />
               <Route path="/trips/:tripId/invite" element={<TripInvitePage />} />
               <Route path="/trips/:tripId/itinerary" element={<ItineraryPage />} />

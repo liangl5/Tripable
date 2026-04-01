@@ -17,7 +17,7 @@ export function AuthStatus() {
   const [isSignUp, setIsSignUp] = useState(true);
   const [message, setMessage] = useState('');
 
-  const returnUrl = searchParams.get('return') || '/trips';
+  const returnUrl = searchParams.get('return') || '/';
   const displayName = useMemo(() => getDisplayName(profile, session), [profile, session]);
 
   const handleSignUp = async (e) => {

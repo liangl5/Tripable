@@ -9,6 +9,7 @@ export const useTripStore = create((set, get) => ({
   loading: false,
   tripsLoading: false,
   createTripLoading: false,
+  inviteSendLoading: false,
   tripLoading: false,
   deleteTripLoading: false,
   leaveTripLoading: false,
@@ -44,11 +45,35 @@ export const useTripStore = create((set, get) => ({
     }
   },
 
+  sendTripInvites: async (payload) => {
+    set({ inviteSendLoading: true, error: null });
+    try {
+      const result = await api.sendTripInvites(payload);
+      set({ inviteSendLoading: false });
+      return result;
+    } catch (error) {
+      set({ error: error.message, inviteSendLoading: false });
+      throw error;
+    }
+  },
+
   loadTrip: async (tripId) => {
     set({ tripLoading: true, error: null });
     try {
       const trip = await api.getTrip(tripId);
       set({ currentTrip: trip, tripLoading: false });
+      return trip;
+    } catch (error) {
+      set({ error: error.message, tripLoading: false });
+      throw error;
+    }
+  },
+
+  loadTripInvitePreview: async (tripId) => {
+    set({ tripLoading: true, error: null });
+    try {
+      const trip = await api.getTripInvitePreview(tripId);
+      set({ tripLoading: false });
       return trip;
     } catch (error) {
       set({ error: error.message, tripLoading: false });
