@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useSession, useUserProfile } from "../App";
 import { getDisplayName } from "../lib/userProfile.js";
+import { trackEvent } from "../lib/analytics.js";
 import TripableLogoLink from "./TripableLogoLink.jsx";
 
 export function AuthStatus() {
@@ -56,8 +57,14 @@ export function AuthStatus() {
 
     const { error } = await supabase.auth.signUp({ email, password });
     if (error) {
+      void trackEvent("auth_sign_up_failed", {
+        reason: error.message || "unknown"
+      });
       setMessage(`Error: ${error.message}`);
     } else {
+      void trackEvent("auth_sign_up_succeeded", {
+        has_return_url: Boolean(returnUrl)
+      });
       setMessage('Check your email for the confirmation link!');
       setEmail('');
       setPassword('');
@@ -73,8 +80,14 @@ export function AuthStatus() {
     setMessage('');
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
+      void trackEvent("auth_sign_in_failed", {
+        reason: error.message || "unknown"
+      });
       setMessage(`Error: ${error.message}`);
     } else {
+      void trackEvent("auth_sign_in_succeeded", {
+        has_return_url: Boolean(returnUrl)
+      });
       setMessage('Signed in successfully!');
       setEmail('');
       setPassword('');
@@ -88,9 +101,13 @@ export function AuthStatus() {
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
+    void trackEvent("auth_sign_out", {});
   };
 
   const switchMode = () => {
+    void trackEvent("auth_mode_switched", {
+      next_mode: isSignUp ? "signin" : "signup"
+    });
     setIsSignUp(!isSignUp);
     setMessage('');
     setEmail('');

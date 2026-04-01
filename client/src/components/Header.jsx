@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useSession, useUserProfile } from "../App";
 import { getDisplayName } from "../lib/userProfile.js";
+import { trackEvent } from "../lib/analytics.js";
 import TripableLogoLink from "./TripableLogoLink.jsx";
 
 export default function Header() {
@@ -15,11 +16,17 @@ export default function Header() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    void trackEvent("auth_sign_out", {
+      source: "header_menu"
+    });
     navigate("/");
     setIsProfileMenuOpen(false);
   };
 
   const handleProfileClick = () => {
+    void trackEvent("profile_opened", {
+      source: "header_menu"
+    });
     navigate("/profile");
     setIsProfileMenuOpen(false);
   };

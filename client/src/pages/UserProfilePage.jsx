@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import { useSession, useUserProfile } from "../App";
 import { updateUserProfileName } from "../lib/userProfile.js";
+import { trackEvent } from "../lib/analytics.js";
 
 export default function UserProfilePage() {
   const navigate = useNavigate();
@@ -30,9 +31,15 @@ export default function UserProfilePage() {
       setIsUpdatingDisplayName(true);  
       await updateUserProfileName(session, newDisplayName);
       await refreshProfile();
+      void trackEvent("profile_display_name_updated", {
+        length: newDisplayName.trim().length
+      });
       setDisplayNameMessage("Display name updated successfully!");
       setTimeout(() => setDisplayNameMessage(""), 3000);
     } catch (error) {
+      void trackEvent("profile_display_name_update_failed", {
+        reason: error?.message || "unknown"
+      });
       setDisplayNameError(error?.message || "Failed to update display name.");
     } finally {
       setIsUpdatingDisplayName(false);
@@ -40,11 +47,15 @@ export default function UserProfilePage() {
   };
 
   const handleResetPassword = async () => {
+    void trackEvent("profile_reset_password_clicked", {});
     // TODO: Implement password reset functionality
     setResetPasswordMessage("Password reset feature coming soon. Our team will implement this.");
   };
 
   const handleDeleteAccount = async () => {
+    void trackEvent("profile_delete_account_clicked", {
+      confirmed: Boolean(deleteConfirmed)
+    });
     if (!deleteConfirmed) {
       setDeleteAccountMessage("Please confirm you want to delete your account.");
       return;

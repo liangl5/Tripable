@@ -6,6 +6,7 @@ import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
 import { supabase } from "../lib/supabase.js";
 import { parseInvitees } from "../lib/tripPlanning.js";
+import { trackEvent } from "../lib/analytics.js";
 
 const ROLE_LABELS = {
   owner: "Owner",
@@ -135,6 +136,10 @@ export default function TripDashboardPage() {
           .eq("tripId", tripId);
 
         setIdeas(ideasData || []);
+        void trackEvent("trip_dashboard_loaded", {
+          trip_id: tripId,
+          ideas_count: ideasData?.length || 0
+        });
         await loadPendingInvites();
       } catch (error) {
         console.error("Failed to load trip:", error);
@@ -171,6 +176,9 @@ export default function TripDashboardPage() {
   const handleCopyInviteLink = async () => {
     const inviteLink = `${window.location.origin}/trips/${tripId}/invite`;
     await navigator.clipboard.writeText(inviteLink);
+    void trackEvent("trip_invite_link_copied", {
+      trip_id: tripId
+    });
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -194,6 +202,9 @@ export default function TripDashboardPage() {
 
       if (error) throw error;
       setTrip((current) => (current ? { ...current, name: nextName } : current));
+      void trackEvent("trip_name_updated", {
+        trip_id: trip.id
+      });
       setEditTripNameOpen(false);
     } catch (error) {
       setActionStatus(error?.message || "Unable to update trip name right now.");
@@ -262,6 +273,10 @@ export default function TripDashboardPage() {
         .eq("status", "pending");
       if (error) throw error;
       await loadPendingInvites();
+      void trackEvent("trip_pending_invite_canceled", {
+        trip_id: tripId,
+        invite_id: inviteId
+      });
       setShareStatus("Pending invite canceled.");
     } catch (error) {
       setShareStatus(error?.message || "Unable to cancel invite right now.");
@@ -300,6 +315,11 @@ export default function TripDashboardPage() {
         ...current,
         [member.id]: targetRole
       }));
+      void trackEvent("trip_member_role_updated", {
+        trip_id: tripId,
+        member_id: member.id,
+        role: targetRole
+      });
       setShareStatus(`${member.name || "User"} is now ${ROLE_LABELS[targetRole]}.`);
     } catch (error) {
       setShareStatus(error?.message || "Unable to update role right now.");
@@ -334,6 +354,10 @@ export default function TripDashboardPage() {
         const next = { ...current };
         delete next[member.id];
         return next;
+      });
+      void trackEvent("trip_member_removed", {
+        trip_id: tripId,
+        member_id: member.id
       });
       setShareStatus(`${member.name || "Member"} was removed from the trip.`);
     } catch (error) {
@@ -468,8 +492,17 @@ export default function TripDashboardPage() {
       setMemberRoles(roleMap);
       await loadPendingInvites();
 
+      void trackEvent("trip_share_submitted", {
+        trip_id: tripId,
+        pending_created: pendingCreated,
+        notifications_enabled: notifyInvitees
+      });
       setShareStatus(`Created ${pendingCreated} pending invite(s).${mailSummary}`);
     } catch (error) {
+      void trackEvent("trip_share_failed", {
+        trip_id: tripId,
+        reason: error?.message || "unknown"
+      });
       setShareStatus(error?.message || "Unable to share trip right now.");
     } finally {
       setShareLoading(false);
@@ -482,6 +515,7 @@ export default function TripDashboardPage() {
     try {
       setActionLoading(true);
       await supabase.from("Trip").delete().eq("id", tripId);
+      void trackEvent("trip_deleted_dashboard", { trip_id: tripId });
       navigate("/");
     } catch (error) {
       console.error("Failed to delete trip:", error);
@@ -507,6 +541,7 @@ export default function TripDashboardPage() {
     try {
       setActionLoading(true);
       await leaveTrip(tripId);
+      void trackEvent("trip_left_dashboard", { trip_id: tripId });
       navigate("/");
     } catch (error) {
       console.error("Failed to leave trip:", error);
@@ -593,7 +628,10 @@ export default function TripDashboardPage() {
           <div className="flex items-center gap-3">
             {userRole === "owner" ? (
               <button
-                onClick={() => setShareOpen(true)}
+                onClick={() => {
+                  setShareOpen(true);
+                  void trackEvent("trip_share_opened", { trip_id: tripId });
+                }}
                 className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-300"
               >
                 Invite

@@ -6,6 +6,7 @@ import {
   DESTINATION_LIST_NAME
 } from "../lib/ideaComposer.js";
 import { normalizeListName, slugify } from "../lib/tripPlanning.js";
+import { trackEvent } from "../lib/analytics.js";
 
 function ModeToggle({ active, title, onClick }) {
   return (
@@ -213,6 +214,10 @@ export default function InlineIdeaComposer({
     setSuggestions([]);
     setHighlightedIndex(-1);
     setSearchError("");
+    void trackEvent("composer_suggestion_selected", {
+      mode,
+      suggestion_id: suggestion.id
+    });
   };
 
   const handleCommit = async (placeMatch) => {
@@ -233,6 +238,10 @@ export default function InlineIdeaComposer({
         ? buildResolvedIdeaPayload(placeMatch, submissionContext)
         : buildFreeformIdeaPayload(trimmedQuery, submissionContext);
       const createdIdea = await onAddIdea(payload);
+      void trackEvent("composer_commit_succeeded", {
+        mode,
+        idea_id: createdIdea?.id || ""
+      });
       setQuery("");
       setSelectedSuggestion(null);
       setSuggestions([]);
@@ -262,8 +271,22 @@ export default function InlineIdeaComposer({
   return (
     <div className="relative min-w-0 rounded-[28px] border border-slate-200 bg-[#FBFCFF] p-4 shadow-soft">
       <div className="flex flex-wrap items-center gap-2">
-        <ModeToggle active={mode === "destination"} title="Destination group" onClick={() => setMode("destination")} />
-        <ModeToggle active={mode === "activity"} title="Activity or place" onClick={() => setMode("activity")} />
+        <ModeToggle
+          active={mode === "destination"}
+          title="Destination group"
+          onClick={() => {
+            setMode("destination");
+            void trackEvent("composer_mode_switched", { mode: "destination" });
+          }}
+        />
+        <ModeToggle
+          active={mode === "activity"}
+          title="Activity or place"
+          onClick={() => {
+            setMode("activity");
+            void trackEvent("composer_mode_switched", { mode: "activity" });
+          }}
+        />
       </div>
 
       <form onSubmit={handleSubmit} className={formGridClassName}>
