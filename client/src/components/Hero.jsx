@@ -105,11 +105,15 @@ export default function Hero() {
   const session = useSession();
 
   const handlePlanTrip = () => {
-    if (session) {
-      navigate("/trips/new");
-    } else {
-      navigate("/auth");
-    }
+    navigate("/trips/new");
+  };
+
+  const handleSignUp = () => {
+    navigate("/auth?mode=signup");
+  };
+
+  const handleSignIn = () => {
+    navigate("/auth?mode=signin");
   };
 
   return (
@@ -126,15 +130,29 @@ export default function Hero() {
             Tripable brings destination ideas, voting, availability, and itineraries into one place so your group can actually decide where to go.
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <button
-              onClick={handlePlanTrip}
-              className="rounded-full bg-[#4C6FFF] px-7 py-4 text-base font-semibold text-white shadow-card transition hover:bg-[#3F5CE0]"
-            >
-              Plan trip
-            </button>
-            <a href="#features" className="text-base font-semibold text-ink transition hover:text-brand-primary">
-              See how it works →
-            </a>
+            {session ? (
+              <button
+                onClick={handlePlanTrip}
+                className="rounded-full bg-[#4C6FFF] px-7 py-4 text-base font-semibold text-white shadow-card transition hover:bg-[#3F5CE0]"
+              >
+                Plan trip
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={handleSignUp}
+                  className="rounded-full bg-[#4C6FFF] px-7 py-4 text-base font-semibold text-white shadow-card transition hover:bg-[#3F5CE0]"
+                >
+                  Sign up
+                </button>
+                <button
+                  onClick={handleSignIn}
+                  className="rounded-full border border-slate-300 bg-white px-7 py-4 text-base font-semibold text-ink transition hover:bg-slate-50"
+                >
+                  Sign in
+                </button>
+              </>
+            )}
           </div>
         </div>
 

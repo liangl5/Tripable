@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useSession, useUserProfile } from "../App";
@@ -10,15 +10,26 @@ export function AuthStatus() {
   const { profile, refreshProfile } = useUserProfile();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const authMode = searchParams.get('mode');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(true);
+  const [isSignUp, setIsSignUp] = useState(authMode !== 'signin');
   const [message, setMessage] = useState('');
 
   const returnUrl = searchParams.get('return') || '/';
   const displayName = useMemo(() => getDisplayName(profile, session), [profile, session]);
+
+  useEffect(() => {
+    if (authMode === 'signin') {
+      setIsSignUp(false);
+      return;
+    }
+    if (authMode === 'signup') {
+      setIsSignUp(true);
+    }
+  }, [authMode]);
 
   const handleSignUp = async (e) => {
     e.preventDefault();
