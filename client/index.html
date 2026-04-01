@@ -1,6 +1,38 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-LKL1HJW6K4"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-LKL1HJW6K4');
+    </script>
+    <script src="https://cdn.amplitude.com/script/9ac08e8010075e930bca4e802fa04ef3.js"></script>
+    <script>
+      window.amplitude.add(window.sessionReplay.plugin({sampleRate: 1}));
+      window.amplitude.init("9ac08e8010075e930bca4e802fa04ef3", {
+        fetchRemoteConfig: true,
+        autocapture: {
+          attribution: true,
+          fileDownloads: true,
+          formInteractions: true,
+          pageViews: true,
+          sessions: true,
+          elementInteractions: true,
+          networkTracking: true,
+          webVitals: true,
+          frustrationInteractions: {
+            thrashedCursor: true,
+            errorClicks: true,
+            deadClicks: true,
+            rageClicks: true
+          }
+        }
+      });
+    </script>
     <link rel="icon" type="image/png" href="/imgs/favicon.ico">
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

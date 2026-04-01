@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { hashIdentifier, trackServerAnalyticsEvent } from "./_analytics.js";
 
 const MAX_RECIPIENTS = 25;
 
@@ -93,7 +94,7 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Missing RESEND_API_KEY" });
   }
 
-  const { tripId, tripName, invitees, inviterName, inviteUrl, notify } = req.body || {};
+  const { tripId, tripName, invitees, inviterName, inviterUserId, inviteUrl, notify } = req.body || {};
 
   if (!tripId || !tripName || !inviteUrl) {
     return res.status(400).json({ error: "Missing required fields" });
@@ -143,6 +144,23 @@ export default async function handler(req, res) {
 
   const sent = results.filter((r) => r.success).length;
   const failed = results.length - sent;
+
+  const successfulInvitees = results.filter((entry) => entry.success).map((entry) => entry.email);
+  await Promise.allSettled(
+    successfulInvitees.map((email) =>
+      trackServerAnalyticsEvent({
+        eventType: "trip_invite_sent_server",
+        tripId,
+        userId: inviterUserId,
+        email,
+        properties: {
+          invitee_hash: hashIdentifier(email),
+          inviter_hash: hashIdentifier(inviterUserId || inviterName || ""),
+          status: "sent"
+        }
+      })
+    )
+  );
 
   return res.status(200).json({
     sent,

@@ -4,6 +4,7 @@ import Header from "../components/Header.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
 import { supabase } from "../lib/supabase.js";
+import { trackEvent } from "../lib/analytics.js";
 
 export default function TripInvitePage() {
   const { tripId } = useParams();
@@ -45,12 +46,41 @@ export default function TripInvitePage() {
     loadTripData();
   }, [tripId, session, loadTripInvitePreview]);
 
+  useEffect(() => {
+    if (!tripId) return;
+    void trackEvent("trip_invite_viewed", {
+      trip_id: tripId
+    });
+  }, [tripId]);
+
+  const trackInviteServerEvent = async (eventType) => {
+    if (!tripId) return;
+    try {
+      await fetch("/api/track-invite-event", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          eventType,
+          tripId,
+          userId: session?.user?.id || null,
+          email: session?.user?.email || null
+        })
+      });
+    } catch {
+      // Avoid blocking invite flows if analytics endpoint fails.
+    }
+  };
+
   const handleAccept = async () => {
     if (!tripId) return;
     try {
       setLoading(true);
       await joinTrip(tripId);
       setAccepted(true);
+      void trackEvent("trip_invite_accepted", { trip_id: tripId });
+      void trackInviteServerEvent("trip_invite_accepted_server");
       // Redirect to trip dashboard after 1 second
       setTimeout(() => {
         navigate(`/trips/${tripId}`);
@@ -80,6 +110,8 @@ export default function TripInvitePage() {
           throw cancelError;
         }
       }
+      void trackEvent("trip_invite_declined", { trip_id: tripId });
+      void trackInviteServerEvent("trip_invite_declined_server");
       navigate("/");
     } catch (declineError) {
       setError(declineError?.message || "Unable to decline invite right now.");

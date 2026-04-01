@@ -1366,6 +1366,7 @@ export const api = {
         tripName: payload.tripName,
         invitees,
         inviterName: user?.name || "A teammate",
+        inviterUserId: user?.id || null,
         inviteUrl,
         notify: shouldNotify
       })

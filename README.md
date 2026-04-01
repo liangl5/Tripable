@@ -12,6 +12,7 @@ https://www.tripable.pro/
 - https://resend.com - SMTP service
 - https://porkbun.com/ - DNS service
 - https://github.com/liangl5/Tripable - GitHub
+- 
 
 ## Tech stack
 
@@ -47,6 +48,36 @@ Required Vercel environment variables:
 Notes:
 - If `RESEND_FROM_EMAIL` is not set, the API falls back to `Tripable <onboarding@resend.dev>` for initial testing.
 - In production, use a verified domain sender in Resend to improve delivery.
+
+## Analytics Setup (Google Analytics + Amplitude)
+
+Tripable supports dual telemetry in the browser and server invite conversion events.
+
+Google Analytics and Amplitude are loaded manually via CDN scripts in `client/index.html`.
+
+Client IDs currently hardcoded in `client/index.html`:
+- GA4 measurement id: `G-LKL1HJW6K4`
+- Amplitude API key: `9ac08e8010075e930bca4e802fa04ef3`
+
+Optional server env variables (Vercel project settings):
+- `GA4_MEASUREMENT_ID`: GA4 measurement id used by server events.
+- `GA4_API_SECRET`: GA4 Measurement Protocol API secret.
+- `AMPLITUDE_API_KEY`: Amplitude API key used by server events.
+- `SUPABASE_URL`: Supabase project URL used by API endpoints.
+- `SUPABASE_SERVICE_ROLE_KEY`: Service role key for server-side reads like user counts.
+
+Notes:
+- Client analytics automatically initialize on app bootstrap.
+- User identifiers are anonymized before being sent to analytics vendors.
+- Invite conversions are also emitted from server endpoints to reduce client retry double-counting.
+
+## API Endpoint
+
+- `GET /api/user-count` returns JSON payload:
+
+```json
+{ "count": 123 }
+```
 
 ## Core user flow
 

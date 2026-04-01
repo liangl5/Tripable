@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { getTripTabs, reorderTabs, deleteTab, createTab } from "../lib/tabManagement.js";
+import { trackEvent } from "../lib/analytics.js";
 import AvailabilityTab from "./TripTabs/AvailabilityTab.jsx";
 import ListTab from "./TripTabs/ListTab.jsx";
 import ItineraryTab from "./TripTabs/ItineraryTab.jsx";
@@ -24,6 +25,11 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
         setTabs(loadedTabs);
         if (loadedTabs.length > 0) {
           setActiveTab(loadedTabs[0].id);
+          void trackEvent("trip_tab_viewed", {
+            trip_id: tripId,
+            tab_id: loadedTabs[0].id,
+            tab_type: loadedTabs[0].tabType || "custom"
+          });
         }
       } catch (error) {
         console.error("Failed to load tabs:", error);
@@ -42,6 +48,10 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
       setTabDeleteLoading(true);
       await deleteTab(tabId);
       setTabs(tabs.filter((t) => t.id !== tabId));
+      void trackEvent("trip_tab_deleted", {
+        trip_id: tripId,
+        tab_id: tabId
+      });
       if (activeTab === tabId) {
         setActiveTab(tabs[0]?.id || null);
       }
@@ -77,6 +87,11 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
       const newTab = await createTab(tripId, name, "custom");
       setTabs([...tabs, newTab]);
       setActiveTab(newTab.id);
+      void trackEvent("trip_tab_created", {
+        trip_id: tripId,
+        tab_id: newTab.id,
+        tab_type: "custom"
+      });
     } catch (error) {
       console.error("Failed to create tab:", error);
     }
@@ -189,7 +204,14 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
               onDragStart={() => handleDragStart(tab.id)}
               onDragOver={handleDragOver}
               onDrop={() => handleDropOnTab(tab.id)}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                setActiveTab(tab.id);
+                void trackEvent("trip_tab_viewed", {
+                  trip_id: tripId,
+                  tab_id: tab.id,
+                  tab_type: tab.tabType || "custom"
+                });
+              }}
               className={`flex items-center gap-2 px-4 py-3 font-semibold border-b-2 transition-colors ${
                 activeTab === tab.id
                   ? "border-ocean text-ocean"

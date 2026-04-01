@@ -1,8 +1,9 @@
-import { Suspense, lazy, useCallback, useEffect, useState, createContext, useContext } from "react";
-import { Routes, Route } from "react-router-dom";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, createContext, useContext } from "react";
+import { Routes, Route, useLocation } from "react-router-dom";
 import { supabase } from "./lib/supabase";
 import { AuthStatus } from "./components/AuthStatus";
 import { ensureUserProfile } from "./lib/userProfile.js";
+import { identifyUser, resetAnalytics, trackPageView } from "./lib/analytics.js";
 
 const HomePage = lazy(() => import("./pages/HomePage.jsx"));
 const CreateTripPage = lazy(() => import("./pages/CreateTripPage.jsx"));
@@ -27,11 +28,13 @@ export function useUserProfile() {
 }
 
 export default function App() {
+  const location = useLocation();
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState(null);
+  const lastTrackedPathRef = useRef("");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -71,11 +74,29 @@ export default function App() {
     if (!session) {
       setProfile(null);
       setProfileError(null);
+      resetAnalytics();
       return;
     }
 
     refreshProfile(session);
   }, [refreshProfile, session]);
+
+  useEffect(() => {
+    if (!session?.user) return;
+
+    void identifyUser({
+      userId: session.user.id,
+      email: session.user.email,
+      role: profile?.role || "member"
+    });
+  }, [profile?.role, session]);
+
+  useEffect(() => {
+    const path = `${location.pathname}${location.search}`;
+    if (lastTrackedPathRef.current === path) return;
+    lastTrackedPathRef.current = path;
+    void trackPageView(path, "Tripable");
+  }, [location.pathname, location.search]);
 
   if (loading) {
     return (

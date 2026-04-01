@@ -6,6 +6,7 @@ import { useSession } from "../App";
 import { parseInvitees } from "../lib/tripPlanning.js";
 import { createDefaultTripsTab } from "../lib/tabManagement.js";
 import { supabase } from "../lib/supabase.js";
+import { trackEvent } from "../lib/analytics.js";
 
 function addInvitee(invitees, invitee, role = "suggestor") {
   const normalized = String(invitee || "").trim().toLowerCase();
@@ -37,6 +38,12 @@ export default function CreateTripPage() {
       navigate("/auth");
     }
   }, [session, navigate]);
+
+  useEffect(() => {
+    void trackEvent("trip_creation_started", {
+      has_session: Boolean(session?.user?.id)
+    });
+  }, [session?.user?.id]);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -101,6 +108,10 @@ export default function CreateTripPage() {
 
     try {
       const trip = await createTrip(payload);
+      void trackEvent("trip_creation_completed", {
+        trip_id: trip.id,
+        invitee_count: nextInvitees.length
+      });
 
       // Create default tabs for the new trip
       if (session?.user?.id) {

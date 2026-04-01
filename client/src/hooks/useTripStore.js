@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api } from "../lib/api.js";
+import { trackEvent } from "../lib/analytics.js";
 
 export const useTripStore = create((set, get) => ({
   trips: [],
@@ -38,6 +39,10 @@ export const useTripStore = create((set, get) => ({
     try {
       const trip = await api.createTrip(payload);
       set((state) => ({ trips: [trip, ...state.trips], createTripLoading: false }));
+      void trackEvent("trip_created", {
+        trip_id: trip.id,
+        invitee_count: Array.isArray(payload?.invitees) ? payload.invitees.length : 0
+      });
       return trip;
     } catch (error) {
       set({ error: error.message, createTripLoading: false });
@@ -50,6 +55,12 @@ export const useTripStore = create((set, get) => ({
     try {
       const result = await api.sendTripInvites(payload);
       set({ inviteSendLoading: false });
+      void trackEvent("trip_invite_sent", {
+        trip_id: payload?.tripId,
+        total: result?.total || 0,
+        sent: result?.sent || 0,
+        failed: result?.failed || 0
+      });
       return result;
     } catch (error) {
       set({ error: error.message, inviteSendLoading: false });
@@ -90,6 +101,11 @@ export const useTripStore = create((set, get) => ({
         trips: state.trips.map((candidate) => (candidate.id === trip.id ? trip : candidate)),
         tripLoading: false
       }));
+      void trackEvent("trip_dates_finalized", {
+        trip_id: tripId,
+        start_date: payload?.startDate || "",
+        end_date: payload?.endDate || ""
+      });
       return trip;
     } catch (error) {
       set({ error: error.message, tripLoading: false });
@@ -106,6 +122,7 @@ export const useTripStore = create((set, get) => ({
         currentTrip: state.currentTrip?.id === tripId ? null : state.currentTrip,
         deleteTripLoading: false
       }));
+      void trackEvent("trip_deleted", { trip_id: tripId });
     } catch (error) {
       set({ error: error.message, deleteTripLoading: false });
       throw error;
@@ -121,6 +138,10 @@ export const useTripStore = create((set, get) => ({
         trips: state.trips.map((candidate) => (candidate.id === trip.id ? { ...candidate, ...trip } : candidate)),
         surveyDatesSaving: false
       }));
+      void trackEvent("trip_survey_dates_updated", {
+        trip_id: tripId,
+        date_count: Array.isArray(payload?.dates) ? payload.dates.length : 0
+      });
       return trip;
     } catch (error) {
       set({ error: error.message, surveyDatesSaving: false });
@@ -153,6 +174,10 @@ export const useTripStore = create((set, get) => ({
         trips: state.trips.map((candidate) => (candidate.id === trip.id ? { ...candidate, ...trip } : candidate)),
         availabilitySaving: false
       }));
+      void trackEvent("availability_submitted", {
+        trip_id: tripId,
+        date_count: Array.isArray(payload?.dates) ? payload.dates.length : 0
+      });
       return trip;
     } catch (error) {
       set({ error: error.message, availabilitySaving: false });
@@ -163,6 +188,7 @@ export const useTripStore = create((set, get) => ({
   joinTrip: async (tripId) => {
     try {
       await api.joinTrip(tripId);
+      void trackEvent("trip_joined", { trip_id: tripId });
     } catch (error) {
       set({ error: error.message });
       throw error;
@@ -181,6 +207,7 @@ export const useTripStore = create((set, get) => ({
         itinerary: state.currentTrip?.id === tripId ? null : state.itinerary,
         leaveTripLoading: false
       }));
+      void trackEvent("trip_left", { trip_id: tripId });
     } catch (error) {
       set({ error: error.message, leaveTripLoading: false });
       throw error;
@@ -203,6 +230,11 @@ export const useTripStore = create((set, get) => ({
     try {
       const idea = await api.createIdea(tripId, payload);
       set((state) => ({ ideas: [idea, ...state.ideas], addIdeaLoading: false }));
+      void trackEvent("idea_created", {
+        trip_id: tripId,
+        idea_id: idea.id,
+        category: payload?.category || ""
+      });
       return idea;
     } catch (error) {
       set({ error: error.message, addIdeaLoading: false });
@@ -236,6 +268,11 @@ export const useTripStore = create((set, get) => ({
           : [updatedIdea, ...state.ideas],
         updateIdeaLoading: false
       }));
+      void trackEvent("idea_updated", {
+        trip_id: tripId,
+        idea_id: ideaId,
+        category: payload?.category || ""
+      });
       return updatedIdea;
     } catch (error) {
       set({ error: error.message, updateIdeaLoading: false });
@@ -251,6 +288,10 @@ export const useTripStore = create((set, get) => ({
       set({
         ideas,
         deleteIdeaLoading: false
+      });
+      void trackEvent("idea_deleted", {
+        trip_id: tripId,
+        idea_id: ideaId
       });
     } catch (error) {
       set({ error: error.message, deleteIdeaLoading: false });
@@ -274,6 +315,11 @@ export const useTripStore = create((set, get) => ({
       set((state) => ({
         ideas: state.ideas.map((idea) => (idea.id === updated.id ? { ...idea, ...updated } : idea))
       }));
+      void trackEvent("idea_voted", {
+        idea_id: ideaId,
+        vote_value: value,
+        previous_vote: priorVote
+      });
     } catch (error) {
       set({ ideas: previous, error: error.message });
     }

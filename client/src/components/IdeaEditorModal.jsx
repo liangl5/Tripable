@@ -6,6 +6,7 @@ import {
   DESTINATION_LIST_NAME
 } from "../lib/ideaComposer.js";
 import { normalizeListName, slugify } from "../lib/tripPlanning.js";
+import { trackEvent } from "../lib/analytics.js";
 
 function buildListOptions(listOptions) {
   return (Array.isArray(listOptions) ? listOptions : [])
@@ -109,6 +110,11 @@ export default function IdeaEditorModal({
     setHighlightedIndex(-1);
     setSearchError("");
     setSearchLocked(true);
+    void trackEvent("idea_editor_opened", {
+      idea_id: idea.id,
+      trip_id: idea.tripId || "",
+      mode: isDestinationGroup ? "destination" : "activity"
+    });
   }, [activityListOptions, idea]);
 
   useEffect(() => {
@@ -211,6 +217,11 @@ export default function IdeaEditorModal({
     setSaving(true);
     try {
       await onSave(idea.id, payload);
+      void trackEvent("idea_editor_saved", {
+        idea_id: idea.id,
+        trip_id: idea.tripId || "",
+        mode: nextMode
+      });
     } finally {
       setSaving(false);
     }
