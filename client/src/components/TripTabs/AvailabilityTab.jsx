@@ -22,6 +22,8 @@ function monthKey(date) {
 export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
   const [startMonth, setStartMonth] = useState(new Date());
   const [selectedDates, setSelectedDates] = useState(new Set());
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragMode, setDragMode] = useState(null); // "select" | "deselect" | null
   const [isEditing, setIsEditing] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [availabilityData, setAvailabilityData] = useState({});
@@ -29,6 +31,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
   const [allUsers, setAllUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [userSubmittedAt, setUserSubmittedAt] = useState(null);
+  const canEditCells = userRole !== "suggestor_no_edit" && (!showHeatmap || isEditing);
 
   // Load user's current availability for this tab
   useEffect(() => {
@@ -110,16 +113,45 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
   const month1 = startOfMonth(startMonth);
   const month2 = addMonths(startMonth, 1);
 
-  const handleDateClick = (dateStr) => {
-    if (!isEditing || userRole === "suggestor_no_edit") return;
+  useEffect(() => {
+    const stopDrag = () => {
+      setIsDragging(false);
+      setDragMode(null);
+    };
+    window.addEventListener("pointerup", stopDrag);
+    window.addEventListener("pointercancel", stopDrag);
+    return () => {
+      window.removeEventListener("pointerup", stopDrag);
+      window.removeEventListener("pointercancel", stopDrag);
+    };
+  }, []);
 
-    const newSelectedDates = new Set(selectedDates);
-    if (newSelectedDates.has(dateStr)) {
-      newSelectedDates.delete(dateStr);
-    } else {
-      newSelectedDates.add(dateStr);
-    }
-    setSelectedDates(newSelectedDates);
+  const applyDateSelection = (dateStr, mode) => {
+    if (!dateStr || !mode) return;
+    setSelectedDates((current) => {
+      const next = new Set(current);
+      if (mode === "select") {
+        next.add(dateStr);
+      } else {
+        next.delete(dateStr);
+      }
+      return next;
+    });
+  };
+
+  const handleDatePointerDown = (event, dateStr) => {
+    event.preventDefault();
+    if (!canEditCells || !dateStr) return;
+    const shouldSelect = !selectedDates.has(dateStr);
+    const nextMode = shouldSelect ? "select" : "deselect";
+    setIsDragging(true);
+    setDragMode(nextMode);
+    applyDateSelection(dateStr, nextMode);
+  };
+
+  const handleDatePointerEnter = (dateStr) => {
+    if (!canEditCells || !isDragging || !dragMode || !dateStr) return;
+    applyDateSelection(dateStr, dragMode);
   };
 
   const handleSave = async () => {
@@ -186,7 +218,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
     const monthLabel = month.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
     return (
-      <div className={`flex-1 ${!isFirst && "border-l border-slate-200 pl-4"}`}>
+      <div className={`flex-1 select-none ${!isFirst && "border-l border-slate-200 pl-4"}`}>
         <h3 className="font-semibold text-ink mb-4">{monthLabel}</h3>
         <div className="grid grid-cols-7 gap-2">
           {DAY_NAMES.map((day) => (
@@ -195,8 +227,8 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
             </div>
           ))}
           {days.map((day, index) => {
-            const dateStr = day ? formatISO(day) : null;
-            const isSelected = dateStr && selectedDates.has(dateStr);
+              const dateStr = day ? formatISO(day) : null;
+              const isSelected = dateStr && selectedDates.has(dateStr);
             const count = dateStr ? availabilityData[dateStr] || 0 : 0;
 
             let bgColor = "bg-white";
@@ -204,22 +236,30 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
               if (count >= 3) bgColor = "bg-green-500";
               else if (count === 2) bgColor = "bg-green-300";
               else bgColor = "bg-green-100";
-            } else if (isEditing && isSelected) {
+            } else if (isSelected && !showHeatmap) {
               bgColor = "bg-ocean text-white";
             }
 
-            return (
-              <button
-                key={index}
-                onClick={() => dateStr && handleDateClick(dateStr)}
-                disabled={!dateStr || (showHeatmap && !isEditing)}
-                className={`h-8 rounded text-xs font-medium border border-slate-300 ${bgColor} ${
-                  isEditing && dateStr ? "cursor-pointer hover:bg-slate-100" : "cursor-default"
-                }`}
-              >
-                {day && day.getDate()}
-              </button>
-            );
+              return (
+                <button
+                  key={index}
+                  onPointerDown={(event) => handleDatePointerDown(event, dateStr)}
+                  onPointerEnter={() => handleDatePointerEnter(dateStr)}
+                  onPointerUp={() => {
+                    setIsDragging(false);
+                    setDragMode(null);
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                  }}
+                  disabled={!dateStr || (showHeatmap && !isEditing)}
+                  className={`h-8 rounded text-xs font-medium border border-slate-300 ${bgColor} ${
+                    canEditCells && dateStr ? "cursor-pointer hover:bg-slate-100 select-none" : "cursor-default"
+                  }`}
+                >
+                  {day && day.getDate()}
+                </button>
+              );
           })}
         </div>
       </div>
