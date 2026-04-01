@@ -1324,6 +1324,7 @@ export const api = {
 
   async sendTripInvites(payload) {
     const user = await getOrCreateUser();
+    const shouldNotify = payload?.notify !== false;
     const invitees = Array.isArray(payload?.invitees)
       ? payload.invitees
           .map((invitee) => {
@@ -1344,6 +1345,15 @@ export const api = {
       };
     }
 
+    if (!shouldNotify) {
+      return {
+        sent: 0,
+        failed: 0,
+        total: invitees.length,
+        results: invitees.map((email) => ({ email, success: false, skipped: true, reason: "notifications_disabled" }))
+      };
+    }
+
     const inviteUrl = payload.inviteUrl || `${window.location.origin}/trips/${payload.tripId}/invite`;
 
     const response = await fetch("/api/send-trip-invites", {
@@ -1356,7 +1366,8 @@ export const api = {
         tripName: payload.tripName,
         invitees,
         inviterName: user?.name || "A teammate",
-        inviteUrl
+        inviteUrl,
+        notify: shouldNotify
       })
     });
 

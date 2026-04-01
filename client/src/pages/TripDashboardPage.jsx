@@ -432,9 +432,12 @@ export default function TripDashboardPage() {
           tripId,
           tripName: trip.name,
           invitees: newlyNotifiedEmails,
-          inviteUrl: `${window.location.origin}/trips/${tripId}/invite`
+          inviteUrl: `${window.location.origin}/trips/${tripId}/invite`,
+          notify: notifyInvitees
         });
         mailSummary = ` Email sent: ${result.sent}, failed: ${result.failed}.`;
+      } else if (!notifyInvitees) {
+        mailSummary = " Email notifications skipped.";
       }
 
       setPendingInvites([]);
@@ -867,6 +870,12 @@ export default function TripDashboardPage() {
               ref={tripNameInputRef}
               value={tripNameDraft}
               onChange={(event) => setTripNameDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void handleSaveTripName();
+                }
+              }}
               className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
               placeholder="Trip name"
             />
