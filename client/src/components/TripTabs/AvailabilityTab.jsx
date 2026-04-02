@@ -276,14 +276,30 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-ink">Group Availability</h2>
-            {(userRole === "owner" || userRole === "editor") && (
+            <div className="flex items-center gap-2">
               <button
-                onClick={handleEdit}
-                className="rounded-lg bg-slate-200 px-3 py-1 text-sm font-semibold text-ink hover:bg-slate-300"
+                onClick={() => setStartMonth(addMonths(startMonth, -1))}
+                className="h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+                aria-label="Previous month"
               >
-                Edit My Availability
+                ←
               </button>
-            )}
+              <button
+                onClick={() => setStartMonth(addMonths(startMonth, 1))}
+                className="h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+                aria-label="Next month"
+              >
+                →
+              </button>
+              {(userRole === "owner" || userRole === "editor") && (
+                <button
+                  onClick={handleEdit}
+                  className="rounded-lg bg-slate-200 px-3 py-1 text-sm font-semibold text-ink hover:bg-slate-300"
+                >
+                  Edit My Availability
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex gap-4 mb-6">
@@ -304,21 +320,6 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
           <div className="grid grid-cols-2 gap-6">
             <CalendarMonth month={month1} isFirst={true} />
             <CalendarMonth month={month2} isFirst={false} />
-          </div>
-
-          <div className="flex gap-3">
-            <button
-              onClick={() => setStartMonth(addMonths(startMonth, -2))}
-              className="flex-1 rounded-lg bg-slate-200 px-4 py-2 text-center text-sm font-semibold text-ink hover:bg-slate-300"
-            >
-              ← Previous 2 Months
-            </button>
-            <button
-              onClick={() => setStartMonth(addMonths(startMonth, 2))}
-              className="flex-1 rounded-lg bg-ocean px-4 py-2 text-center text-sm font-semibold text-white hover:bg-blue-600"
-            >
-              Next 2 Months →
-            </button>
           </div>
 
           <div className="mt-8">
@@ -351,26 +352,27 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
             <h2 className="text-lg font-semibold text-ink">
               {isEditing ? "Select Your Available Dates" : "Your Availability"}
             </h2>
-            <button
-              onClick={() => setStartMonth(addMonths(startMonth, -2))}
-              className="rounded-lg bg-slate-200 px-3 py-1 text-sm font-semibold text-ink hover:bg-slate-300"
-            >
-              ← Previous
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setStartMonth(addMonths(startMonth, -1))}
+                className="h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+                aria-label="Previous month"
+              >
+                ←
+              </button>
+              <button
+                onClick={() => setStartMonth(addMonths(startMonth, 1))}
+                className="h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+                aria-label="Next month"
+              >
+                →
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-6">
             <CalendarMonth month={month1} isFirst={true} />
             <CalendarMonth month={month2} isFirst={false} />
-          </div>
-
-          <div className="flex gap-3 mt-6">
-            <button
-              onClick={() => setStartMonth(addMonths(startMonth, 2))}
-              className="flex-1 rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-300"
-            >
-              Next →
-            </button>
           </div>
 
           {isEditing && (
@@ -391,14 +393,6 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
             </div>
           )}
 
-          {!isEditing && !userSubmittedAt && (
-            <button
-              onClick={() => setIsEditing(true)}
-              className="w-full rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600"
-            >
-              Submit Your Availability
-            </button>
-          )}
         </div>
       )}
     </div>
