@@ -76,6 +76,9 @@ export default function IdeaCard({
               <p className="mt-1 text-sm text-slate-500">{detailLabel}</p>
             ) : null}
             {idea.description ? <p className="mt-1 text-sm text-slate-500">{idea.description}</p> : null}
+            {Number.isFinite(Number(idea.costEstimate)) ? (
+              <p className="mt-2 text-xs font-semibold text-ocean">Estimated cost: ${Number(idea.costEstimate).toFixed(2)}</p>
+            ) : null}
           </div>
         </div>
 

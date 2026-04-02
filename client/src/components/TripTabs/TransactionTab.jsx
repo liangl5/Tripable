@@ -55,7 +55,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
 
   const handleAddTransaction = async () => {
     if (!formData.name || !formData.totalAmount) {
-      alert("Please fill in name and amount");
+      console.error("Please fill in name and amount");
       return;
     }
 
@@ -102,22 +102,18 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
       setShowAddForm(false);
     } catch (error) {
       console.error("Failed to add transaction:", error);
-      alert("Failed to create transaction");
     } finally {
       setLoading(false);
     }
   };
 
   const handleDeleteTransaction = async (transactionId) => {
-    if (!window.confirm("Delete this transaction?")) return;
-
     try {
       await supabase.from("TransactionSplit").delete().eq("transactionId", transactionId);
       await supabase.from("Transaction").delete().eq("id", transactionId);
       setTransactions(transactions.filter((t) => t.id !== transactionId));
     } catch (error) {
       console.error("Failed to delete transaction:", error);
-      alert("Failed to delete transaction");
     }
   };
 

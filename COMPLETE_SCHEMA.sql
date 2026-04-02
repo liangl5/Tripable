@@ -102,6 +102,8 @@ CREATE TABLE "Idea" (
   "entryType" VARCHAR(20) CHECK ("entryType" IN ('place', 'activity')),
   "parentIdeaId" TEXT REFERENCES "Idea"(id) ON DELETE CASCADE,
   "listId" TEXT,
+  "tabId" TEXT NOT NULL REFERENCES "TripTabConfiguration"(id) ON DELETE CASCADE,
+  "costEstimate" NUMERIC(12,2),
   "mapQuery" TEXT,
   coordinates JSONB,
   "photoUrl" TEXT,
@@ -124,6 +126,7 @@ CREATE TABLE "Vote" (
 CREATE TABLE "ItineraryDay" (
   id TEXT PRIMARY KEY,
   "tripId" TEXT NOT NULL REFERENCES "Trip"(id) ON DELETE CASCADE,
+  "tabId" TEXT,
   "dayNumber" INTEGER NOT NULL,
   date TIMESTAMPTZ,
   "isDraft" BOOLEAN DEFAULT false,
@@ -150,6 +153,15 @@ CREATE TABLE "TripTabConfiguration" (
   "isCollapsible" BOOLEAN DEFAULT false,
   "createdAt" TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Scope itinerary days to a specific itinerary tab
+ALTER TABLE "ItineraryDay"
+  ADD CONSTRAINT fk_itinerary_day_tab
+  FOREIGN KEY ("tabId") REFERENCES "TripTabConfiguration"(id) ON DELETE CASCADE;
+ALTER TABLE "ItineraryDay" ALTER COLUMN "tabId" SET NOT NULL;
+ALTER TABLE "ItineraryDay" DROP CONSTRAINT "ItineraryDay_tripId_dayNumber_key";
+ALTER TABLE "ItineraryDay"
+  ADD CONSTRAINT "ItineraryDay_tabId_dayNumber_key" UNIQUE ("tabId", "dayNumber");
 
 -- 11. UserTripRole (per-trip roles: owner/editor/suggestor)
 CREATE TABLE "UserTripRole" (
@@ -191,10 +203,11 @@ CREATE TABLE "AvailabilityTabData" (
 CREATE TABLE "List" (
   id TEXT PRIMARY KEY,
   "tripId" TEXT NOT NULL REFERENCES "Trip"(id) ON DELETE CASCADE,
+  "tabId" TEXT NOT NULL REFERENCES "TripTabConfiguration"(id) ON DELETE CASCADE,
   name VARCHAR(255) NOT NULL,
   "order" INTEGER DEFAULT 0,
   "createdAt" TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE("tripId", "name")
+  UNIQUE("tripId", "tabId", "name")
 );
 
 -- Add FK constraint to Idea.listId
@@ -259,6 +272,7 @@ CREATE INDEX idx_idea_created_by ON "Idea"("createdById");
 CREATE INDEX idx_idea_entry_type ON "Idea"("entryType");
 CREATE INDEX idx_idea_parent ON "Idea"("parentIdeaId");
 CREATE INDEX idx_idea_list ON "Idea"("listId");
+CREATE INDEX idx_idea_tab ON "Idea"("tabId");
 CREATE INDEX idx_idea_trip_entry ON "Idea"("tripId", "entryType");
 CREATE INDEX idx_idea_trip_created ON "Idea"("tripId", "createdAt" DESC);
 
@@ -269,7 +283,8 @@ CREATE INDEX idx_vote_composite ON "Vote"("ideaId", "userId");
 
 -- Itinerary indexes (fast day/item access)
 CREATE INDEX idx_itinerary_day_trip ON "ItineraryDay"("tripId");
-CREATE INDEX idx_itinerary_day_number ON "ItineraryDay"("tripId", "dayNumber");
+CREATE INDEX idx_itinerary_day_tab ON "ItineraryDay"("tabId");
+CREATE INDEX idx_itinerary_day_number ON "ItineraryDay"("tabId", "dayNumber");
 CREATE INDEX idx_itinerary_item_day ON "ItineraryItem"("itineraryDayId");
 CREATE INDEX idx_itinerary_item_idea ON "ItineraryItem"("ideaId");
 
@@ -291,7 +306,8 @@ CREATE INDEX idx_transaction_split_composite ON "TransactionSplit"("transactionI
 
 -- List indexes
 CREATE INDEX idx_list_trip ON "List"("tripId");
-CREATE INDEX idx_list_trip_name ON "List"("tripId", "name");
+CREATE INDEX idx_list_tab ON "List"("tabId");
+CREATE INDEX idx_list_trip_name ON "List"("tripId", "tabId", "name");
 
 -- Availability indexes (fast date lookups)
 CREATE INDEX idx_survey_date_trip ON "SurveyDate"("tripId");
@@ -733,7 +749,7 @@ CREATE POLICY "Users can create their own availability" ON "AvailabilityTabData"
 CREATE POLICY "Users can update their own availability" ON "AvailabilityTabData" FOR UPDATE USING (auth.uid()::text = "userId");
 CREATE POLICY "Users can delete their own availability" ON "AvailabilityTabData" FOR DELETE USING (auth.uid()::text = "userId");
 
--- List policies: Owner and suggestors can create lists
+-- List policies: Owner and editor can create lists
 CREATE POLICY "Trip members can view lists" ON "List" FOR SELECT USING (
   auth.uid() IS NOT NULL AND
   auth.uid()::text IN (
@@ -741,10 +757,11 @@ CREATE POLICY "Trip members can view lists" ON "List" FOR SELECT USING (
     UNION SELECT "createdById" FROM "Trip" WHERE id = "List"."tripId"
   )
 );
-CREATE POLICY "Owner and suggestors can create lists" ON "List" FOR INSERT WITH CHECK (
-  auth.uid()::text IN (
-    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = "List"."tripId"
-    UNION SELECT "createdById" FROM "Trip" WHERE id = "List"."tripId"
+CREATE POLICY "Only owner and editor can create lists" ON "List" FOR INSERT WITH CHECK (
+  auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "List"."tripId")
+  OR auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole"
+    WHERE "tripId" = "List"."tripId" AND role = 'editor'
   )
 );
 CREATE POLICY "Only trip owner can update lists" ON "List" FOR UPDATE USING (
@@ -935,7 +952,7 @@ CREATE POLICY "Only trip owner can delete itinerary config" ON "ItineraryTabConf
 -- │ Tabs/Config │ CRUD      │ CRUD       │ R        │ R        │
 -- │ Roles       │ CRUD      │ R          │ R        │ R        │
 -- │ Invites     │ CRUD      │ -          │ -        │ -        │
--- │ Lists       │ CRUD      │ CRUD       │ CR       │ R        │
+-- │ Lists       │ CRUD      │ CRUD       │ R        │ R        │
 -- │ Availability│ CRUD any  │ CRUD own   │ CRUD own │ CRUD own │
 -- └─────────────┴───────────┴────────────┴──────────┘
 --

@@ -3,7 +3,6 @@ import {
   clearIdeaMeta,
   clearGeneratedItinerary,
   createItineraryDraft,
-  DEFAULT_LISTS,
   getGeneratedItinerary,
   hydrateIdea,
   hydrateIdeas,
@@ -535,7 +534,7 @@ function isMissingIdeaDetailsColumnError(error) {
   const message = [error?.message, error?.details, error?.hint, error?.code]
     .filter(Boolean)
     .join(" ");
-  return /(listid|mapquery|coordinates|photourl|photoattributions|recommendationsource)/i.test(message) &&
+  return /(listid|tabid|costestimate|mapquery|coordinates|photourl|photoattributions|recommendationsource)/i.test(message) &&
     /(column|schema cache|PGRST204|not found)/i.test(message);
 }
 
@@ -637,6 +636,8 @@ function buildIdeaDetailsRecord(payload) {
     entryType: payload.entryType || null,
     parentIdeaId: payload.parentIdeaId || null,
     listId: payload.listId || null,
+    tabId: payload.tabId || null,
+    costEstimate: payload.costEstimate ?? null,
     mapQuery: payload.mapQuery || null,
     coordinates: payload.coordinates || null,
     photoUrl: payload.photoUrl || null,
@@ -651,10 +652,24 @@ function buildIdeaRecordVariants(baseIdeaRecord, payload) {
       ...baseIdeaRecord,
       ...buildIdeaDetailsRecord(payload)
     },
+    details: {
+      ...baseIdeaRecord,
+      entryType: payload.entryType || null,
+      parentIdeaId: payload.parentIdeaId || null,
+      listId: payload.listId || null,
+      mapQuery: payload.mapQuery || null,
+      coordinates: payload.coordinates || null,
+      photoUrl: payload.photoUrl || null,
+      photoAttributions: Array.isArray(payload.photoAttributions) ? payload.photoAttributions : [],
+      recommendationSource: payload.recommendationSource || null
+    },
     hierarchy: {
       ...baseIdeaRecord,
       entryType: payload.entryType || null,
       parentIdeaId: payload.parentIdeaId || null
+    },
+    core: {
+      ...baseIdeaRecord
     }
   };
 }
@@ -675,7 +690,7 @@ async function insertIdeaRecord(baseIdeaRecord, payload) {
     persistedDetails = false;
     ({ data, error } = await supabase
       .from("Idea")
-      .insert([variants.hierarchy])
+      .insert([variants.details])
       .select("*, User(*)")
       .single());
   }
@@ -687,7 +702,7 @@ async function insertIdeaRecord(baseIdeaRecord, payload) {
     );
     ({ data, error } = await supabase
       .from("Idea")
-      .insert([baseIdeaRecord])
+      .insert([variants.core])
       .select("*, User(*)")
       .single());
   }
@@ -712,7 +727,7 @@ async function updateIdeaRecord(ideaId, baseIdeaRecord, payload) {
     persistedDetails = false;
     ({ data: updatedIdeaId, error } = await supabase
       .from("Idea")
-      .update(variants.hierarchy)
+      .update(variants.details)
       .eq("id", ideaId)
       .select("id")
       .maybeSingle());
@@ -725,7 +740,7 @@ async function updateIdeaRecord(ideaId, baseIdeaRecord, payload) {
     );
     ({ data: updatedIdeaId, error } = await supabase
       .from("Idea")
-      .update(baseIdeaRecord)
+      .update(variants.core)
       .eq("id", ideaId)
       .select("id")
       .maybeSingle());
@@ -846,6 +861,8 @@ function formatIdea(tripId, idea, userId, votes = []) {
     entryType: idea.entryType,
     parentIdeaId: idea.parentIdeaId || null,
     listId: idea.listId || null,
+    tabId: idea.tabId || null,
+    costEstimate: idea.costEstimate ?? null,
     mapQuery: idea.mapQuery || null,
     coordinates: idea.coordinates || null,
     photoUrl: idea.photoUrl || null,
@@ -870,6 +887,8 @@ function formatIdeaWithPersistedDetails(tripId, idea, userId, votes = [], payloa
       entryType: idea.entryType ?? payload.entryType ?? null,
       parentIdeaId: idea.parentIdeaId ?? payload.parentIdeaId ?? null,
       listId: idea.listId ?? payload.listId ?? null,
+      tabId: idea.tabId ?? payload.tabId ?? null,
+      costEstimate: idea.costEstimate ?? payload.costEstimate ?? null,
       mapQuery: idea.mapQuery ?? payload.mapQuery ?? null,
       coordinates: idea.coordinates ?? payload.coordinates ?? null,
       photoUrl: idea.photoUrl ?? payload.photoUrl ?? null,
@@ -894,6 +913,8 @@ function buildHydratedIdeaPersistencePayload(idea) {
     entryType: idea.entryType || null,
     parentIdeaId: idea.parentIdeaId || null,
     listId: idea.listId || null,
+    tabId: idea.tabId || null,
+    costEstimate: idea.costEstimate ?? null,
     mapQuery: idea.mapQuery || null,
     coordinates: idea.coordinates || null,
     photoUrl: idea.photoUrl || null,
@@ -906,6 +927,8 @@ function buildHydratedIdeaPersistencePayload(idea) {
     (!idea.entryType && Boolean(payload.entryType)) ||
     (!idea.parentIdeaId && Boolean(payload.parentIdeaId)) ||
     (!idea.listId && Boolean(payload.listId)) ||
+    (!idea.tabId && Boolean(payload.tabId)) ||
+    (idea.costEstimate !== payload.costEstimate && payload.costEstimate !== null && payload.costEstimate !== undefined) ||
     (!idea.mapQuery && Boolean(payload.mapQuery)) ||
     (!idea.coordinates && Boolean(payload.coordinates)) ||
     (!idea.photoUrl && Boolean(payload.photoUrl)) ||
@@ -953,6 +976,8 @@ async function migrateHydratedIdeas(tripId, viewerUserId, tripOwnerId, ideas) {
           photoUrl: payload.photoUrl,
           photoAttributions: payload.photoAttributions,
           listId: payload.listId,
+          tabId: payload.tabId,
+          costEstimate: payload.costEstimate,
           listName: payload.category,
           recommendationSource: payload.recommendationSource
         });
@@ -1257,7 +1282,7 @@ export const api = {
   async createTrip(payload) {
     const user = await getOrCreateUser();
     const tripId = crypto.randomUUID();
-    const initialLists = Array.isArray(payload.lists) && payload.lists.length ? payload.lists : DEFAULT_LISTS;
+    const initialLists = Array.isArray(payload.lists) && payload.lists.length ? payload.lists : [];
     
     // Create trip with clean schema (no JSONB)
     const tripInsert = {
@@ -1297,25 +1322,10 @@ export const api = {
 
     if (roleError) throw roleError;
 
-    // Create default lists
-    if (initialLists && initialLists.length > 0) {
-      const listsToInsert = initialLists.map((listName, index) => ({
-        id: crypto.randomUUID(),
-        tripId,
-        name: typeof listName === 'string' ? listName : listName.name,
-        order: index
-      }));
-
-      await supabase
-        .from("List")
-        .insert(listsToInsert)
-        .select();
-    }
-
     return {
       ...trip,
       destination: null,
-      lists: initialLists,
+      lists: [],
       invitees: Array.isArray(payload.invitees) ? payload.invitees : [],
       budgetTotal: "",
       expenses: []
@@ -1803,6 +1813,8 @@ export const api = {
         photoUrl: payload.photoUrl || "",
         photoAttributions: payload.photoAttributions || [],
         listId: payload.listId || "",
+        tabId: payload.tabId || null,
+        costEstimate: payload.costEstimate ?? null,
         listName: payload.category,
         recommendationSource: payload.recommendationSource || null
       });
@@ -1855,6 +1867,8 @@ export const api = {
         photoUrl: payload.photoUrl || "",
         photoAttributions: payload.photoAttributions || [],
         listId: payload.listId || "",
+        tabId: payload.tabId || null,
+        costEstimate: payload.costEstimate ?? null,
         listName: payload.category,
         recommendationSource: payload.recommendationSource || null
       });
@@ -2022,5 +2036,116 @@ export const api = {
         })) || []
       }))
     };
+  },
+
+  async getLists(tripId, tabId) {
+    let query = supabase
+      .from("List")
+      .select("*")
+      .eq("tripId", tripId);
+
+    if (tabId) {
+      query = query.eq("tabId", tabId);
+    }
+
+    const { data: lists, error } = await query.order("order", { ascending: true });
+
+    if (error) throw error;
+    return lists || [];
+  },
+
+  async createList(tripId, name, tabId) {
+    const normalizedName = normalizeListName(name);
+    if (!normalizedName) {
+      throw new Error("List name is required");
+    }
+
+    if (!tabId) {
+      throw new Error("Tab id is required to create a list");
+    }
+
+    const { data: existingList, error: existingError } = await supabase
+      .from("List")
+      .select("*")
+      .eq("tripId", tripId)
+      .eq("tabId", tabId)
+      .eq("name", normalizedName)
+      .maybeSingle();
+
+    if (existingError) throw existingError;
+    if (existingList) {
+      return existingList;
+    }
+
+    let existingListQuery = supabase
+      .from("List")
+      .select("order")
+      .eq("tripId", tripId);
+
+    existingListQuery = existingListQuery.eq("tabId", tabId);
+
+    const { data: existingLists } = await existingListQuery
+      .order("order", { ascending: false })
+      .limit(1);
+
+    const nextOrder = (existingLists?.[0]?.order ?? -1) + 1;
+
+    const payload = {
+      id: crypto.randomUUID(),
+      tripId,
+      tabId,
+      name: normalizedName,
+      order: nextOrder,
+      createdAt: new Date().toISOString()
+    };
+
+    const { data: list, error } = await supabase
+      .from("List")
+      .insert([payload])
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === "23505" || /unique constraint/i.test(String(error.message || ""))) {
+        const { data: fallbackList, error: fallbackError } = await supabase
+          .from("List")
+          .select("*")
+          .eq("tripId", tripId)
+          .eq("tabId", tabId)
+          .eq("name", normalizedName)
+          .maybeSingle();
+
+        if (fallbackError) throw fallbackError;
+        if (fallbackList) return fallbackList;
+      }
+
+      throw error;
+    }
+    return list;
+  },
+
+  async updateList(listId, name) {
+    if (!name || !String(name).trim()) {
+      throw new Error("List name is required");
+    }
+
+    const { data: list, error } = await supabase
+      .from("List")
+      .update({ name: String(name).trim() })
+      .eq("id", listId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return list;
+  },
+
+  async deleteList(listId) {
+    const { error } = await supabase
+      .from("List")
+      .delete()
+      .eq("id", listId);
+
+    if (error) throw error;
   }
 };

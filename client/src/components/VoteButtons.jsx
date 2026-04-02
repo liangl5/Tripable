@@ -54,11 +54,17 @@ function IconNeutral({ className }) {
   );
 }
 
-export default function VoteButtons({ score, userVote, onVote, compact = false }) {
-  const outerClassName = compact ? "flex items-center gap-1.5" : "flex items-center gap-2";
+export default function VoteButtons({ score, userVote, onVote, compact = false, layout = "horizontal" }) {
+  const isStacked = layout === "stack";
+  const outerClassName = isStacked
+    ? "flex flex-col items-center gap-1 rounded-2xl border border-slate-200 bg-white px-2 py-2 shadow-soft"
+    : compact
+      ? "flex items-center gap-1.5"
+      : "flex items-center gap-2";
   const voteButtonClassName = compact
     ? "inline-flex h-8 w-8 items-center justify-center rounded-full transition"
     : "inline-flex h-9 w-9 items-center justify-center rounded-full transition";
+  const stackedVoteButtonClassName = "rounded-lg px-2 py-1 text-xs font-bold transition";
   const scoreWrapClassName = compact
     ? "flex min-w-14 items-center justify-center gap-1.5 rounded-full bg-white/80 px-2.5 py-1 shadow-soft"
     : "flex min-w-16 items-center justify-center gap-2 rounded-full bg-white/70 px-3 py-1 shadow-card";
@@ -67,6 +73,34 @@ export default function VoteButtons({ score, userVote, onVote, compact = false }
     : "inline-flex h-7 w-7 items-center justify-center rounded-full transition";
   const iconClassName = compact ? "h-4 w-4" : "h-5 w-5";
   const neutralIconClassName = compact ? "h-3.5 w-3.5" : "h-4 w-4";
+
+  if (isStacked) {
+    return (
+      <div className={outerClassName}>
+        <button
+          type="button"
+          onClick={() => onVote(userVote === 1 ? 0 : 1)}
+          aria-label={userVote === 1 ? "Remove upvote" : "Upvote"}
+          className={`${stackedVoteButtonClassName} ${
+            userVote === 1 ? "bg-moss text-white" : "bg-mist text-slate-600 hover:bg-moss/15 hover:text-moss"
+          }`}
+        >
+          ^
+        </button>
+        <div className="min-w-8 text-center text-sm font-semibold text-ink">{score}</div>
+        <button
+          type="button"
+          onClick={() => onVote(userVote === -1 ? 0 : -1)}
+          aria-label={userVote === -1 ? "Remove downvote" : "Downvote"}
+          className={`${stackedVoteButtonClassName} ${
+            userVote === -1 ? "bg-coral text-white" : "bg-mist text-slate-600 hover:bg-coral/15 hover:text-coral"
+          }`}
+        >
+          v
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className={outerClassName}>

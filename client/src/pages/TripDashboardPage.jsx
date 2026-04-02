@@ -30,7 +30,6 @@ export default function TripDashboardPage() {
   const navigate = useNavigate();
   const session = useSession();
   const [trip, setTrip] = useState(null);
-  const [ideas, setIdeas] = useState([]);
   const [tripMembers, setTripMembers] = useState([]);
   const [userRole, setUserRole] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -50,6 +49,8 @@ export default function TripDashboardPage() {
   const [tripNameDraft, setTripNameDraft] = useState("");
   const [tripNameSaving, setTripNameSaving] = useState(false);
   const tripNameInputRef = useRef(null);
+  const ideas = useTripStore((state) => state.ideas);
+  const loadIdeas = useTripStore((state) => state.loadIdeas);
   const leaveTrip = useTripStore((state) => state.leaveTrip);
   const leaveTripLoading = useTripStore((state) => state.leaveTripLoading);
   const sendTripInvites = useTripStore((state) => state.sendTripInvites);
@@ -78,7 +79,7 @@ export default function TripDashboardPage() {
 
   // Load trip and roles
   useEffect(() => {
-    if (!session) {
+    if (!currentUserId) {
       navigate("/auth");
       return;
     }
@@ -129,16 +130,11 @@ export default function TripDashboardPage() {
 
         setTripMembers(membersData || []);
 
-        // Load ideas
-        const { data: ideasData } = await supabase
-          .from("Idea")
-          .select("*")
-          .eq("tripId", tripId);
-
-        setIdeas(ideasData || []);
+        // Load ideas into shared trip store so tabs stay reactive after add/delete.
+        await loadIdeas(tripId);
         void trackEvent("trip_dashboard_loaded", {
           trip_id: tripId,
-          ideas_count: ideasData?.length || 0
+          ideas_count: useTripStore.getState().ideas.length || 0
         });
         await loadPendingInvites();
       } catch (error) {
@@ -150,7 +146,7 @@ export default function TripDashboardPage() {
     };
 
     loadTripData();
-  }, [tripId, session, navigate, currentUserId]);
+  }, [tripId, navigate, currentUserId, loadIdeas]);
 
   useEffect(() => {
     if (!shareOpen || userRole !== "owner") return;

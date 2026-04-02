@@ -21,7 +21,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
         const { data: daysData } = await supabase
           .from("ItineraryDay")
           .select("*")
-          .eq("tripId", tripId)
+          .eq("tabId", tab.id)
           .order("dayNumber", { ascending: true });
 
         setDays(daysData || []);
@@ -68,6 +68,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
           {
             id: crypto.randomUUID(),
             tripId,
+            tabId: tab.id,
             dayNumber: nextDayNumber,
             createdAt: new Date().toISOString()
           }
@@ -84,7 +85,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
   };
 
   const handleDeleteDay = async (dayId) => {
-    if (!canManageItinerary || !window.confirm("Delete this day?")) return;
+    if (!canManageItinerary) return;
 
     try {
       await supabase.from("ItineraryDay").delete().eq("id", dayId);
@@ -150,7 +151,6 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
       setUnsavedChanges(false);
     } catch (error) {
       console.error("Failed to save itinerary:", error);
-      alert("Failed to save itinerary changes");
     } finally {
       setLoading(false);
     }

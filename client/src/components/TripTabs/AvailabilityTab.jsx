@@ -1,23 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
-
-const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-function startOfMonth(date) {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
-}
-
-function addMonths(date, count) {
-  return new Date(date.getFullYear(), date.getMonth() + count, 1);
-}
-
-function formatISO(date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function monthKey(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
+import { DAY_NAMES, addMonths, formatISO, monthKey, startOfMonth } from "../../lib/calendarHelpers.js";
 
 export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
   const [startMonth, setStartMonth] = useState(new Date());
@@ -182,7 +165,6 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
       setIsEditing(false);
     } catch (error) {
       console.error("Failed to save availability:", error);
-      alert("Failed to save availability. Please try again.");
     } finally {
       setLoading(false);
     }

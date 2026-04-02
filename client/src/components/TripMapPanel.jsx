@@ -7,7 +7,8 @@ import {
 } from "../lib/googleMaps.js";
 
 function buildMapUrl(query) {
-  const encoded = encodeURIComponent(query || "United States");
+  const safeQuery = String(query || "").trim() || "0,0";
+  const encoded = encodeURIComponent(safeQuery);
   return `https://www.google.com/maps?output=embed&q=${encoded}`;
 }
 
@@ -82,7 +83,7 @@ export default function TripMapPanel({
   onFocusLocation,
   immersive = false
 }) {
-  const fallbackQuery = destination?.mapQuery || destination?.label || "United States";
+  const fallbackQuery = destination?.mapQuery || destination?.label || "";
   const fallbackPosition = useMemo(
     () => normalizeCoordinates(destination?.coordinates),
     [destination?.coordinates]
@@ -138,15 +139,21 @@ export default function TripMapPanel({
         if (cancelled || !mapContainerRef.current) return;
 
         if (!mapInstanceRef.current) {
-          mapInstanceRef.current = new googleMaps.Map(mapContainerRef.current, {
+          const configuredMapId = getGoogleMapsMapId();
+          const mapOptions = {
             center: { lat: 20, lng: 0 },
             zoom: 3,
-            mapId: getGoogleMapsMapId(),
             streetViewControl: false,
             mapTypeControl: false,
             fullscreenControl: false,
             clickableIcons: false,
             gestureHandling: "greedy"
+          };
+          if (configuredMapId && configuredMapId !== "DEMO_MAP_ID") {
+            mapOptions.mapId = configuredMapId;
+          }
+          mapInstanceRef.current = new googleMaps.Map(mapContainerRef.current, {
+            ...mapOptions
           });
         }
 
@@ -367,111 +374,19 @@ export default function TripMapPanel({
             referrerPolicy="no-referrer-when-downgrade"
           />
         )}
-
-        <div className="pointer-events-none absolute inset-x-5 top-5 z-10">
-          <div className="pointer-events-auto rounded-[28px] bg-white/92 p-5 shadow-card backdrop-blur">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-semibold text-ink">
-                  {destination?.name || "Map preview"}
-                </h2>
-                {jsMapError ? (
-                  <p className="mt-2 text-xs font-semibold text-slate-400">{jsMapError}</p>
-                ) : null}
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <button
-                  type="button"
-                  aria-pressed={showAllNames}
-                  onClick={() => setShowAllNames((current) => !current)}
-                  className={`rounded-full border px-3 py-2 text-xs font-semibold transition ${
-                    showAllNames
-                      ? "border-ocean bg-ocean text-white"
-                      : "border-slate-200 bg-white text-slate-700 hover:bg-mist"
-                  }`}
-                >
-                  Show all names
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onFocusLocation(fallbackQuery)}
-                  className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-mist"
-                >
-                  Reset map
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       </section>
     );
   }
 
   return (
-    <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white/95 shadow-card">
-      <div className="border-b border-slate-100 px-6 py-5">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold text-ink">
-              {destination?.name || "Map preview"}
-            </h2>
-            <p className="mt-2 text-sm text-slate-500">
-              Only selected-list items with a real map location appear here, including Google-matched activities.
-            </p>
-          </div>
-          <span className="rounded-full bg-mist px-3 py-2 text-xs font-semibold text-slate-500">
-            Labels appear on hover in the desktop map.
-          </span>
-        </div>
-      </div>
-
+    <section className="h-full overflow-hidden rounded-[28px] border border-slate-200 bg-white/95 shadow-card">
       <iframe
         title="Trip map"
         src={buildMapUrl(mapQuery)}
-        className="h-[420px] w-full border-0"
+        className="h-full min-h-[560px] w-full border-0"
         loading="lazy"
         referrerPolicy="no-referrer-when-downgrade"
       />
-
-      <div className="px-6 py-5">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold text-ink">Locations in the plan</h3>
-          <button
-            type="button"
-            onClick={() => onFocusLocation(fallbackQuery)}
-            className="rounded-full bg-mist px-3 py-1 text-xs font-semibold text-slate-600"
-          >
-            Reset map
-          </button>
-        </div>
-
-        {visibleIdeas.length ? (
-          <div className="mt-4 grid gap-3">
-            {visibleIdeas.map((idea) => (
-              <button
-                key={idea.id}
-                type="button"
-                onClick={() => onFocusLocation(idea.mapQuery)}
-                className="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-left transition hover:border-ocean hover:bg-[#F8FAFF]"
-              >
-                <div>
-                  <p className="text-sm font-semibold text-ink">{idea.title}</p>
-                  <p className="mt-1 text-xs text-slate-500">{idea.locationLabel}</p>
-                </div>
-                {idea.listName ? (
-                  <span className="rounded-full bg-mist px-3 py-1 text-[11px] font-semibold text-slate-500">
-                    {idea.listName}
-                  </span>
-                ) : null}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-mist px-4 py-5 text-sm text-slate-500">
-            Select a list with mapped items, or add places with real addresses to start pinning the plan on the map.
-          </div>
-        )}
-      </div>
     </section>
   );
 }
