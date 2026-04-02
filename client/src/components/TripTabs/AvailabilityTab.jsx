@@ -306,12 +306,20 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
             <CalendarMonth month={month2} isFirst={false} />
           </div>
 
-          <button
-            onClick={() => setStartMonth(addMonths(startMonth, 2))}
-            className="w-full rounded-lg bg-ocean px-4 py-2 text-center text-sm font-semibold text-white hover:bg-blue-600"
-          >
-            Next 2 Months →
-          </button>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setStartMonth(addMonths(startMonth, -2))}
+              className="flex-1 rounded-lg bg-slate-200 px-4 py-2 text-center text-sm font-semibold text-ink hover:bg-slate-300"
+            >
+              ← Previous 2 Months
+            </button>
+            <button
+              onClick={() => setStartMonth(addMonths(startMonth, 2))}
+              className="flex-1 rounded-lg bg-ocean px-4 py-2 text-center text-sm font-semibold text-white hover:bg-blue-600"
+            >
+              Next 2 Months →
+            </button>
+          </div>
 
           <div className="mt-8">
             <h3 className="text-lg font-semibold text-ink mb-4">Member Availability</h3>
