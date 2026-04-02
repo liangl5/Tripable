@@ -14,7 +14,8 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
   const [allUsers, setAllUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [userSubmittedAt, setUserSubmittedAt] = useState(null);
-  const canEditCells = userRole !== "suggestor_no_edit" && (!showHeatmap || isEditing);
+  const canEditAvailability = true;
+  const canEditCells = canEditAvailability && (!showHeatmap || isEditing);
 
   // Load user's current availability for this tab
   useEffect(() => {
@@ -273,7 +274,14 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
               >
                 →
               </button>
-              {(userRole === "owner" || userRole === "editor") && (
+              <button
+                onClick={handleSave}
+                disabled={loading}
+                className="rounded-lg bg-ocean px-3 py-1 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-50"
+              >
+                Save Availability
+              </button>
+              {canEditAvailability && (
                 <button
                   onClick={handleEdit}
                   className="rounded-lg bg-slate-200 px-3 py-1 text-sm font-semibold text-ink hover:bg-slate-300"
@@ -357,7 +365,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
             <CalendarMonth month={month2} isFirst={false} />
           </div>
 
-          {isEditing && (
+          {canEditAvailability && (!showHeatmap || isEditing) && (
             <div className="flex gap-3 mt-4">
               <button
                 onClick={handleSave}
@@ -366,12 +374,14 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
               >
                 Save Availability
               </button>
-              <button
-                onClick={handleCancel}
-                className="flex-1 rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-300"
-              >
-                Cancel
-              </button>
+              {isEditing ? (
+                <button
+                  onClick={handleCancel}
+                  className="flex-1 rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-300"
+                >
+                  Cancel
+                </button>
+              ) : null}
             </div>
           )}
 

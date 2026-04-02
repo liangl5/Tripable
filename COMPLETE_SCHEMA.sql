@@ -91,6 +91,17 @@ CREATE TABLE "UserAvailability" (
   UNIQUE("tripId", "userId", "date")
 );
 
+-- 5b. TripTabConfiguration must exist before Idea (Idea.tabId FK depends on it)
+CREATE TABLE IF NOT EXISTS "TripTabConfiguration" (
+  id TEXT PRIMARY KEY,
+  "tripId" TEXT NOT NULL REFERENCES "Trip"(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  "tabType" VARCHAR(50) NOT NULL CHECK ("tabType" IN ('availability', 'list', 'itinerary', 'expenses', 'custom')),
+  "position" INTEGER NOT NULL,
+  "isCollapsible" BOOLEAN DEFAULT false,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 6. Idea (activities, places, recommendations)
 CREATE TABLE "Idea" (
   id TEXT PRIMARY KEY,
@@ -144,7 +155,7 @@ CREATE TABLE "ItineraryItem" (
 );
 
 -- 10. TripTabConfiguration (custom tabs per trip)
-CREATE TABLE "TripTabConfiguration" (
+CREATE TABLE IF NOT EXISTS "TripTabConfiguration" (
   id TEXT PRIMARY KEY,
   "tripId" TEXT NOT NULL REFERENCES "Trip"(id) ON DELETE CASCADE,
   name VARCHAR(255) NOT NULL,
@@ -384,16 +395,8 @@ CREATE POLICY "Owner or editor can update trip" ON "Trip" FOR UPDATE USING (
 CREATE POLICY "Only trip owner can delete" ON "Trip" FOR DELETE USING (auth.uid()::text = "createdById");
 
 -- TripMember policies
-CREATE POLICY "TripMember select own or role or owner" ON "TripMember" FOR SELECT USING (
-  auth.uid() IS NOT NULL AND (
-    auth.uid()::text = "userId" OR
-    EXISTS (
-      SELECT 1
-      FROM "Trip" t
-      WHERE t.id = "TripMember"."tripId"
-        AND t."createdById" = auth.uid()::text
-    )
-  )
+CREATE POLICY "Trip members can view all trip members" ON "TripMember" FOR SELECT USING (
+  auth.uid() IS NOT NULL
 );
 CREATE POLICY "Users can join trips" ON "TripMember" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
 CREATE POLICY "Trip owner can add members" ON "TripMember" FOR INSERT WITH CHECK (
@@ -448,12 +451,41 @@ CREATE POLICY "Trip members can view all availability" ON "UserAvailability" FOR
   auth.uid() IS NOT NULL AND
   auth.uid()::text IN (
     SELECT "userId" FROM "UserTripRole" WHERE "tripId" = "UserAvailability"."tripId"
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = "UserAvailability"."tripId"
     UNION SELECT "createdById" FROM "Trip" WHERE id = "UserAvailability"."tripId"
   )
 );
-CREATE POLICY "Users can set their own availability" ON "UserAvailability" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
-CREATE POLICY "Users can update their own availability" ON "UserAvailability" FOR UPDATE USING (auth.uid()::text = "userId");
-CREATE POLICY "Users can delete their own availability" ON "UserAvailability" FOR DELETE USING (auth.uid()::text = "userId");
+CREATE POLICY "Users can set their own availability" ON "UserAvailability" FOR INSERT WITH CHECK (
+  auth.uid()::text = "userId"
+  AND auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = "UserAvailability"."tripId"
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = "UserAvailability"."tripId"
+    UNION SELECT "createdById" FROM "Trip" WHERE id = "UserAvailability"."tripId"
+  )
+);
+CREATE POLICY "Users can update their own availability" ON "UserAvailability" FOR UPDATE USING (
+  auth.uid()::text = "userId"
+  AND auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = "UserAvailability"."tripId"
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = "UserAvailability"."tripId"
+    UNION SELECT "createdById" FROM "Trip" WHERE id = "UserAvailability"."tripId"
+  )
+) WITH CHECK (
+  auth.uid()::text = "userId"
+  AND auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = "UserAvailability"."tripId"
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = "UserAvailability"."tripId"
+    UNION SELECT "createdById" FROM "Trip" WHERE id = "UserAvailability"."tripId"
+  )
+);
+CREATE POLICY "Users can delete their own availability" ON "UserAvailability" FOR DELETE USING (
+  auth.uid()::text = "userId"
+  AND auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = "UserAvailability"."tripId"
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = "UserAvailability"."tripId"
+    UNION SELECT "createdById" FROM "Trip" WHERE id = "UserAvailability"."tripId"
+  )
+);
 
 -- Idea policies: Suggestors can create/view, edit own
 CREATE POLICY "Trip members can view ideas" ON "Idea" FOR SELECT USING (
@@ -644,6 +676,12 @@ CREATE POLICY "UserTripRole select own row" ON "UserTripRole" FOR SELECT USING (
     FROM "Trip"
     WHERE id = "UserTripRole"."tripId"
   )
+  OR EXISTS (
+    SELECT 1
+    FROM "TripMember" tm
+    WHERE tm."tripId" = "UserTripRole"."tripId"
+      AND tm."userId" = auth.uid()::text
+  )
 );
 CREATE POLICY "Only trip owner can assign roles" ON "UserTripRole" FOR INSERT WITH CHECK (
   auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "UserTripRole"."tripId")
@@ -655,7 +693,7 @@ CREATE POLICY "Only trip owner can assign roles" ON "UserTripRole" FOR INSERT WI
     )
   )
 );
-CREATE POLICY "Members can self-assign suggestor or editor role" ON "UserTripRole" FOR INSERT WITH CHECK (
+CREATE POLICY "Members or invitees can self-assign suggestor or editor role" ON "UserTripRole" FOR INSERT WITH CHECK (
   auth.uid()::text = "userId"
   AND role IN ('suggestor', 'editor')
   AND EXISTS (
@@ -742,12 +780,41 @@ CREATE POLICY "Trip members can view availability data" ON "AvailabilityTabData"
   auth.uid() IS NOT NULL AND
   auth.uid()::text IN (
     SELECT "userId" FROM "UserTripRole" WHERE "tripId" = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
     UNION SELECT "createdById" FROM "Trip" WHERE id = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
   )
 );
-CREATE POLICY "Users can create their own availability" ON "AvailabilityTabData" FOR INSERT WITH CHECK (auth.uid()::text = "userId");
-CREATE POLICY "Users can update their own availability" ON "AvailabilityTabData" FOR UPDATE USING (auth.uid()::text = "userId");
-CREATE POLICY "Users can delete their own availability" ON "AvailabilityTabData" FOR DELETE USING (auth.uid()::text = "userId");
+CREATE POLICY "Users can create their own availability" ON "AvailabilityTabData" FOR INSERT WITH CHECK (
+  auth.uid()::text = "userId"
+  AND auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
+    UNION SELECT "createdById" FROM "Trip" WHERE id = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
+  )
+);
+CREATE POLICY "Users can update their own availability" ON "AvailabilityTabData" FOR UPDATE USING (
+  auth.uid()::text = "userId"
+  AND auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
+    UNION SELECT "createdById" FROM "Trip" WHERE id = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
+  )
+) WITH CHECK (
+  auth.uid()::text = "userId"
+  AND auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
+    UNION SELECT "createdById" FROM "Trip" WHERE id = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
+  )
+);
+CREATE POLICY "Users can delete their own availability" ON "AvailabilityTabData" FOR DELETE USING (
+  auth.uid()::text = "userId"
+  AND auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
+    UNION SELECT "createdById" FROM "Trip" WHERE id = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
+  )
+);
 
 -- List policies: Owner and editor can create lists
 CREATE POLICY "Trip members can view lists" ON "List" FOR SELECT USING (

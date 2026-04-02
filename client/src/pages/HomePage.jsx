@@ -203,7 +203,6 @@ export default function HomePage() {
         <header className="mb-10 flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-semibold text-ink">Your trips</h1>
-            <p className="mt-2 text-sm text-slate-600">Create and manage your travel plans</p>
           </div>
           <Link
             to="/trips/new"

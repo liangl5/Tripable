@@ -352,7 +352,7 @@ export default function ListTab({ tab, trip, tripId, userId, userRole, ideas, on
               </div>
             ))}
 
-          {lists.length > 0 && !isAddingList && (
+          {canManageLists && lists.length > 0 && !isAddingList && (
             <button
               onClick={() => setIsAddingList(true)}
               className="w-full rounded-lg border-2 border-dashed border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:border-ocean hover:text-ink"

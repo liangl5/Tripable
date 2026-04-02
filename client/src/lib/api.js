@@ -1622,7 +1622,26 @@ export const api = {
       .eq("userId", user.id)
       .single();
 
-    if (existing) return; // Already a member
+    if (existing) {
+      // If the user is already a member, finalize any lingering pending invite
+      // so they do not appear in both "Pending" and "People with access" lists.
+      if (pendingInvite?.id) {
+        const { error: inviteFinalizeError } = await supabase
+          .from("PendingTripInvite")
+          .update({
+            status: "accepted",
+            acceptedAt: new Date().toISOString(),
+            acceptedByUserId: user.id
+          })
+          .eq("id", pendingInvite.id)
+          .eq("status", "pending");
+
+        if (inviteFinalizeError && !String(inviteFinalizeError.message || "").includes("PendingTripInvite")) {
+          throw inviteFinalizeError;
+        }
+      }
+      return; // Already a member
+    }
 
     // Add as member
     const { error } = await supabase
@@ -1644,18 +1663,37 @@ export const api = {
         tripId,
         userId: user.id,
         role: desiredRole
-      }])
-      .select()
-      .single();
+      }]);
 
     // Duplicate role rows are harmless. Any other failure leaves the trip in a partial state,
     // so roll back membership and surface a real error to the caller.
-    if (roleError && !roleError.message?.toLowerCase?.().includes("duplicate")) {
-      await supabase
+    const isDuplicateRoleError =
+      roleError?.code === "23505" ||
+      String(roleError?.message || "").toLowerCase().includes("duplicate") ||
+      String(roleError?.details || "").toLowerCase().includes("already exists") ||
+      String(roleError?.hint || "").toLowerCase().includes("unique");
+
+    if (roleError && !isDuplicateRoleError) {
+      const { error: rollbackError } = await supabase
         .from("TripMember")
         .delete()
         .eq("tripId", tripId)
         .eq("userId", user.id);
+
+      const isPermissionError =
+        roleError?.code === "42501" ||
+        String(roleError?.message || "").toLowerCase().includes("permission") ||
+        String(roleError?.message || "").toLowerCase().includes("row-level security") ||
+        String(roleError?.details || "").toLowerCase().includes("policy");
+
+      if (rollbackError) {
+        throw new Error("Trip join hit a permissions mismatch and rollback failed. Ask the trip owner to remove you from People with access, then retry.");
+      }
+
+      if (isPermissionError) {
+        throw new Error("Unable to complete trip join permissions. The trip role policy is blocking invite acceptance.");
+      }
+
       throw new Error("Unable to complete trip join permissions. Please contact the trip owner.");
     }
 
