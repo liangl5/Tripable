@@ -61,7 +61,8 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
     if (!canManageItinerary) return;
 
     try {
-      const nextDayNumber = (days.length || 0) + 1;
+      const maxDayNumber = days.reduce((max, day) => Math.max(max, day.dayNumber || 0), 0);
+      const nextDayNumber = maxDayNumber + 1;
       const { data, error } = await supabase
         .from("ItineraryDay")
         .insert([
@@ -69,8 +70,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
             id: crypto.randomUUID(),
             tripId,
             tabId: tab.id,
-            dayNumber: nextDayNumber,
-            createdAt: new Date().toISOString()
+            dayNumber: nextDayNumber
           }
         ])
         .select()
@@ -78,7 +78,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
 
       if (error) throw error;
 
-      setDays([...days, data]);
+      setDays([...days, data].sort((a, b) => a.dayNumber - b.dayNumber));
     } catch (error) {
       console.error("Failed to add day:", error);
     }
