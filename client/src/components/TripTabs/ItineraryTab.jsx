@@ -393,6 +393,8 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
     );
   };
 
+  const remainingActivityCount = getActivityBank().length;
+
   const getVoteSummary = (votesInput) => {
     const votes = Array.isArray(votesInput) ? votesInput : [];
     const upvotes = votes.filter((vote) => vote.value === 1);
@@ -440,6 +442,13 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
           </button>
         )}
       </div>
+
+      {!isEditMode && remainingActivityCount > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-900">
+          {remainingActivityCount} {remainingActivityCount === 1 ? "activity" : "activities"} still in the Activity Bank.
+          Switch to edit mode to add them to your itinerary.
+        </div>
+      )}
 
       <div className="flex gap-6 flex-1 overflow-hidden">
       {/* Days Columns */}

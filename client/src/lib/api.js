@@ -1506,8 +1506,7 @@ export const api = {
       if (error) throw error;
     }
 
-    // Invalidate itinerary
-    await supabase.from("ItineraryDay").delete().eq("tripId", tripId);
+    // Invalidate generated itinerary cache only (don't wipe saved itinerary)
     clearGeneratedItinerary(tripId);
 
     return this.getTrip(tripId);
@@ -1844,7 +1843,7 @@ export const api = {
     if (error) throw error;
 
     // Invalidate itinerary
-    await supabase.from("ItineraryDay").delete().eq("tripId", tripId);
+    // Invalidate generated itinerary cache only (don't wipe saved itinerary)
     clearGeneratedItinerary(tripId);
     if (persistedDetails) {
       removeIdeaMeta(tripId, ideaId);
