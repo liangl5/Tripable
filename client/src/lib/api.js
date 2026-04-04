@@ -851,6 +851,11 @@ function formatIdea(tripId, idea, userId, votes = []) {
   const voteScore = votes.reduce((sum, vote) => sum + vote.value, 0);
   const userVote = votes.find((vote) => vote.userId === userId)?.value || 0;
   const isCreator = idea.createdById === userId;
+  const votesDetailed = votes.map((vote) => ({
+    userId: vote.userId,
+    value: vote.value,
+    name: vote.User?.name || "Traveler"
+  }));
 
   return hydrateIdea(tripId, {
     id: idea.id,
@@ -874,6 +879,7 @@ function formatIdea(tripId, idea, userId, votes = []) {
     voteScore,
     voteCount: votes.length,
     userVote,
+    votes: votesDetailed,
     isCreator
   });
 }
@@ -1796,7 +1802,7 @@ export const api = {
 
     const { data: ideas, error } = await supabase
       .from("Idea")
-      .select("*, votes:Vote(*), User(*)")
+      .select("*, votes:Vote(*, User(*)), User(*)")
       .eq("tripId", tripId)
       .order("createdAt", { ascending: false });
 
@@ -2013,14 +2019,13 @@ export const api = {
       }
     }
 
-    // Invalidate itinerary
-    await supabase.from("ItineraryDay").delete().eq("tripId", idea.tripId);
+    // Invalidate generated itinerary cache only (don't wipe saved itinerary)
     clearGeneratedItinerary(idea.tripId);
 
     // Return updated idea
     const { data: votes } = await supabase
       .from("Vote")
-      .select("*")
+      .select("*, User(*)")
       .eq("ideaId", ideaId);
 
     const voteScore = votes?.reduce((sum, v) => sum + v.value, 0) || 0;
@@ -2030,7 +2035,12 @@ export const api = {
       id: ideaId,
       voteScore,
       voteCount: votes?.length || 0,
-      userVote
+      userVote,
+      votes: (votes || []).map((vote) => ({
+        userId: vote.userId,
+        value: vote.value,
+        name: vote.User?.name || "Traveler"
+      }))
     };
   },
 

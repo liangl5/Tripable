@@ -21,6 +21,7 @@ const TAB_TYPE_OPTIONS = [
 export default function TabManager({ trip, tripId, userId, userRole, ideas, tripMembers }) {
   const [tabs, setTabs] = useState([]);
   const [activeTab, setActiveTab] = useState(null);
+  const [hydratedTab, setHydratedTab] = useState(false);
   const [loading, setLoading] = useState(false);
   const [draggedTab, setDraggedTab] = useState(null);
   const [tabDeleteConfirm, setTabDeleteConfirm] = useState(null);
@@ -33,6 +34,7 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
   const [tabCreateName, setTabCreateName] = useState("");
   const [tabCreateError, setTabCreateError] = useState("");
   const canManageTabs = userRole === "owner" || userRole === "editor";
+  const storageKey = `tripable.activeTab.${tripId}`;
 
   // Load tabs on mount
   useEffect(() => {
@@ -42,12 +44,10 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
         const loadedTabs = await getTripTabs(tripId);
         setTabs(loadedTabs);
         if (loadedTabs.length > 0) {
-          setActiveTab(loadedTabs[0].id);
-          void trackEvent("trip_tab_viewed", {
-            trip_id: tripId,
-            tab_id: loadedTabs[0].id,
-            tab_type: loadedTabs[0].tabType || "custom"
-          });
+          const stored = localStorage.getItem(storageKey);
+          const nextActive = loadedTabs.some((tab) => tab.id === stored) ? stored : loadedTabs[0].id;
+          setActiveTab(nextActive);
+          setHydratedTab(true);
         }
       } catch (error) {
         console.error("Failed to load tabs:", error);
@@ -57,7 +57,20 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
     };
 
     loadTabs();
-  }, [tripId]);
+  }, [tripId, storageKey]);
+
+  useEffect(() => {
+    if (!activeTab) return;
+    const activeTabData = tabs.find((tab) => tab.id === activeTab);
+    localStorage.setItem(storageKey, activeTab);
+    if (activeTabData && hydratedTab) {
+      void trackEvent("trip_tab_viewed", {
+        trip_id: tripId,
+        tab_id: activeTab,
+        tab_type: activeTabData.tabType || "custom"
+      });
+    }
+  }, [activeTab, tabs, tripId, storageKey, hydratedTab]);
 
   const executeTabDelete = async (tabId) => {
     if (!canManageTabs) return;
