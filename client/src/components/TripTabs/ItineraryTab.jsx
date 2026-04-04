@@ -522,7 +522,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
                           const voteSummary = getVoteSummaryForIdea(item.ideaId);
                           const tooltipLines = voteSummary.tooltip.split("\n");
                           return (
-                            <div className="relative inline-flex items-center group">
+                            <div className="relative inline-flex items-center group cursor-pointer">
                               <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600 transition group-hover:border-ocean group-hover:text-ocean">
                                 <span>👍 {voteSummary.up}</span>
                                 <span>👎 {voteSummary.down}</span>
