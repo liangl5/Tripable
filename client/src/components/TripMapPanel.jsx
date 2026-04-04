@@ -104,6 +104,7 @@ export default function TripMapPanel({
   const locationCacheRef = useRef(new Map());
   const infoWindowRef = useRef(null);
   const persistentInfoWindowsRef = useRef([]);
+  const mapHasIdRef = useRef(false);
   const [jsMapReady, setJsMapReady] = useState(false);
   const [jsMapError, setJsMapError] = useState("");
   const [showAllNames, setShowAllNames] = useState(false);
@@ -140,6 +141,8 @@ export default function TripMapPanel({
 
         if (!mapInstanceRef.current) {
           const configuredMapId = getGoogleMapsMapId();
+          const hasMapId = Boolean(configuredMapId && configuredMapId !== "DEMO_MAP_ID");
+          mapHasIdRef.current = hasMapId;
           const mapOptions = {
             center: { lat: 20, lng: 0 },
             zoom: 3,
@@ -149,7 +152,7 @@ export default function TripMapPanel({
             clickableIcons: false,
             gestureHandling: "greedy"
           };
-          if (configuredMapId && configuredMapId !== "DEMO_MAP_ID") {
+          if (hasMapId) {
             mapOptions.mapId = configuredMapId;
           }
           mapInstanceRef.current = new googleMaps.Map(mapContainerRef.current, {
@@ -202,9 +205,14 @@ export default function TripMapPanel({
     const renderMarkers = async () => {
       const googleMaps = window.google?.maps;
       if (!googleMaps || cancelled) return;
-      const markerLibrary = await googleMaps.importLibrary("marker");
-      if (cancelled) return;
-      const { AdvancedMarkerElement, PinElement } = markerLibrary;
+      const hasMapId = mapHasIdRef.current;
+      let AdvancedMarkerElement = null;
+      let PinElement = null;
+      if (hasMapId) {
+        const markerLibrary = await googleMaps.importLibrary("marker");
+        if (cancelled) return;
+        ({ AdvancedMarkerElement, PinElement } = markerLibrary);
+      }
 
       clearMarkers();
 
@@ -227,45 +235,89 @@ export default function TripMapPanel({
 
         const markerLabel = String(idea.title || idea.locationLabel || idea.mapQuery || "Plan item").trim();
         const markerTitle = truncateMarkerTitle(markerLabel);
-        const markerContent = createAdvancedMarkerContent(PinElement, idea, markerLabel);
-        const marker = new AdvancedMarkerElement({
-          map,
-          position,
-          title: markerTitle,
-          content: markerContent
-        });
-        const openHoverLabel = () => {
-          infoWindowRef.current?.setContent(createMarkerTooltipContent(markerLabel));
-          infoWindowRef.current?.open({
-            anchor: marker,
-            map,
-            shouldFocus: false
-          });
-        };
-        const closeHoverLabel = () => {
-          infoWindowRef.current?.close();
-        };
-        const cleanup = () => {
-          markerContent.removeEventListener("mouseenter", openHoverLabel);
-          markerContent.removeEventListener("mouseleave", closeHoverLabel);
-        };
+        let marker = null;
+        let cleanup = null;
 
-        if (showAllNames) {
-          const persistentInfoWindow = new googleMaps.InfoWindow({
-            content: createMarkerTooltipContent(markerLabel),
-            disableAutoPan: true,
-            headerDisabled: true,
-            pixelOffset: new googleMaps.Size(0, -28)
-          });
-          persistentInfoWindow.open({
-            anchor: marker,
+        if (hasMapId && AdvancedMarkerElement && PinElement) {
+          const markerContent = createAdvancedMarkerContent(PinElement, idea, markerLabel);
+          marker = new AdvancedMarkerElement({
             map,
-            shouldFocus: false
+            position,
+            title: markerTitle,
+            content: markerContent
           });
-          persistentInfoWindowsRef.current.push(persistentInfoWindow);
+          const openHoverLabel = () => {
+            infoWindowRef.current?.setContent(createMarkerTooltipContent(markerLabel));
+            infoWindowRef.current?.open({
+              anchor: marker,
+              map,
+              shouldFocus: false
+            });
+          };
+          const closeHoverLabel = () => {
+            infoWindowRef.current?.close();
+          };
+          cleanup = () => {
+            markerContent.removeEventListener("mouseenter", openHoverLabel);
+            markerContent.removeEventListener("mouseleave", closeHoverLabel);
+          };
+
+          if (showAllNames) {
+            const persistentInfoWindow = new googleMaps.InfoWindow({
+              content: createMarkerTooltipContent(markerLabel),
+              disableAutoPan: true,
+              headerDisabled: true,
+              pixelOffset: new googleMaps.Size(0, -28)
+            });
+            persistentInfoWindow.open({
+              anchor: marker,
+              map,
+              shouldFocus: false
+            });
+            persistentInfoWindowsRef.current.push(persistentInfoWindow);
+          } else {
+            markerContent.addEventListener("mouseenter", openHoverLabel);
+            markerContent.addEventListener("mouseleave", closeHoverLabel);
+          }
         } else {
-          markerContent.addEventListener("mouseenter", openHoverLabel);
-          markerContent.addEventListener("mouseleave", closeHoverLabel);
+          marker = new googleMaps.Marker({
+            map,
+            position,
+            title: markerTitle
+          });
+          const openHoverLabel = () => {
+            infoWindowRef.current?.setContent(createMarkerTooltipContent(markerLabel));
+            infoWindowRef.current?.open({
+              anchor: marker,
+              map,
+              shouldFocus: false
+            });
+          };
+          const closeHoverLabel = () => {
+            infoWindowRef.current?.close();
+          };
+
+          if (showAllNames) {
+            const persistentInfoWindow = new googleMaps.InfoWindow({
+              content: createMarkerTooltipContent(markerLabel),
+              disableAutoPan: true,
+              headerDisabled: true
+            });
+            persistentInfoWindow.open({
+              anchor: marker,
+              map,
+              shouldFocus: false
+            });
+            persistentInfoWindowsRef.current.push(persistentInfoWindow);
+            cleanup = () => {};
+          } else {
+            const overListener = marker.addListener("mouseover", openHoverLabel);
+            const outListener = marker.addListener("mouseout", closeHoverLabel);
+            cleanup = () => {
+              overListener.remove();
+              outListener.remove();
+            };
+          }
         }
 
         if (!firstMarkerPosition) {
