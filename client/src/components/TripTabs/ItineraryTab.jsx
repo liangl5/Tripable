@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
-import { clearGeneratedItinerary } from "../../lib/tripPlanning";
+import { clearGeneratedItinerary, slugify } from "../../lib/tripPlanning";
 
 export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, trip }) {
   const [days, setDays] = useState([]);
@@ -13,6 +13,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
   const [dateRangeStart, setDateRangeStart] = useState("");
   const [dateRangeEnd, setDateRangeEnd] = useState("");
   const [dateRangeError, setDateRangeError] = useState("");
+  const [listOptions, setListOptions] = useState([]);
   const [unsavedChanges, setUnsavedChanges] = useState(false);
   const [loading, setLoading] = useState(false);
   const canManageItinerary = userRole === "owner" || userRole === "editor";
@@ -55,6 +56,14 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
 
         setAllowedListIds(configData?.allowedListIds);
 
+        const { data: listData } = await supabase
+          .from("List")
+          .select("id, name, order")
+          .eq("tripId", tripId)
+          .order("order", { ascending: true });
+
+        setListOptions(listData || []);
+
         const nextDates = (daysData || [])
           .map((day) => (day?.date ? String(day.date).slice(0, 10) : null))
           .filter(Boolean)
@@ -76,6 +85,23 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
 
     loadItinerary();
   }, [tab.id, tripId, canManageItinerary, trip?.startDate, trip?.endDate]);
+
+  useEffect(() => {
+    const loadLists = async () => {
+      try {
+        const { data: listData } = await supabase
+          .from("List")
+          .select("id, name, order")
+          .eq("tripId", tripId)
+          .order("order", { ascending: true });
+        setListOptions(listData || []);
+      } catch (error) {
+        console.error("Failed to load lists:", error);
+      }
+    };
+
+    loadLists();
+  }, [tripId, tab.id, ideas]);
 
   useEffect(() => {
     if (!unsavedChanges) return undefined;
@@ -393,6 +419,40 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
     );
   };
 
+  const groupedActivityBank = () => {
+    const bank = getActivityBank();
+    const listIndex = new Map(listOptions.map((list, index) => [list.id, index]));
+    const listNameById = new Map(listOptions.map((list) => [list.id, list.name]));
+    const listNameBySlug = new Map(listOptions.map((list) => [slugify(list.name), list.name]));
+    const listNameByLower = new Map(listOptions.map((list) => [String(list.name).toLowerCase(), list.name]));
+
+    const groups = bank.reduce((acc, idea) => {
+      const listId = idea.listId || "";
+      const listNameHint = String(idea.listName || idea.category || "").trim();
+      const slugMatch = listId ? listNameBySlug.get(listId) : null;
+      const nameMatch = listNameHint ? listNameByLower.get(listNameHint.toLowerCase()) : null;
+      const slugNameMatch = listNameHint ? listNameBySlug.get(slugify(listNameHint)) : null;
+      const label =
+        (listId && listNameById.get(listId)) ||
+        slugMatch ||
+        nameMatch ||
+        slugNameMatch ||
+        listNameHint ||
+        "Uncategorized";
+      const key = listId || label;
+      if (!acc[key]) acc[key] = { label, listId, items: [] };
+      acc[key].items.push(idea);
+      return acc;
+    }, {});
+
+    return Object.values(groups).sort((a, b) => {
+      const aIndex = a.listId ? listIndex.get(a.listId) : Number.POSITIVE_INFINITY;
+      const bIndex = b.listId ? listIndex.get(b.listId) : Number.POSITIVE_INFINITY;
+      if (aIndex !== bIndex) return (aIndex ?? Number.POSITIVE_INFINITY) - (bIndex ?? Number.POSITIVE_INFINITY);
+      return a.label.localeCompare(b.label);
+    });
+  };
+
   const remainingActivityCount = getActivityBank().length;
 
   const getVoteSummary = (votesInput) => {
@@ -620,58 +680,65 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
         </button>
 
         {showActivityBank && (
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {getActivityBank().map((activity) => (
-              <div
-                key={activity.id}
-                draggable={canManageItinerary}
-                onDragStart={() => handleDragStart(activity)}
-                className={`rounded-lg border border-slate-200 p-2 text-xs ${
-                  canManageItinerary ? "cursor-grab active:cursor-grabbing hover:bg-white" : ""
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="space-y-1">
-                    <p className="font-semibold text-ink">{activity.title}</p>
-                    {activity.location && <p className="text-slate-600">{activity.location}</p>}
-                    {(() => {
-                      const voteSummary = getVoteSummary(activity.votes);
-                      const tooltipLines = voteSummary.tooltip.split("\n");
-                      return (
-                        <div className="relative inline-flex items-center group">
-                          <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600 transition group-hover:border-ocean group-hover:text-ocean">
-                            <span>👍 {voteSummary.up}</span>
-                            <span>👎 {voteSummary.down}</span>
-                          </span>
-                          <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden min-w-[200px] rounded-lg border border-slate-200 bg-white p-2 text-[11px] font-semibold text-slate-700 shadow-lg group-hover:block">
-                            {tooltipLines.map((line) => (
-                              <p key={line} className="leading-snug">
-                                {line}
-                              </p>
-                            ))}
-                          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            {groupedActivityBank().map((group) => (
+              <div key={group.listId || group.label} className="space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  {group.label}
+                </p>
+                {group.items.map((activity) => (
+                  <div
+                    key={activity.id}
+                    draggable={canManageItinerary}
+                    onDragStart={() => handleDragStart(activity)}
+                    className={`rounded-lg border border-slate-200 p-2 text-xs ${
+                      canManageItinerary ? "cursor-grab active:cursor-grabbing hover:bg-white" : ""
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <p className="font-semibold text-ink">{activity.title}</p>
+                        {activity.location && <p className="text-slate-600">{activity.location}</p>}
+                        {(() => {
+                          const voteSummary = getVoteSummary(activity.votes);
+                          const tooltipLines = voteSummary.tooltip.split("\n");
+                          return (
+                            <div className="relative inline-flex items-center group cursor-pointer">
+                              <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600 transition group-hover:border-ocean group-hover:text-ocean">
+                                <span>👍 {voteSummary.up}</span>
+                                <span>👎 {voteSummary.down}</span>
+                              </span>
+                              <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden min-w-[200px] rounded-lg border border-slate-200 bg-white p-2 text-[11px] font-semibold text-slate-700 shadow-lg group-hover:block">
+                                {tooltipLines.map((line) => (
+                                  <p key={line} className="leading-snug">
+                                    {line}
+                                  </p>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                      {canManageItinerary && (
+                        <div className="text-slate-400" title="Drag to reorder">
+                          <svg
+                            className="h-4 w-4"
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                            aria-hidden="true"
+                          >
+                            <circle cx="6" cy="5" r="1.5" />
+                            <circle cx="14" cy="5" r="1.5" />
+                            <circle cx="6" cy="10" r="1.5" />
+                            <circle cx="14" cy="10" r="1.5" />
+                            <circle cx="6" cy="15" r="1.5" />
+                            <circle cx="14" cy="15" r="1.5" />
+                          </svg>
                         </div>
-                      );
-                    })()}
-                  </div>
-                  {canManageItinerary && (
-                    <div className="text-slate-400" title="Drag to reorder">
-                      <svg
-                        className="h-4 w-4"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        aria-hidden="true"
-                      >
-                        <circle cx="6" cy="5" r="1.5" />
-                        <circle cx="14" cy="5" r="1.5" />
-                        <circle cx="6" cy="10" r="1.5" />
-                        <circle cx="14" cy="10" r="1.5" />
-                        <circle cx="6" cy="15" r="1.5" />
-                        <circle cx="14" cy="15" r="1.5" />
-                      </svg>
+                      )}
                     </div>
-                  )}
-                </div>
+                  </div>
+                ))}
               </div>
             ))}
 
