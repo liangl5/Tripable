@@ -4,8 +4,7 @@ import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
 import { createDefaultTripsTab } from "../lib/tabManagement.js";
 import { formatDateRange } from "../lib/timeFormat.js";
-import { parseInvitees } from "../lib/tripPlanning.js";
-import { supabase } from "../lib/supabase.js";
+import ShareTripModal from "./ShareTripModal.jsx";
 
 const ROLE_LABELS = {
   owner: "Owner",
@@ -47,26 +46,16 @@ export default function TripList({ trips }) {
   const createTrip = useTripStore((state) => state.createTrip);
   const updateTripMeta = useTripStore((state) => state.updateTripMeta);
   const deleteTrip = useTripStore((state) => state.deleteTrip);
-  const sendTripInvites = useTripStore((state) => state.sendTripInvites);
   const [menuOpenId, setMenuOpenId] = useState(null);
   const [renameTrip, setRenameTrip] = useState(null);
   const [renameValue, setRenameValue] = useState("");
   const [shareTrip, setShareTrip] = useState(null);
-  const [inviteDraft, setInviteDraft] = useState("");
   const [inviteStatus, setInviteStatus] = useState("");
-  const [inviteLoading, setInviteLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [duplicateLoading, setDuplicateLoading] = useState(false);
   const [shareMenuOpenId, setShareMenuOpenId] = useState(null);
   const [shareMenuPinnedId, setShareMenuPinnedId] = useState(null);
   const [lastShareTrip, setLastShareTrip] = useState(null);
-  const [accessMembers, setAccessMembers] = useState([]);
-  const [roleUpdateLoadingId, setRoleUpdateLoadingId] = useState(null);
-  const [roleMenuOpenId, setRoleMenuOpenId] = useState(null);
-  const [pendingRoleChanges, setPendingRoleChanges] = useState({});
-  const [savingRoleChanges, setSavingRoleChanges] = useState(false);
-  const [originalRoles, setOriginalRoles] = useState({});
-  const roleMenuRef = useRef(null);
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -94,151 +83,10 @@ export default function TripList({ trips }) {
   }, [menuOpenId]);
 
   useEffect(() => {
-    if (!roleMenuOpenId) return undefined;
-    const handleClickOutside = (event) => {
-      if (roleMenuRef.current && !roleMenuRef.current.contains(event.target)) {
-        setRoleMenuOpenId(null);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [roleMenuOpenId]);
-
-  useEffect(() => {
     if (!inviteStatus) return undefined;
     const timer = setTimeout(() => setInviteStatus(""), 10000);
     return () => clearTimeout(timer);
   }, [inviteStatus]);
-
-  const loadAccessMembers = async () => {
-    if (!shareTrip?.id) {
-      setAccessMembers([]);
-      return;
-    }
-
-    try {
-      const { data: memberRows, error: memberError } = await supabase
-        .from("TripMember")
-        .select("tripId, userId")
-        .eq("tripId", shareTrip.id);
-      if (memberError) throw memberError;
-
-      const userIds = Array.from(new Set((memberRows || []).map((row) => row.userId).filter(Boolean)));
-      if (!userIds.length) {
-        setAccessMembers([]);
-        return;
-      }
-
-      const { data: users, error: userError } = await supabase
-        .from("User")
-        .select("id, name, email")
-        .in("id", userIds);
-      if (userError) throw userError;
-
-      const { data: roleRows, error: roleError } = await supabase
-        .from("UserTripRole")
-        .select("userId, role")
-        .eq("tripId", shareTrip.id)
-        .in("userId", userIds);
-      if (roleError) throw roleError;
-
-      const roleMap = new Map((roleRows || []).map((row) => [row.userId, row.role]));
-      const members = (users || []).map((user) => ({
-        id: user.id,
-        name: user.name || "Traveler",
-        email: user.email || "",
-        role: roleMap.get(user.id) || "suggestor",
-        photoUrl: user.photoUrl || ""
-      }));
-
-      members.sort((a, b) => {
-        if (a.role === "owner") return -1;
-        if (b.role === "owner") return 1;
-        return a.name.localeCompare(b.name);
-      });
-
-      setAccessMembers(members);
-      setPendingRoleChanges({});
-      setOriginalRoles(
-        members.reduce((acc, member) => {
-          acc[member.id] = member.role;
-          return acc;
-        }, {})
-      );
-    } catch (error) {
-      console.error("Failed to load trip members", error);
-      setAccessMembers([]);
-    }
-  };
-
-  useEffect(() => {
-    void loadAccessMembers();
-  }, [shareTrip]);
-
-  const currentUserRole = accessMembers.find((member) => member.id === session?.user?.id)?.role || "suggestor";
-  const canManageRoles = currentUserRole === "owner" || currentUserRole === "editor";
-
-  const handleRoleChange = (memberId, nextRole) => {
-    if (!shareTrip?.id) return;
-    if (!memberId || !nextRole) return;
-    setPendingRoleChanges((current) => {
-      const next = { ...current };
-      const originalRole = originalRoles[memberId];
-      if (nextRole === originalRole) {
-        delete next[memberId];
-      } else {
-        next[memberId] = nextRole;
-      }
-      return next;
-    });
-    setAccessMembers((current) =>
-      current.map((member) => (member.id === memberId ? { ...member, role: nextRole } : member))
-    );
-  };
-
-  const pendingChangeCount = Object.keys(pendingRoleChanges).length;
-
-  const handleSaveRoleChanges = async () => {
-    if (!shareTrip?.id || pendingChangeCount === 0) return;
-    setSavingRoleChanges(true);
-    try {
-      const entries = Object.entries(pendingRoleChanges);
-      for (const [memberId, nextRole] of entries) {
-        if (nextRole === "remove") {
-          const { error: roleError } = await supabase
-            .from("UserTripRole")
-            .delete()
-            .eq("tripId", shareTrip.id)
-            .eq("userId", memberId);
-          if (roleError) throw roleError;
-          const { error: memberError } = await supabase
-            .from("TripMember")
-            .delete()
-            .eq("tripId", shareTrip.id)
-            .eq("userId", memberId);
-          if (memberError) throw memberError;
-        } else {
-          const { error } = await supabase
-            .from("UserTripRole")
-            .update({ role: nextRole })
-            .eq("tripId", shareTrip.id)
-            .eq("userId", memberId);
-          if (error) throw error;
-        }
-      }
-      await loadAccessMembers();
-      setInviteStatus("Permissions updated");
-      setShareTrip(null);
-    } catch (error) {
-      console.error("Failed to update member role", error);
-      setInviteStatus(error?.message || "Unable to update permissions.");
-    } finally {
-      setSavingRoleChanges(false);
-      setRoleUpdateLoadingId(null);
-    }
-  };
 
   if (!trips.length) {
     return (
@@ -358,7 +206,6 @@ export default function TripList({ trips }) {
                             setShareMenuOpenId(null);
                             setShareMenuPinnedId(null);
                             setShareTrip(trip);
-                            setInviteDraft("");
                             setInviteStatus("");
                           }}
                         >
@@ -530,215 +377,15 @@ export default function TripList({ trips }) {
         </div>
       ) : null}
 
-      {shareTrip ? (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/35 px-4"
-          onClick={() => setShareTrip(null)}
-        >
-          <div
-            className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-card"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h3 className="text-lg font-semibold text-ink">Share trip</h3>
-            <p className="mt-1 text-sm text-slate-600">Invite people by email or copy the link.</p>
-            <div className="mt-4 space-y-3">
-              <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Invite by email</label>
-              <textarea
-                rows={3}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-ink"
-                value={inviteDraft}
-                onChange={(event) => setInviteDraft(event.target.value)}
-                placeholder="Add emails separated by commas"
-              />
-              {!inviteDraft.trim() ? (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">People with access</p>
-                <div className="mt-2 space-y-2">
-                  {accessMembers.length ? (
-                    accessMembers.map((member) => (
-                      <div
-                        key={member.id}
-                        className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white text-xs font-semibold ${
-                              member.photoUrl ? "bg-slate-100 text-slate-600" : getAvatarColor(member.id)
-                            }`}
-                          >
-                            {member.photoUrl ? (
-                              <img src={member.photoUrl} alt={member.name || "Traveler"} className="h-full w-full object-cover" />
-                            ) : (
-                              <span>{getInitials(member.name)}</span>
-                            )}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-ink">{member.name || "Traveler"}</p>
-                            <p className="text-xs text-slate-500 truncate">{member.email || "No email"}</p>
-                          </div>
-                        </div>
-                        {canManageRoles && member.role !== "owner" ? (
-                          <div className="relative" ref={roleMenuOpenId === member.id ? roleMenuRef : null}>
-                            <button
-                              type="button"
-                              onClick={() => setRoleMenuOpenId(roleMenuOpenId === member.id ? null : member.id)}
-                              className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm hover:border-ocean hover:text-ocean"
-                              disabled={roleUpdateLoadingId === member.id}
-                            >
-                              {member.role === "remove" ? "Remove access" : ROLE_LABELS[member.role] || "Suggestor"}
-                              <svg className="h-3 w-3 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                                <path d="M5 7l5 5 5-5" />
-                              </svg>
-                            </button>
-                            {roleMenuOpenId === member.id && (
-                              <div className="absolute right-0 mt-2 w-40 rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-lg">
-                                <button
-                                  type="button"
-                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-slate-100"
-                                  onClick={() => {
-                                    setRoleMenuOpenId(null);
-                                    handleRoleChange(member.id, "editor");
-                                  }}
-                                >
-                                  {member.role === "editor" ? (
-                                    <svg className="h-4 w-4 text-emerald-500" viewBox="0 0 20 20" fill="currentColor">
-                                      <path d="M7.667 13.2L4.4 9.933l-1.4 1.4 4.667 4.667 9-9-1.4-1.4-7.6 7.6z" />
-                                    </svg>
-                                  ) : (
-                                    <span className="h-4 w-4" />
-                                  )}
-                                  Editor
-                                </button>
-                                <button
-                                  type="button"
-                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-slate-100"
-                                  onClick={() => {
-                                    setRoleMenuOpenId(null);
-                                    handleRoleChange(member.id, "suggestor");
-                                  }}
-                                >
-                                  {member.role === "suggestor" ? (
-                                    <svg className="h-4 w-4 text-emerald-500" viewBox="0 0 20 20" fill="currentColor">
-                                      <path d="M7.667 13.2L4.4 9.933l-1.4 1.4 4.667 4.667 9-9-1.4-1.4-7.6 7.6z" />
-                                    </svg>
-                                  ) : (
-                                    <span className="h-4 w-4" />
-                                  )}
-                                  Suggestor
-                                </button>
-                                <button
-                                  type="button"
-                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-coral hover:bg-rose-50"
-                                  onClick={() => {
-                                    setRoleMenuOpenId(null);
-                                    handleRoleChange(member.id, "remove");
-                                  }}
-                                >
-                                  {member.role === "remove" ? (
-                                    <svg className="h-4 w-4 text-emerald-500" viewBox="0 0 20 20" fill="currentColor">
-                                      <path d="M7.667 13.2L4.4 9.933l-1.4 1.4 4.667 4.667 9-9-1.4-1.4-7.6 7.6z" />
-                                    </svg>
-                                  ) : (
-                                    <span className="h-4 w-4" />
-                                  )}
-                                  Remove access
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {ROLE_LABELS[member.role] || "Suggestor"}
-                          </span>
-                        )}
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-slate-500">No members yet.</p>
-                  )}
-                </div>
-                </div>
-              ) : null}
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={async () => {
-                    const link = `${window.location.origin}/trips/${shareTrip.id}/invite`;
-                    await navigator.clipboard.writeText(link);
-                    setInviteStatus("Link copied");
-                  }}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-ink hover:border-ocean hover:text-ocean"
-                >
-                  Copy link
-                </button>
-                <div className="ml-auto flex items-center gap-2">
-                  {pendingChangeCount > 0 ? (
-                    <>
-                      <span className="text-sm font-semibold text-amber-700">Pending changes</span>
-                      <button
-                        type="button"
-                        onClick={handleSaveRoleChanges}
-                        disabled={savingRoleChanges}
-                        className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-60"
-                      >
-                        {savingRoleChanges ? "Saving..." : "Save"}
-                      </button>
-                    </>
-                  ) : inviteDraft.trim() ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setInviteDraft("")}
-                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-600 hover:border-slate-400 hover:text-ink"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={async () => {
-                          if (!shareTrip?.id) return;
-                          const emails = parseInvitees(inviteDraft);
-                          if (!emails.length) {
-                            setInviteStatus("Add at least one email.");
-                            return;
-                          }
-                          setInviteLoading(true);
-                          setInviteStatus("");
-                          try {
-                            await sendTripInvites({
-                              tripId: shareTrip.id,
-                              tripName: shareTrip.name || "Trip",
-                              invitees: emails,
-                              inviteUrl: `${window.location.origin}/trips/${shareTrip.id}/invite`
-                            });
-                            setInviteStatus("Invites sent.");
-                            setInviteDraft("");
-                          } catch (error) {
-                            setInviteStatus(error?.message || "Unable to send invites.");
-                          } finally {
-                            setInviteLoading(false);
-                          }
-                        }}
-                        className="rounded-lg bg-ocean px-3 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-60"
-                        disabled={inviteLoading}
-                      >
-                        {inviteLoading ? "Sending..." : "Send"}
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setShareTrip(null)}
-                      className="rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-                    >
-                      Done
-                    </button>
-                  )}
-                </div>
-              </div>
-              {inviteStatus ? <p className="text-sm text-slate-600">{inviteStatus}</p> : null}
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <ShareTripModal
+        open={Boolean(shareTrip)}
+        trip={shareTrip}
+        onClose={() => setShareTrip(null)}
+        onLinkCopied={(trip) => {
+          setInviteStatus("Link copied");
+          setLastShareTrip(trip);
+        }}
+      />
 
       {deleteConfirm ? (
         <div
@@ -787,7 +434,6 @@ export default function TripList({ trips }) {
               className="text-base font-semibold text-sky-200 underline hover:text-white"
               onClick={() => {
                 setShareTrip(lastShareTrip);
-                setInviteDraft("");
                 setInviteStatus("");
               }}
             >
