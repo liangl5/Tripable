@@ -1,8 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useTripStore } from "../hooks/useTripStore.js";
-import { useSession } from "../App";
-import { createDefaultTripsTab } from "../lib/tabManagement.js";
 import { formatDateRange } from "../lib/timeFormat.js";
 import ShareTripModal from "./ShareTripModal.jsx";
 
@@ -41,9 +39,7 @@ const getAvatarColor = (id) => {
 };
 
 export default function TripList({ trips }) {
-  const navigate = useNavigate();
-  const session = useSession();
-  const createTrip = useTripStore((state) => state.createTrip);
+  const duplicateTrip = useTripStore((state) => state.duplicateTrip);
   const updateTripMeta = useTripStore((state) => state.updateTripMeta);
   const deleteTrip = useTripStore((state) => state.deleteTrip);
   const [menuOpenId, setMenuOpenId] = useState(null);
@@ -59,16 +55,24 @@ export default function TripList({ trips }) {
   const [inviteStatus, setInviteStatus] = useState("");
   const [inviteStatusAt, setInviteStatusAt] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [deleteNotice, setDeleteNotice] = useState(null);
+  const [deleteNoticeAt, setDeleteNoticeAt] = useState(0);
+  const [copyNotice, setCopyNotice] = useState(null);
+  const [copyNoticeAt, setCopyNoticeAt] = useState(0);
+  const [copyStatus, setCopyStatus] = useState("");
+  const [copyStatusAt, setCopyStatusAt] = useState(0);
+  const [hiddenTripIds, setHiddenTripIds] = useState(() => new Set());
   const [duplicateLoading, setDuplicateLoading] = useState(false);
   const [shareMenuOpenId, setShareMenuOpenId] = useState(null);
   const [shareMenuPinnedId, setShareMenuPinnedId] = useState(null);
   const [lastShareTrip, setLastShareTrip] = useState(null);
   const menuRef = useRef(null);
+  const deleteTimeoutsRef = useRef(new Map());
 
   useEffect(() => {
     if (!menuOpenId) return undefined;
     const handleClickOutside = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) {
+      if (!event.target.closest("[data-trip-menu]")) {
         setMenuOpenId(null);
         setShareMenuOpenId(null);
         setShareMenuPinnedId(null);
@@ -106,6 +110,24 @@ export default function TripList({ trips }) {
     const timer = setTimeout(() => setRenameUndoNotice(""), 10000);
     return () => clearTimeout(timer);
   }, [renameUndoNotice]);
+
+  useEffect(() => {
+    if (!deleteNotice) return undefined;
+    const timer = setTimeout(() => setDeleteNotice(null), 10000);
+    return () => clearTimeout(timer);
+  }, [deleteNotice]);
+
+  useEffect(() => {
+    if (!copyNotice) return undefined;
+    const timer = setTimeout(() => setCopyNotice(null), 10000);
+    return () => clearTimeout(timer);
+  }, [copyNotice]);
+
+  useEffect(() => {
+    if (!copyStatus) return undefined;
+    const timer = setTimeout(() => setCopyStatus(""), 10000);
+    return () => clearTimeout(timer);
+  }, [copyStatus]);
 
   useEffect(() => {
     if (!renameUndoSaving) return undefined;
@@ -150,7 +172,96 @@ export default function TripList({ trips }) {
     setRenameUndoNoticeAt(Date.now());
   };
 
-  if (!trips.length) {
+  const showActionUndone = () => {
+    showRenameUndoNotice("Action undone");
+  };
+
+  const showDeleteNotice = (trip) => {
+    setDeleteNotice({
+      id: trip.id,
+      name: trip.name || "Trip"
+    });
+    setDeleteNoticeAt(Date.now());
+  };
+
+  const showCopyNotice = (trip) => {
+    if (!trip?.id) return;
+    setCopyNotice({
+      id: trip.id,
+      name: trip.name || "Trip"
+    });
+    setCopyNoticeAt(Date.now());
+  };
+
+  const showCopyStatus = (message) => {
+    setCopyStatus(message);
+    setCopyStatusAt(Date.now());
+  };
+
+  const scheduleTripDelete = (trip) => {
+    if (!trip?.id) return;
+    setDeleteConfirm(null);
+    setHiddenTripIds((current) => new Set([...current, trip.id]));
+    showDeleteNotice(trip);
+
+    const timeoutId = setTimeout(async () => {
+      try {
+        await deleteTrip(trip.id);
+      } catch (error) {
+        console.error("Failed to delete trip", error);
+        setHiddenTripIds((current) => {
+          const next = new Set(current);
+          next.delete(trip.id);
+          return next;
+        });
+        showInviteStatus("Unable to delete trip.");
+      } finally {
+        deleteTimeoutsRef.current.delete(trip.id);
+      }
+    }, 10000);
+
+    deleteTimeoutsRef.current.set(trip.id, timeoutId);
+  };
+
+  const undoTripDelete = (tripId) => {
+    if (!tripId) return;
+    const timeoutId = deleteTimeoutsRef.current.get(tripId);
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      deleteTimeoutsRef.current.delete(tripId);
+    }
+    setHiddenTripIds((current) => {
+      const next = new Set(current);
+      next.delete(tripId);
+      return next;
+    });
+    setDeleteNotice(null);
+    showActionUndone();
+  };
+
+  const undoTripCopy = async (tripId) => {
+    if (!tripId) return;
+    try {
+      await deleteTrip(tripId);
+      setHiddenTripIds((current) => {
+        const next = new Set(current);
+        next.delete(tripId);
+        return next;
+      });
+      setCopyNotice(null);
+      showActionUndone();
+    } catch (error) {
+      console.error("Failed to undo trip copy", error);
+      showInviteStatus("Unable to undo copy.");
+    }
+  };
+
+  const visibleTrips = useMemo(
+    () => trips.filter((trip) => !hiddenTripIds.has(trip.id)),
+    [trips, hiddenTripIds]
+  );
+
+  if (!visibleTrips.length) {
     return (
       <div className="rounded-3xl border border-dashed border-slate-300 bg-white/60 p-8 text-center">
         <p className="text-lg font-semibold">No trips yet</p>
@@ -162,12 +273,13 @@ export default function TripList({ trips }) {
   return (
     <>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {trips.map((trip) => (
+        {visibleTrips.map((trip) => (
           <div key={trip.id} className="relative overflow-visible rounded-3xl bg-white/90">
             <div className="h-40 rounded-t-3xl bg-gradient-to-br from-sky-100 via-indigo-100 to-rose-100" />
             <div
               className="absolute right-4 top-4"
               ref={menuRef}
+              data-trip-menu
               onMouseDown={(event) => event.stopPropagation()}
             >
               <button
@@ -209,15 +321,15 @@ export default function TripList({ trips }) {
                       setMenuOpenId(null);
                       setDuplicateLoading(true);
                       try {
+                        showCopyStatus("Creating copy...");
                         const copyName = `Copy of ${trip.name || "Trip"}`;
-                        const newTrip = await createTrip({ name: copyName });
-                        if (session?.user?.id) {
-                          await createDefaultTripsTab(newTrip.id, session.user.id);
-                        }
-                        navigate(`/trips/${newTrip.id}`);
+                        const newTrip = await duplicateTrip(trip.id, { name: copyName });
+                        showCopyNotice({ id: newTrip.id, name: trip.name || "Trip" });
                       } catch (error) {
                         console.error("Unable to duplicate trip", error);
+                        showInviteStatus("Unable to create copy.");
                       } finally {
+                        setCopyStatus("");
                         setDuplicateLoading(false);
                       }
                     }}
@@ -226,7 +338,7 @@ export default function TripList({ trips }) {
                       <rect x="9" y="9" width="13" height="13" rx="2" />
                       <rect x="2" y="2" width="13" height="13" rx="2" />
                     </svg>
-                    {duplicateLoading ? "Duplicating..." : "Duplicate"}
+                    {duplicateLoading ? "Making copy..." : "Make a copy"}
                   </button>
                   <div
                     className="group relative"
@@ -474,8 +586,7 @@ export default function TripList({ trips }) {
               <button
                 onClick={async () => {
                   try {
-                    await deleteTrip(deleteConfirm.id);
-                    setDeleteConfirm(null);
+                    scheduleTripDelete(deleteConfirm);
                   } catch (error) {
                     console.error("Failed to delete trip", error);
                   }
@@ -489,8 +600,8 @@ export default function TripList({ trips }) {
         </div>
       ) : null}
 
-      <div className="fixed bottom-4 right-6 z-[70] flex flex-col items-end gap-2">
-        {[
+      {(() => {
+        const notifications = [
           inviteStatus
             ? {
                 key: "invite",
@@ -589,13 +700,90 @@ export default function TripList({ trips }) {
                 )
               }
             : null
+          ,
+          deleteNotice
+            ? {
+                key: "delete",
+                ts: deleteNoticeAt,
+                node: (
+                  <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
+                    <span>“{deleteNotice.name}” deleted</span>
+                    <button
+                      type="button"
+                      className="text-base font-semibold text-sky-200 underline hover:text-white"
+                      onClick={() => undoTripDelete(deleteNotice.id)}
+                    >
+                      Undo
+                    </button>
+                    <button
+                      type="button"
+                      className="ml-auto text-white/70 hover:text-white"
+                      onClick={() => setDeleteNotice(null)}
+                      aria-label="Dismiss notification"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )
+              }
+            : null
+          ,
+          copyNotice
+            ? {
+                key: "copy",
+                ts: copyNoticeAt,
+                node: (
+                  <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
+                    <span>Copy of “{copyNotice.name}” created</span>
+                    <button
+                      type="button"
+                      className="text-base font-semibold text-sky-200 underline hover:text-white"
+                      onClick={() => undoTripCopy(copyNotice.id)}
+                    >
+                      Undo
+                    </button>
+                    <button
+                      type="button"
+                      className="ml-auto text-white/70 hover:text-white"
+                      onClick={() => setCopyNotice(null)}
+                      aria-label="Dismiss notification"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )
+              }
+            : null
+          ,
+          copyStatus
+            ? {
+                key: "copy-status",
+                ts: copyStatusAt,
+                node: (
+                  <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
+                    <span>{copyStatus}</span>
+                    <button
+                      type="button"
+                      className="ml-auto text-white/70 hover:text-white"
+                      onClick={() => setCopyStatus("")}
+                      aria-label="Dismiss notification"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )
+              }
+            : null
         ]
           .filter(Boolean)
-          .sort((a, b) => b.ts - a.ts)
-          .map((item) => (
-            <div key={item.key}>{item.node}</div>
-          ))}
-      </div>
+          .sort((a, b) => b.ts - a.ts);
+
+        const latest = notifications[0];
+
+        return latest ? (
+          <div className="fixed bottom-4 right-6 z-[70]">{latest.node}</div>
+        ) : null;
+      })()}
     </>
   );
 }

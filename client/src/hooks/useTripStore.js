@@ -50,6 +50,22 @@ export const useTripStore = create((set, get) => ({
     }
   },
 
+  duplicateTrip: async (tripId, payload) => {
+    set({ createTripLoading: true, error: null });
+    try {
+      const trip = await api.duplicateTrip(tripId, payload);
+      set((state) => ({ trips: [trip, ...state.trips], createTripLoading: false }));
+      void trackEvent("trip_duplicated", {
+        trip_id: trip.id,
+        source_trip_id: tripId
+      });
+      return trip;
+    } catch (error) {
+      set({ error: error.message, createTripLoading: false });
+      throw error;
+    }
+  },
+
   sendTripInvites: async (payload) => {
     set({ inviteSendLoading: true, error: null });
     try {

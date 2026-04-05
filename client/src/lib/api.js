@@ -1338,6 +1338,299 @@ export const api = {
     };
   },
 
+  async duplicateTrip(sourceTripId, payload = {}) {
+    const user = await getOrCreateUser();
+
+    const { data: sourceTrip, error: sourceError } = await supabase
+      .from("Trip")
+      .select("*")
+      .eq("id", sourceTripId)
+      .single();
+
+    if (sourceError || !sourceTrip) {
+      throw new Error("Trip not found");
+    }
+
+    const newTripId = crypto.randomUUID();
+    const tripInsert = {
+      id: newTripId,
+      name: payload?.name || `Copy of ${sourceTrip.name || "Trip"}`,
+      createdById: user.id
+    };
+
+    const { error: tripError } = await supabase
+      .from("Trip")
+      .insert([tripInsert]);
+
+    if (tripError) throw tripError;
+
+    const { error: memberError } = await supabase
+      .from("TripMember")
+      .insert([{
+        id: crypto.randomUUID(),
+        tripId: newTripId,
+        userId: user.id
+      }]);
+
+    if (memberError) throw memberError;
+
+    const { error: roleError } = await supabase
+      .from("UserTripRole")
+      .insert([{
+        id: crypto.randomUUID(),
+        tripId: newTripId,
+        userId: user.id,
+        role: "owner"
+      }]);
+
+    if (roleError) throw roleError;
+
+    const { data: sourceTabs, error: tabError } = await supabase
+      .from("TripTabConfiguration")
+      .select("*")
+      .eq("tripId", sourceTripId)
+      .order("position", { ascending: true });
+
+    if (tabError) throw tabError;
+
+    const tabIdMap = new Map();
+    const newTabs = (sourceTabs || []).map((tab) => {
+      const id = crypto.randomUUID();
+      tabIdMap.set(tab.id, id);
+      return {
+        id,
+        tripId: newTripId,
+        name: tab.name,
+        tabType: tab.tabType,
+        position: tab.position,
+        isCollapsible: tab.isCollapsible ?? false
+      };
+    });
+
+    const mapTabId = (tabId) => {
+      if (!tabId) return null;
+      const mapped = tabIdMap.get(tabId);
+      if (!mapped) {
+        throw new Error("Unable to map tab configuration during duplication");
+      }
+      return mapped;
+    };
+
+    if (newTabs.length) {
+      const { error } = await supabase.from("TripTabConfiguration").insert(newTabs);
+      if (error) throw error;
+    }
+
+    const { data: sourceLists, error: listError } = await supabase
+      .from("List")
+      .select("*")
+      .eq("tripId", sourceTripId)
+      .order("order", { ascending: true });
+
+    if (listError) throw listError;
+
+    const listIdMap = new Map();
+    const newLists = (sourceLists || []).map((list) => {
+      const id = crypto.randomUUID();
+      listIdMap.set(list.id, id);
+      return {
+        id,
+        tripId: newTripId,
+        tabId: mapTabId(list.tabId),
+        name: list.name,
+        order: list.order
+      };
+    });
+
+    if (newLists.length) {
+      const { error } = await supabase.from("List").insert(newLists);
+      if (error) throw error;
+    }
+
+    const sourceTabIds = (sourceTabs || []).map((tab) => tab.id);
+
+    if (sourceTabIds.length) {
+      const { data: itineraryConfigs, error: configError } = await supabase
+        .from("ItineraryTabConfiguration")
+        .select("*")
+        .in("tabId", sourceTabIds);
+
+      if (configError) throw configError;
+
+      const newConfigs = (itineraryConfigs || []).map((config) => {
+        const allowedIds = Array.isArray(config.allowedListIds)
+          ? config.allowedListIds.map((id) => listIdMap.get(id)).filter(Boolean)
+          : config.allowedListIds;
+
+        return {
+          id: crypto.randomUUID(),
+          tabId: mapTabId(config.tabId),
+          allowedListIds: allowedIds
+        };
+      });
+
+      if (newConfigs.length) {
+        const { error } = await supabase.from("ItineraryTabConfiguration").insert(newConfigs);
+        if (error) throw error;
+      }
+    }
+
+    const { data: sourceIdeas, error: ideaError } = await supabase
+      .from("Idea")
+      .select("*")
+      .eq("tripId", sourceTripId);
+
+    if (ideaError) throw ideaError;
+
+    const ideaIdMap = new Map();
+    (sourceIdeas || []).forEach((idea) => {
+      ideaIdMap.set(idea.id, crypto.randomUUID());
+    });
+
+    const newIdeas = (sourceIdeas || []).map((idea) => ({
+      id: ideaIdMap.get(idea.id),
+      tripId: newTripId,
+      title: idea.title,
+      description: idea.description,
+      location: idea.location,
+      category: idea.category,
+      entryType: idea.entryType,
+      parentIdeaId: idea.parentIdeaId ? ideaIdMap.get(idea.parentIdeaId) : null,
+      listId: idea.listId ? listIdMap.get(idea.listId) : null,
+      tabId: mapTabId(idea.tabId),
+      costEstimate: idea.costEstimate,
+      mapQuery: idea.mapQuery,
+      coordinates: idea.coordinates,
+      photoUrl: idea.photoUrl,
+      photoAttributions: idea.photoAttributions,
+      recommendationSource: idea.recommendationSource,
+      createdById: idea.createdById
+    }));
+
+    if (newIdeas.length) {
+      const { error } = await supabase.from("Idea").insert(newIdeas);
+      if (error) throw error;
+    }
+
+    const { data: sourceDays, error: dayError } = await supabase
+      .from("ItineraryDay")
+      .select("*")
+      .eq("tripId", sourceTripId)
+      .order("dayNumber", { ascending: true });
+
+    if (dayError) throw dayError;
+
+    const dayIdMap = new Map();
+    (sourceDays || []).forEach((day) => {
+      dayIdMap.set(day.id, crypto.randomUUID());
+    });
+
+    const newDays = (sourceDays || []).map((day) => ({
+      id: dayIdMap.get(day.id),
+      tripId: newTripId,
+      tabId: mapTabId(day.tabId),
+      dayNumber: day.dayNumber,
+      date: day.date,
+      isDraft: day.isDraft
+    }));
+
+    if (newDays.length) {
+      const { error } = await supabase.from("ItineraryDay").insert(newDays);
+      if (error) throw error;
+    }
+
+    if (sourceDays?.length) {
+      const { data: items, error: itemError } = await supabase
+        .from("ItineraryItem")
+        .select("*")
+        .in("itineraryDayId", sourceDays.map((day) => day.id));
+
+      if (itemError) throw itemError;
+
+      const newItems = (items || []).map((item) => ({
+        id: crypto.randomUUID(),
+        itineraryDayId: dayIdMap.get(item.itineraryDayId),
+        ideaId: item.ideaId ? ideaIdMap.get(item.ideaId) : null,
+        order: item.order,
+        title: item.title,
+        location: item.location
+      }));
+
+      if (newItems.length) {
+        const { error } = await supabase.from("ItineraryItem").insert(newItems);
+        if (error) throw error;
+      }
+    }
+
+    const { data: surveyRows, error: surveyError } = await supabase
+      .from("SurveyDate")
+      .select("date")
+      .eq("tripId", sourceTripId);
+
+    if (surveyError) throw surveyError;
+
+    const newSurveyRows = (surveyRows || []).map((row) => ({
+      id: crypto.randomUUID(),
+      tripId: newTripId,
+      date: row.date
+    }));
+
+    if (newSurveyRows.length) {
+      const { error } = await supabase.from("SurveyDate").insert(newSurveyRows);
+      if (error) throw error;
+    }
+
+    const { data: transactions, error: transactionError } = await supabase
+      .from("Transaction")
+      .select("*")
+      .eq("tripId", sourceTripId);
+
+    if (transactionError) throw transactionError;
+
+    const transactionIdMap = new Map();
+    (transactions || []).forEach((tx) => {
+      transactionIdMap.set(tx.id, crypto.randomUUID());
+    });
+
+    const newTransactions = (transactions || []).map((tx) => ({
+      id: transactionIdMap.get(tx.id),
+      tripId: newTripId,
+      tabId: mapTabId(tx.tabId),
+      name: tx.name,
+      totalAmount: tx.totalAmount,
+      paidByUserId: tx.paidByUserId,
+      createdById: tx.createdById
+    }));
+
+    if (newTransactions.length) {
+      const { error } = await supabase.from("Transaction").insert(newTransactions);
+      if (error) throw error;
+    }
+
+    if (transactions?.length) {
+      const { data: splits, error: splitError } = await supabase
+        .from("TransactionSplit")
+        .select("*")
+        .in("transactionId", transactions.map((tx) => tx.id));
+
+      if (splitError) throw splitError;
+
+      const newSplits = (splits || []).map((split) => ({
+        id: crypto.randomUUID(),
+        transactionId: transactionIdMap.get(split.transactionId),
+        userId: split.userId,
+        amount: split.amount
+      }));
+
+      if (newSplits.length) {
+        const { error } = await supabase.from("TransactionSplit").insert(newSplits);
+        if (error) throw error;
+      }
+    }
+
+    return this.getTrip(newTripId);
+  },
+
   async sendTripInvites(payload) {
     const user = await getOrCreateUser();
     const shouldNotify = payload?.notify !== false;
