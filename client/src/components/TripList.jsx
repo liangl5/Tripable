@@ -38,7 +38,7 @@ const getAvatarColor = (id) => {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 };
 
-export default function TripList({ trips }) {
+export default function TripList({ trips, selectionMode = false, openOnCardClick = false }) {
   const duplicateTrip = useTripStore((state) => state.duplicateTrip);
   const updateTripMeta = useTripStore((state) => state.updateTripMeta);
   const deleteTrip = useTripStore((state) => state.deleteTrip);
@@ -61,6 +61,7 @@ export default function TripList({ trips }) {
   const [copyNoticeAt, setCopyNoticeAt] = useState(0);
   const [copyStatus, setCopyStatus] = useState("");
   const [copyStatusAt, setCopyStatusAt] = useState(0);
+  const [selectedTripIds, setSelectedTripIds] = useState(() => new Set());
   const [hiddenTripIds, setHiddenTripIds] = useState(() => new Set());
   const [duplicateLoading, setDuplicateLoading] = useState(false);
   const [shareMenuOpenId, setShareMenuOpenId] = useState(null);
@@ -128,6 +129,12 @@ export default function TripList({ trips }) {
     const timer = setTimeout(() => setCopyStatus(""), 10000);
     return () => clearTimeout(timer);
   }, [copyStatus]);
+
+  useEffect(() => {
+    if (selectionMode) return undefined;
+    setSelectedTripIds(new Set());
+    return undefined;
+  }, [selectionMode]);
 
   useEffect(() => {
     if (!renameUndoSaving) return undefined;
@@ -261,6 +268,61 @@ export default function TripList({ trips }) {
     [trips, hiddenTripIds]
   );
 
+  const toggleTripSelection = (tripId) => {
+    setSelectedTripIds((current) => {
+      const next = new Set(current);
+      if (next.has(tripId)) {
+        next.delete(tripId);
+      } else {
+        next.add(tripId);
+      }
+      return next;
+    });
+  };
+
+  const handleBulkCopy = async () => {
+    const ids = Array.from(selectedTripIds);
+    if (!ids.length) return;
+    setDuplicateLoading(true);
+    try {
+      showCopyStatus("Creating copy...");
+      for (const tripId of ids) {
+        const trip = trips.find((item) => item.id === tripId);
+        if (!trip) continue;
+        const copyName = `Copy of ${trip.name || "Trip"}`;
+        const newTrip = await duplicateTrip(tripId, { name: copyName });
+        showCopyNotice({ id: newTrip.id, name: trip.name || "Trip" });
+      }
+      setSelectedTripIds(new Set());
+    } catch (error) {
+      console.error("Unable to duplicate trips", error);
+      showInviteStatus("Unable to create copy.");
+    } finally {
+      setCopyStatus("");
+      setDuplicateLoading(false);
+    }
+  };
+
+  const handleBulkDelete = () => {
+    const ids = Array.from(selectedTripIds);
+    if (!ids.length) return;
+    ids.forEach((tripId) => {
+      const trip = trips.find((item) => item.id === tripId);
+      if (trip) {
+        scheduleTripDelete(trip);
+      }
+    });
+    setSelectedTripIds(new Set());
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedTripIds.size === visibleTrips.length) {
+      setSelectedTripIds(new Set());
+      return;
+    }
+    setSelectedTripIds(new Set(visibleTrips.map((trip) => trip.id)));
+  };
+
   if (!visibleTrips.length) {
     return (
       <div className="rounded-3xl border border-dashed border-slate-300 bg-white/60 p-8 text-center">
@@ -272,21 +334,80 @@ export default function TripList({ trips }) {
 
   return (
     <>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {selectionMode ? (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600">
+          <span>{selectedTripIds.size} selected</span>
+          <button
+            type="button"
+            onClick={toggleSelectAll}
+            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-ink hover:border-ocean hover:text-ocean"
+          >
+            {selectedTripIds.size === visibleTrips.length ? "Deselect all" : "Select all"}
+          </button>
+          <button
+            type="button"
+            onClick={handleBulkCopy}
+            disabled={!selectedTripIds.size || duplicateLoading}
+            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-ink hover:border-ocean hover:text-ocean disabled:opacity-60"
+          >
+            {duplicateLoading ? "Making copy..." : "Make copies"}
+          </button>
+          <button
+            type="button"
+            onClick={handleBulkDelete}
+            disabled={!selectedTripIds.size}
+            className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-semibold text-coral hover:bg-rose-100 disabled:opacity-60"
+          >
+            Delete selected
+          </button>
+        </div>
+      ) : null}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {visibleTrips.map((trip) => (
-          <div key={trip.id} className="relative overflow-visible rounded-3xl bg-white/90">
+          <div
+            key={trip.id}
+            className={`relative overflow-visible rounded-3xl border border-slate-200 bg-white/90 transition ${
+              selectionMode ? "cursor-pointer hover:border-ocean" : ""
+            } ${
+              !selectionMode && openOnCardClick ? "cursor-pointer hover:bg-slate-100" : ""
+            } ${selectionMode && selectedTripIds.has(trip.id) ? "border-ocean ring-2 ring-ocean/30" : ""}`}
+            onClickCapture={
+              selectionMode
+                ? (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    toggleTripSelection(trip.id);
+                  }
+                : undefined
+            }
+            onClick={
+              !selectionMode && openOnCardClick
+                ? () => {
+                    window.location.href = `/trips/${trip.id}`;
+                  }
+                : undefined
+            }
+            role={selectionMode ? "button" : undefined}
+            aria-pressed={selectionMode ? selectedTripIds.has(trip.id) : undefined}
+          >
             <div className="h-40 rounded-t-3xl bg-gradient-to-br from-sky-100 via-indigo-100 to-rose-100" />
             <div
               className="absolute right-4 top-4"
               ref={menuRef}
               data-trip-menu
               onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
             >
               <button
                 type="button"
                 onClick={() => setMenuOpenId(menuOpenId === trip.id ? null : trip.id)}
                 className="flex h-9 w-9 items-center justify-center rounded-full text-slate-600 hover:bg-white/40 hover:text-ink"
                 aria-label="Trip actions"
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setMenuOpenId(menuOpenId === trip.id ? null : trip.id);
+                }}
               >
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor" aria-hidden="true">
                   <circle cx="12" cy="5" r="1.6" />
@@ -298,6 +419,7 @@ export default function TripList({ trips }) {
                 <div
                   className="absolute right-0 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-lg"
                   onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
                 >
                   <button
                     type="button"
@@ -351,7 +473,7 @@ export default function TripList({ trips }) {
                   >
                     <button
                       type="button"
-                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-slate-100"
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-slate-100"
                       onClick={() => {
                         setShareMenuOpenId(trip.id);
                         setShareMenuPinnedId(trip.id);
@@ -363,7 +485,7 @@ export default function TripList({ trips }) {
                         <path d="M12 2v13" />
                       </svg>
                       Share
-                      <svg className="ml-auto h-3 w-3 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
+                      <svg className="ml-auto h-5 w-5 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
                         <path d="M7 5l5 5-5 5" />
                       </svg>
                     </button>
@@ -434,7 +556,7 @@ export default function TripList({ trips }) {
             </div>
             <div className="flex flex-col gap-4 p-6">
               <div>
-                <h3 className="text-2xl font-semibold tracking-tight text-ink">
+                <h3 className="truncate text-xl font-semibold tracking-tight text-ink">
                   {trip.destination?.name || trip.destination?.label
                     ? `${trip.name} at ${trip.destination.name || trip.destination.label}`
                     : trip.name}
@@ -444,8 +566,12 @@ export default function TripList({ trips }) {
                 ) : null}
               </div>
 
-              <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">People</p>
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold text-slate-500">
+                  {trip.createdAt || trip.created_at
+                    ? new Date(trip.createdAt || trip.created_at).toLocaleDateString()
+                    : ""}
+                </div>
                 <div className="relative flex items-center">
                   {(() => {
                     const allMembers = trip.members && trip.members.length
@@ -498,13 +624,15 @@ export default function TripList({ trips }) {
                   })()}
                 </div>
               </div>
-
-              <Link
-                to={`/trips/${trip.id}`}
-                className="w-full rounded-full bg-ink px-4 py-2 text-center text-xs font-semibold text-white shadow-sm hover:bg-slate-800"
-              >
-                View Trip
-              </Link>
+              {openOnCardClick ? null : (
+                <Link
+                  to={`/trips/${trip.id}`}
+                  className="w-full rounded-full bg-ink px-4 py-2 text-center text-xs font-semibold text-white shadow-sm hover:bg-slate-800"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  View Trip
+                </Link>
+              )}
             </div>
           </div>
         ))}

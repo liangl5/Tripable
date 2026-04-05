@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Header from "../components/Header.jsx";
 import TripList from "../components/TripList.jsx";
@@ -13,6 +13,7 @@ export default function TripListPage() {
   const tripsLoading = useTripStore((state) => state.tripsLoading);
   const error = useTripStore((state) => state.error);
   const currentUserId = session?.user?.id;
+  const [selectionMode, setSelectionMode] = useState(false);
 
   useEffect(() => {
     if (!session) {
@@ -45,10 +46,22 @@ export default function TripListPage() {
             <Link to="/" className="rounded-full bg-white/80 px-5 py-3 text-sm font-semibold text-ink shadow-card">
               Home
             </Link>
+            <button
+              type="button"
+              onClick={() => setSelectionMode((current) => !current)}
+              className="rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-ink shadow-card hover:border-ocean hover:text-ocean disabled:opacity-60"
+              disabled={!trips.length}
+            >
+              {selectionMode ? "Done" : "Select"}
+            </button>
             <Link
               to="/trips/new"
-              className="rounded-full bg-ocean px-5 py-3 text-sm font-semibold text-white shadow-card"
+              className="inline-flex items-center gap-2 rounded-full bg-ocean px-5 py-3 text-sm font-semibold text-white shadow-card"
             >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 5v14" />
+                <path d="M5 12h14" />
+              </svg>
               Create new trip
             </Link>
           </div>
@@ -56,7 +69,7 @@ export default function TripListPage() {
 
         {tripsLoading ? <p className="text-sm">Loading trips...</p> : null}
         {error ? <p className="text-sm text-coral">{error}</p> : null}
-        <TripList trips={tripsWithOwnership} />
+        <TripList trips={tripsWithOwnership} selectionMode={selectionMode} />
       </div>
     </div>
   );

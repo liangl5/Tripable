@@ -23,11 +23,15 @@ export default function HomePage() {
   const [pendingInvites, setPendingInvites] = useState([]);
   const [pendingInvitesLoading, setPendingInvitesLoading] = useState(false);
   const [tripCards, setTripCards] = useState([]);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [localSession, setLocalSession] = useState(null);
 
-  const currentUserId = session?.user?.id;
+  const effectiveSession = session || localSession;
+  const currentUserId = effectiveSession?.user?.id;
 
   useEffect(() => {
-    if (!session) {
+    if (!effectiveSession) {
       hasLoadedTripsRef.current = false;
       return;
     }
@@ -36,10 +40,41 @@ export default function HomePage() {
       hasLoadedTripsRef.current = true;
       loadTrips();
     }
-  }, [session, loadTrips]);
+  }, [effectiveSession, loadTrips]);
 
   useEffect(() => {
-    if (!session?.user?.email) {
+    let active = true;
+    const resolveSession = async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (!active) return;
+        if (data?.session) {
+          setLocalSession(data.session);
+          setSessionLoading(false);
+          return;
+        }
+      } catch (error) {
+        console.error("Failed to check session", error);
+      }
+      if (active) {
+        setSessionLoading(false);
+      }
+    };
+    resolveSession();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (session) {
+      setSessionLoading(false);
+      setLocalSession(session);
+    }
+  }, [session]);
+
+  useEffect(() => {
+    if (!effectiveSession?.user?.email) {
       setPendingInvites([]);
       return;
     }
@@ -47,7 +82,7 @@ export default function HomePage() {
     const loadPendingInvites = async () => {
       setPendingInvitesLoading(true);
       try {
-        const normalizedEmail = String(session.user.email || "").trim().toLowerCase();
+        const normalizedEmail = String(effectiveSession.user.email || "").trim().toLowerCase();
         const { data: inviteRows, error: inviteError } = await supabase
           .from("PendingTripInvite")
           .select("id, tripId, role, createdAt")
@@ -106,10 +141,10 @@ export default function HomePage() {
     };
 
     void loadPendingInvites();
-  }, [session]);
+  }, [effectiveSession]);
 
   useEffect(() => {
-    if (!session?.user?.id || !trips.length) {
+    if (!effectiveSession?.user?.id || !trips.length) {
       setTripCards([]);
       return;
     }
@@ -191,13 +226,13 @@ export default function HomePage() {
           .from("UserTripRole")
           .select("tripId, role")
           .in("tripId", tripIds)
-          .eq("userId", session.user.id);
+          .eq("userId", effectiveSession.user.id);
         if (roleError) throw roleError;
 
         const roleMap = new Map((roleRows || []).map((row) => [row.tripId, row.role]));
         setTripCards(
           trips.map((trip) => {
-            const isOwner = trip.createdById === session.user.id;
+            const isOwner = trip.createdById === effectiveSession.user.id;
             const rawRole = isOwner ? "owner" : roleMap.get(trip.id) || "suggestor";
             const normalizedRole = rawRole === "owner" || rawRole === "editor" ? rawRole : "suggestor";
             const members = membersByTrip.get(trip.id) || [];
@@ -226,19 +261,30 @@ export default function HomePage() {
           trips.map((trip) => ({
             ...trip,
             ownerDisplayName: "Trip owner",
-            userRole: trip.createdById === session.user.id ? "owner" : "suggestor",
-            canDelete: trip.createdById === session.user.id
+            userRole: trip.createdById === effectiveSession.user.id ? "owner" : "suggestor",
+            canDelete: trip.createdById === effectiveSession.user.id
           }))
         );
       }
     };
 
     void loadTripCardMeta();
-  }, [session, trips]);
+  }, [effectiveSession, trips]);
 
 
   // If user is NOT logged in, show marketing home page
-  if (!session) {
+  if (sessionLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <Header />
+        <div className="mx-auto flex max-w-6xl flex-col px-6 py-12">
+          <p className="text-sm text-slate-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!effectiveSession) {
     return (
       <div className="min-h-screen">
         <Header />
@@ -263,33 +309,52 @@ export default function HomePage() {
           <div>
             <h1 className="text-3xl font-semibold text-ink">My Trips</h1>
           </div>
-          <Link
-            to="/trips/new"
-            className="rounded-full bg-ocean px-5 py-3 text-sm font-semibold text-white shadow-card hover:bg-blue-600"
-          >
-            Create new trip
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setSelectionMode((current) => !current)}
+              className="rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-ink shadow-card hover:border-ocean hover:text-ocean disabled:opacity-60"
+              disabled={!trips.length}
+            >
+              {selectionMode ? "Done" : "Select"}
+            </button>
+            <Link
+              to="/trips/new"
+              className="inline-flex items-center gap-2 rounded-full bg-ocean px-5 py-3 text-sm font-semibold text-white shadow-card hover:bg-blue-600"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 5v14" />
+                <path d="M5 12h14" />
+              </svg>
+              Create new trip
+            </Link>
+          </div>
         </header>
 
         {pendingInvitesLoading ? <p className="mb-4 text-sm text-slate-600">Checking pending invites...</p> : null}
         {pendingInvites.length > 0 ? (
-          <section className="mb-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+          <section className="mb-8">
             <h2 className="text-lg font-semibold text-ink">Pending invitations</h2>
             <p className="mt-1 text-sm text-slate-600">You have invites waiting for your response.</p>
-            <div className="mt-4 grid gap-3">
+            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {pendingInvites.map((invite) => (
-                <div key={invite.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-3">
-                  <div>
-                    <p className="text-sm font-semibold text-ink">{invite.tripName}</p>
-                    <p className="text-xs text-slate-500">Owner: {invite.ownerName}</p>
-                    <p className="text-xs text-slate-500">Role: {invite.role === "editor" ? "Editor" : "Suggestor"}</p>
+                <div key={invite.id} className="rounded-3xl border border-slate-200 bg-white/90">
+                  <div className="h-40 rounded-t-3xl bg-gradient-to-br from-sky-100 via-indigo-100 to-rose-100" />
+                  <div className="flex flex-col gap-4 p-6">
+                    <div>
+                      <h3 className="truncate text-xl font-semibold tracking-tight text-ink">{invite.tripName}</h3>
+                      <p className="mt-2 text-sm font-semibold text-slate-500">Owner: {invite.ownerName}</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-500">
+                        Role: {invite.role === "editor" ? "Editor" : "Suggestor"}
+                      </p>
+                    </div>
+                    <Link
+                      to={`/trips/${invite.tripId}/invite`}
+                      className="w-full rounded-full bg-ink px-4 py-2 text-center text-xs font-semibold text-white shadow-sm hover:bg-slate-800"
+                    >
+                      Review invite
+                    </Link>
                   </div>
-                  <Link
-                    to={`/trips/${invite.tripId}/invite`}
-                    className="rounded-lg bg-ocean px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-600"
-                  >
-                    Review invite
-                  </Link>
                 </div>
               ))}
             </div>
@@ -298,7 +363,11 @@ export default function HomePage() {
 
         {tripsLoading && <p className="text-sm text-slate-600">Loading trips...</p>}
         {error ? <p className="text-sm text-coral">{error}</p> : null}
-        <TripList trips={tripCards.length ? tripCards : trips} />
+        <TripList
+          trips={tripCards.length ? tripCards : trips}
+          selectionMode={selectionMode}
+          openOnCardClick
+        />
       </div>
     </div>
   );

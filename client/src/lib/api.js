@@ -810,6 +810,7 @@ function formatTrip(trip, memberCount = 0) {
     name: trip.name,
     startDate: toISODate(trip.startDate),
     endDate: toISODate(trip.endDate),
+    createdAt: trip.createdAt || trip.created_at || null,
     destination: trip.destination || null,
     lists: trip.lists || null,
     invitees: trip.invitees || [],

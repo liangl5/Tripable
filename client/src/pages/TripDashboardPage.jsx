@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import Header from "../components/Header.jsx";
 import TabManager from "../components/TabManager.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
@@ -603,17 +603,37 @@ export default function TripDashboardPage() {
       <div className="bg-white border-b border-slate-200">
         <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
           <div>
-            <div className="group inline-flex items-center gap-2">
-              <h1 className="text-2xl font-semibold text-ink">{trip.name}</h1>
-              {canEditTripName ? (
+            <div className="inline-flex items-center gap-3">
+              <Link
+                to="/"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full text-ink hover:bg-ocean/15 hover:text-ocean"
+                aria-label="Back to trips"
+              >
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M19 12H5" />
+                  <path d="M11 6l-6 6 6 6" />
+                </svg>
+              </Link>
+              <div className="group inline-flex items-center gap-2">
                 <button
-                  onClick={() => setEditTripNameOpen(true)}
-                  className="rounded-md px-1.5 py-0.5 text-slate-400 opacity-0 transition hover:bg-mist hover:text-ocean group-hover:opacity-100"
-                  aria-label="Edit trip name"
+                  type="button"
+                  onClick={() => {
+                    if (canEditTripName) {
+                      setEditTripNameOpen(true);
+                    }
+                  }}
+                  className={`inline-flex items-center gap-2 rounded-lg px-2 py-1 text-left ${
+                    canEditTripName ? "cursor-pointer hover:bg-ocean/10" : ""
+                  }`}
                 >
-                  ✎
+                  <h1 className="text-2xl font-semibold text-ink">{trip.name}</h1>
+                  {canEditTripName ? (
+                    <span className="px-1.5 py-0.5 text-slate-400 opacity-0 transition group-hover:opacity-100">
+                      ✎
+                    </span>
+                  ) : null}
                 </button>
-              ) : null}
+              </div>
             </div>
             {trip.startDate && trip.endDate && (
               <p className="text-sm text-slate-600 mt-1">
