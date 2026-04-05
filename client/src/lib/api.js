@@ -1580,11 +1580,27 @@ export const api = {
       throw new Error("Only trip owners and editors can update trip settings");
     }
 
-    // NOTE: Trip metadata now stored in normalized tables
-    // - destination → TripDestination table
-    // - lists → List table  
-    // - expenses → Transaction + TransactionSplit tables
-    // This updateTripMeta function is deprecated and kept for backwards compatibility
+    const updates = {};
+    if (Object.prototype.hasOwnProperty.call(payload || {}, "name")) {
+      const nextName = String(payload?.name || "").trim();
+      if (!nextName) {
+        throw new Error("Trip name cannot be empty");
+      }
+      updates.name = nextName;
+    }
+
+    if (!Object.keys(updates).length) {
+      return this.getTrip(tripId);
+    }
+
+    const { error } = await supabase
+      .from("Trip")
+      .update(updates)
+      .eq("id", tripId)
+      .select()
+      .single();
+
+    if (error) throw error;
 
     return this.getTrip(tripId);
   },

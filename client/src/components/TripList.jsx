@@ -49,8 +49,15 @@ export default function TripList({ trips }) {
   const [menuOpenId, setMenuOpenId] = useState(null);
   const [renameTrip, setRenameTrip] = useState(null);
   const [renameValue, setRenameValue] = useState("");
+  const [renameNotice, setRenameNotice] = useState(null);
+  const [renameNoticeAt, setRenameNoticeAt] = useState(0);
+  const [renameUndoNotice, setRenameUndoNotice] = useState("");
+  const [renameUndoNoticeAt, setRenameUndoNoticeAt] = useState(0);
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameUndoSaving, setRenameUndoSaving] = useState(false);
   const [shareTrip, setShareTrip] = useState(null);
   const [inviteStatus, setInviteStatus] = useState("");
+  const [inviteStatusAt, setInviteStatusAt] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [duplicateLoading, setDuplicateLoading] = useState(false);
   const [shareMenuOpenId, setShareMenuOpenId] = useState(null);
@@ -88,6 +95,61 @@ export default function TripList({ trips }) {
     return () => clearTimeout(timer);
   }, [inviteStatus]);
 
+  useEffect(() => {
+    if (!renameNotice) return undefined;
+    const timer = setTimeout(() => setRenameNotice(null), 10000);
+    return () => clearTimeout(timer);
+  }, [renameNotice]);
+
+  useEffect(() => {
+    if (!renameUndoNotice) return undefined;
+    const timer = setTimeout(() => setRenameUndoNotice(""), 10000);
+    return () => clearTimeout(timer);
+  }, [renameUndoNotice]);
+
+  useEffect(() => {
+    if (!renameUndoSaving) return undefined;
+    const timer = setTimeout(() => setRenameUndoSaving(false), 2000);
+    return () => clearTimeout(timer);
+  }, [renameUndoSaving]);
+
+  const handleRenameSave = async () => {
+    if (!renameTrip?.id) return;
+    const nextName = String(renameValue || "").trim();
+    if (!nextName) return;
+    if (nextName === (renameTrip.name || "")) {
+      setRenameTrip(null);
+      return;
+    }
+    try {
+      const previousName = renameTrip.name || "Trip";
+      const tripId = renameTrip.id;
+      setRenameSaving(true);
+      await updateTripMeta(tripId, { name: nextName });
+      setRenameTrip(null);
+      setRenameNotice({
+        tripId,
+        from: previousName,
+        to: nextName
+      });
+      setRenameNoticeAt(Date.now());
+    } catch (error) {
+      console.error("Failed to rename trip", error);
+    } finally {
+      setRenameSaving(false);
+    }
+  };
+
+  const showInviteStatus = (message) => {
+    setInviteStatus(message);
+    setInviteStatusAt(Date.now());
+  };
+
+  const showRenameUndoNotice = (message) => {
+    setRenameUndoNotice(message);
+    setRenameUndoNoticeAt(Date.now());
+  };
+
   if (!trips.length) {
     return (
       <div className="rounded-3xl border border-dashed border-slate-300 bg-white/60 p-8 text-center">
@@ -101,7 +163,7 @@ export default function TripList({ trips }) {
     <>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {trips.map((trip) => (
-          <div key={trip.id} className="relative overflow-visible rounded-3xl bg-white/90 shadow-card">
+          <div key={trip.id} className="relative overflow-visible rounded-3xl bg-white/90">
             <div className="h-40 rounded-t-3xl bg-gradient-to-br from-sky-100 via-indigo-100 to-rose-100" />
             <div
               className="absolute right-4 top-4"
@@ -111,7 +173,7 @@ export default function TripList({ trips }) {
               <button
                 type="button"
                 onClick={() => setMenuOpenId(menuOpenId === trip.id ? null : trip.id)}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow-sm hover:text-ink"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-slate-600 hover:bg-white/40 hover:text-ink"
                 aria-label="Trip actions"
               >
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor" aria-hidden="true">
@@ -207,6 +269,7 @@ export default function TripList({ trips }) {
                             setShareMenuPinnedId(null);
                             setShareTrip(trip);
                             setInviteStatus("");
+                            setInviteStatusAt(0);
                           }}
                         >
                         <svg className="h-4 w-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -224,7 +287,7 @@ export default function TripList({ trips }) {
                             setMenuOpenId(null);
                             setShareMenuOpenId(null);
                             setShareMenuPinnedId(null);
-                            setInviteStatus("Link copied");
+                            showInviteStatus("Link copied");
                             setLastShareTrip(trip);
                           }}
                         >
@@ -271,7 +334,7 @@ export default function TripList({ trips }) {
 
               <div className="space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">People</p>
-                <div className="flex items-center">
+                <div className="relative flex items-center">
                   {(() => {
                     const allMembers = trip.members && trip.members.length
                       ? trip.members
@@ -279,52 +342,54 @@ export default function TripList({ trips }) {
                     const maxVisible = 5;
                     const visibleMembers = allMembers.slice(0, maxVisible);
                     const overflowCount = Math.max(allMembers.length - maxVisible, 0);
+                    const memberNames = allMembers
+                      .map((member) => member.name || "Traveler")
+                      .filter(Boolean)
+                      .join(", ");
 
                     return (
                       <>
-                        {visibleMembers.map((member, index) => (
-                    <div
-                      key={member.id}
-                      className={`relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white text-xs font-semibold ${
-                        index === 0 ? "z-10" : "-ml-2"
-                      } ${member.photoUrl ? "bg-slate-100 text-slate-600" : getAvatarColor(member.id)}`}
-                      style={{ zIndex: 10 - index }}
-                      title={member.name || "Traveler"}
-                    >
-                      {member.photoUrl ? (
-                        <img src={member.photoUrl} alt={member.name || "Traveler"} className="h-full w-full object-cover" />
-                      ) : (
-                        <span>{getInitials(member.name)}</span>
-                      )}
-                    </div>
-                        ))}
-                        {overflowCount > 0 && (
-                          <div
-                            className={`relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white bg-slate-200 text-xs font-semibold text-slate-700 -ml-2`}
-                            style={{ zIndex: 10 - visibleMembers.length }}
-                            title={`${overflowCount} more`}
-                          >
-                            +{overflowCount}
-                          </div>
-                        )}
+                        <div className="group relative flex items-center">
+                          {visibleMembers.map((member, index) => (
+                            <div
+                              key={member.id}
+                              className={`relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white text-xs font-semibold ${
+                                index === 0 ? "z-10" : "-ml-2"
+                              } ${member.photoUrl ? "bg-slate-100 text-slate-600" : getAvatarColor(member.id)}`}
+                              style={{ zIndex: 10 - index }}
+                            >
+                              {member.photoUrl ? (
+                                <img src={member.photoUrl} alt={member.name || "Traveler"} className="h-full w-full object-cover" />
+                              ) : (
+                                <span>{getInitials(member.name)}</span>
+                              )}
+                            </div>
+                          ))}
+                          {overflowCount > 0 && (
+                            <div
+                              className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white bg-slate-200 text-xs font-semibold text-slate-700 -ml-2"
+                              style={{ zIndex: 10 - visibleMembers.length }}
+                              title={`${overflowCount} more`}
+                            >
+                              +{overflowCount}
+                            </div>
+                          )}
+                          {memberNames ? (
+                            <div className="pointer-events-none absolute left-0 bottom-12 z-20 hidden w-max max-w-[260px] rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-white shadow-lg group-hover:block">
+                              {memberNames}
+                              <span className="absolute left-4 top-full h-0 w-0 border-x-8 border-x-transparent border-t-8 border-t-ink" />
+                            </div>
+                          ) : null}
+                        </div>
                       </>
                     );
                   })()}
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-[#EEF2FF] px-3 py-1 text-xs font-semibold text-[#4C6FFF]">
-                  {ROLE_LABELS[trip.userRole] || "Suggestor"}
-                </span>
-                <span className="rounded-full bg-sand px-3 py-1 text-xs font-semibold text-slateblue">
-                  {trip.memberCount} members
-                </span>
-              </div>
-
               <Link
                 to={`/trips/${trip.id}`}
-                className="w-full rounded-full border border-slate-200 px-4 py-2 text-center text-xs font-semibold text-ink hover:border-ocean hover:text-ocean"
+                className="w-full rounded-full bg-ink px-4 py-2 text-center text-xs font-semibold text-white shadow-sm hover:bg-slate-800"
               >
                 View Trip
               </Link>
@@ -347,30 +412,29 @@ export default function TripList({ trips }) {
               className="mt-4 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-ink"
               value={renameValue}
               onChange={(event) => setRenameValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void handleRenameSave();
+                }
+              }}
               placeholder="Trip name"
+              disabled={renameSaving}
             />
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 onClick={() => setRenameTrip(null)}
                 className="rounded-xl px-3 py-1.5 text-sm font-semibold text-slate-600"
+                disabled={renameSaving}
               >
                 Cancel
               </button>
               <button
-                onClick={async () => {
-                  if (!renameTrip?.id) return;
-                  const nextName = String(renameValue || "").trim();
-                  if (!nextName) return;
-                  try {
-                    await updateTripMeta(renameTrip.id, { name: nextName });
-                    setRenameTrip(null);
-                  } catch (error) {
-                    console.error("Failed to rename trip", error);
-                  }
-                }}
-                className="rounded-xl bg-ocean px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-600"
+                onClick={handleRenameSave}
+                className="rounded-xl bg-ocean px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-70"
+                disabled={renameSaving}
               >
-                Save
+                {renameSaving ? "Saving..." : "Save"}
               </button>
             </div>
           </div>
@@ -382,7 +446,7 @@ export default function TripList({ trips }) {
         trip={shareTrip}
         onClose={() => setShareTrip(null)}
         onLinkCopied={(trip) => {
-          setInviteStatus("Link copied");
+          showInviteStatus("Link copied");
           setLastShareTrip(trip);
         }}
       />
@@ -425,31 +489,113 @@ export default function TripList({ trips }) {
         </div>
       ) : null}
 
-      {inviteStatus ? (
-        <div className="fixed bottom-6 right-6 z-[70] flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
-          <span>{inviteStatus}</span>
-          {lastShareTrip ? (
-            <button
-              type="button"
-              className="text-base font-semibold text-sky-200 underline hover:text-white"
-              onClick={() => {
-                setShareTrip(lastShareTrip);
-                setInviteStatus("");
-              }}
-            >
-              Manage access
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="ml-1 text-white/70 hover:text-white"
-            onClick={() => setInviteStatus("")}
-            aria-label="Dismiss notification"
-          >
-            ✕
-          </button>
-        </div>
-      ) : null}
+      <div className="fixed bottom-4 right-6 z-[70] flex flex-col items-end gap-2">
+        {[
+          inviteStatus
+            ? {
+                key: "invite",
+                ts: inviteStatusAt,
+                node: (
+                  <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
+                    <span>{inviteStatus}</span>
+                    {lastShareTrip ? (
+                      <button
+                        type="button"
+                        className="text-base font-semibold text-sky-200 underline hover:text-white"
+                        onClick={() => {
+                          setShareTrip(lastShareTrip);
+                          setInviteStatus("");
+                          setInviteStatusAt(0);
+                        }}
+                      >
+                        Manage access
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="ml-auto text-white/70 hover:text-white"
+                      onClick={() => {
+                        setInviteStatus("");
+                        setInviteStatusAt(0);
+                      }}
+                      aria-label="Dismiss notification"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )
+              }
+            : null,
+          renameNotice
+            ? {
+                key: "rename",
+                ts: renameNoticeAt || 0,
+                node: (
+                  <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
+                    <span>
+                      “{renameNotice.from}” renamed to “{renameNotice.to}”
+                    </span>
+                    {renameSaving && !renameUndoSaving ? (
+                      <span className="text-base font-semibold text-white/80">Saving...</span>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="text-base font-semibold text-sky-200 underline hover:text-white"
+                      onClick={async () => {
+                        try {
+                          setRenameUndoSaving(true);
+                          await updateTripMeta(renameNotice.tripId, { name: renameNotice.from });
+                          showRenameUndoNotice("Action undone");
+                        } catch (error) {
+                          console.error("Failed to undo rename", error);
+                        } finally {
+                          setRenameNotice(null);
+                        }
+                      }}
+                    >
+                      Undo
+                    </button>
+                    <button
+                      type="button"
+                      className="ml-auto text-white/70 hover:text-white"
+                      onClick={() => setRenameNotice(null)}
+                      aria-label="Dismiss notification"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )
+              }
+            : null,
+          renameUndoNotice
+            ? {
+                key: "rename-undo",
+                ts: renameUndoNoticeAt,
+                node: (
+                  <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
+                    <span>{renameUndoNotice}</span>
+                    <button
+                      type="button"
+                      className="ml-auto text-white/70 hover:text-white"
+                      onClick={() => {
+                        setRenameUndoNotice("");
+                        setRenameUndoNoticeAt(0);
+                      }}
+                      aria-label="Dismiss notification"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )
+              }
+            : null
+        ]
+          .filter(Boolean)
+          .sort((a, b) => b.ts - a.ts)
+          .map((item) => (
+            <div key={item.key}>{item.node}</div>
+          ))}
+      </div>
     </>
   );
 }
