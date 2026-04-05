@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Header from "../components/Header.jsx";
 import TripList from "../components/TripList.jsx";
@@ -10,11 +10,8 @@ export default function TripListPage() {
   const session = useSession();
   const trips = useTripStore((state) => state.trips);
   const loadTrips = useTripStore((state) => state.loadTrips);
-  const deleteTrip = useTripStore((state) => state.deleteTrip);
   const tripsLoading = useTripStore((state) => state.tripsLoading);
-  const deleteTripLoading = useTripStore((state) => state.deleteTripLoading);
   const error = useTripStore((state) => state.error);
-  const [deletingTripId, setDeletingTripId] = useState(null);
   const currentUserId = session?.user?.id;
 
   useEffect(() => {
@@ -35,14 +32,6 @@ export default function TripListPage() {
     [currentUserId, trips]
   );
 
-  const handleDeleteTrip = async (tripId) => {
-    setDeletingTripId(tripId);
-    try {
-      await deleteTrip(tripId);
-    } finally {
-      setDeletingTripId(null);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -50,7 +39,7 @@ export default function TripListPage() {
       <div className="mx-auto flex max-w-6xl flex-col px-6 py-12">
         <header className="mb-10 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-semibold text-ink">Your trips</h1>
+            <h1 className="text-3xl font-semibold text-ink">My Trips</h1>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <Link to="/" className="rounded-full bg-white/80 px-5 py-3 text-sm font-semibold text-ink shadow-card">
@@ -67,11 +56,7 @@ export default function TripListPage() {
 
         {tripsLoading ? <p className="text-sm">Loading trips...</p> : null}
         {error ? <p className="text-sm text-coral">{error}</p> : null}
-        <TripList
-          trips={tripsWithOwnership}
-          onDeleteTrip={handleDeleteTrip}
-          deletingTripId={deleteTripLoading ? deletingTripId : null}
-        />
+        <TripList trips={tripsWithOwnership} />
       </div>
     </div>
   );
