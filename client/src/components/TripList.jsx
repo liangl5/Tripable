@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTripStore } from "../hooks/useTripStore.js";
+import { useUserProfile } from "../App";
 import { formatDateRange } from "../lib/timeFormat.js";
+import { getAvatarColor } from "../lib/avatarColors.js";
 import ShareTripModal from "./ShareTripModal.jsx";
 
 const ROLE_LABELS = {
@@ -14,31 +16,11 @@ const getInitials = (name) => {
   const value = String(name || "").trim();
   if (!value) return "?";
   const parts = value.split(/\s+/).filter(Boolean);
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
-};
-
-const AVATAR_COLORS = [
-  "bg-rose-100 text-rose-700",
-  "bg-amber-100 text-amber-700",
-  "bg-emerald-100 text-emerald-700",
-  "bg-cyan-100 text-cyan-700",
-  "bg-blue-100 text-blue-700",
-  "bg-indigo-100 text-indigo-700",
-  "bg-violet-100 text-violet-700",
-  "bg-fuchsia-100 text-fuchsia-700"
-];
-
-const getAvatarColor = (id) => {
-  const value = String(id || "");
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash * 31 + value.charCodeAt(i)) % 2147483647;
-  }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+  return parts[0][0].toUpperCase();
 };
 
 export default function TripList({ trips, selectionMode = false, openOnCardClick = false }) {
+  const { profile } = useUserProfile();
   const duplicateTrip = useTripStore((state) => state.duplicateTrip);
   const updateTripMeta = useTripStore((state) => state.updateTripMeta);
   const deleteTrip = useTripStore((state) => state.deleteTrip);
@@ -588,21 +570,30 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
                     return (
                       <>
                         <div className="group relative flex items-center">
-                          {visibleMembers.map((member, index) => (
+                          {visibleMembers.map((member, index) => {
+                            const isCurrentUser = profile?.id && member.id === profile.id;
+                            const effectivePhotoUrl = member.photoUrl || (isCurrentUser ? profile.photoUrl : "");
+                            const effectiveAvatarColor = member.avatarColor || (isCurrentUser ? profile.avatarColor : "");
+                            return (
                             <div
                               key={member.id}
                               className={`relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white text-xs font-semibold ${
                                 index === 0 ? "z-10" : "-ml-2"
-                              } ${member.photoUrl ? "bg-slate-100 text-slate-600" : getAvatarColor(member.id)}`}
+                              } ${
+                                effectivePhotoUrl
+                                  ? "bg-slate-100 text-slate-600"
+                                  : effectiveAvatarColor || getAvatarColor(member.id)
+                              }`}
                               style={{ zIndex: 10 - index }}
                             >
-                              {member.photoUrl ? (
-                                <img src={member.photoUrl} alt={member.name || "Traveler"} className="h-full w-full object-cover" />
+                              {effectivePhotoUrl ? (
+                                <img src={effectivePhotoUrl} alt={member.name || "Traveler"} className="h-full w-full object-cover" />
                               ) : (
                                 <span>{getInitials(member.name)}</span>
                               )}
                             </div>
-                          ))}
+                          );
+                          })}
                           {overflowCount > 0 && (
                             <div
                               className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white bg-slate-200 text-xs font-semibold text-slate-700 -ml-2"

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTripStore } from "../hooks/useTripStore.js";
-import { useSession } from "../App";
+import { useSession, useUserProfile } from "../App";
 import { supabase } from "../lib/supabase.js";
 import Header from "../components/Header.jsx";
 import TripList from "../components/TripList.jsx";
@@ -14,6 +14,7 @@ import Footer from "../components/Footer.jsx";
 
 export default function HomePage() {
   const session = useSession();
+  const { profile } = useUserProfile();
   const navigate = useNavigate();
   const hasLoadedTripsRef = useRef(false);
   const trips = useTripStore((state) => state.trips);
@@ -70,7 +71,9 @@ export default function HomePage() {
     if (session) {
       setSessionLoading(false);
       setLocalSession(session);
+      return;
     }
+    setLocalSession(null);
   }, [session]);
 
   useEffect(() => {
@@ -118,8 +121,8 @@ export default function HomePage() {
         let ownerMap = new Map();
         if (ownerIds.length > 0) {
           const { data: ownerRows, error: ownerError } = await supabase
-            .from("User")
-            .select("id, name")
+          .from("User")
+          .select("id, name, photoUrl, avatarColor")
             .in("id", ownerIds);
           if (ownerError) throw ownerError;
           ownerMap = new Map((ownerRows || []).map((owner) => [owner.id, owner.name || "Trip owner"]));
@@ -158,8 +161,8 @@ export default function HomePage() {
         let userMap = new Map();
         if (ownerIds.length > 0) {
           const { data: ownerRows, error: ownerError } = await supabase
-            .from("User")
-            .select("id, name")
+          .from("User")
+          .select("id, name, photoUrl, avatarColor")
             .in("id", ownerIds);
           if (ownerError) throw ownerError;
           ownerMap = new Map((ownerRows || []).map((owner) => [owner.id, owner.name || "Trip owner"]));
@@ -212,7 +215,12 @@ export default function HomePage() {
         (memberRows || []).forEach((row) => {
           const user = userMap.get(row.userId);
           if (user) {
-            pushMember(row.tripId, { id: user.id, name: user.name || "Traveler", photoUrl: user.photoUrl });
+            pushMember(row.tripId, {
+              id: user.id,
+              name: user.name || "Traveler",
+              photoUrl: user.photoUrl,
+              avatarColor: user.avatarColor
+            });
           }
         });
 
@@ -238,8 +246,18 @@ export default function HomePage() {
             const members = membersByTrip.get(trip.id) || [];
             const ownerUser = userMap.get(trip.createdById);
             const ownerMember = ownerUser
-              ? { id: ownerUser.id, name: ownerMap.get(trip.createdById) || "Trip owner", photoUrl: ownerUser.photoUrl }
-              : { id: trip.createdById, name: ownerMap.get(trip.createdById) || "Trip owner", photoUrl: "" };
+              ? {
+                  id: ownerUser.id,
+                  name: ownerMap.get(trip.createdById) || "Trip owner",
+                  photoUrl: ownerUser.photoUrl,
+                  avatarColor: ownerUser.avatarColor
+                }
+              : {
+                  id: trip.createdById,
+                  name: ownerMap.get(trip.createdById) || "Trip owner",
+                  photoUrl: "",
+                  avatarColor: ""
+                };
             const uniqueMembers = [ownerMember, ...members].reduce((acc, member) => {
               if (!member?.id) return acc;
               if (!acc.some((item) => item.id === member.id)) acc.push(member);
@@ -269,7 +287,7 @@ export default function HomePage() {
     };
 
     void loadTripCardMeta();
-  }, [effectiveSession, trips]);
+  }, [effectiveSession, trips, profile?.photoUrl, profile?.avatarColor]);
 
 
   // If user is NOT logged in, show marketing home page
