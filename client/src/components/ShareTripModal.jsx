@@ -52,6 +52,16 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
   const [originalRoles, setOriginalRoles] = useState({});
   const roleMenuRef = useRef(null);
 
+  const resetInviteState = () => {
+    setInviteDraft("");
+    setInviteStatus("");
+    setInviteLoading(false);
+    setRoleMenuOpenId(null);
+    setRoleUpdateLoadingId(null);
+    setPendingRoleChanges({});
+    setSavingRoleChanges(false);
+  };
+
   useEffect(() => {
     if (!inviteStatus) return undefined;
     const timer = setTimeout(() => setInviteStatus(""), 10000);
@@ -120,7 +130,11 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
   };
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      resetInviteState();
+      return;
+    }
+    resetInviteState();
     void loadAccessMembers();
   }, [open, trip?.id]);
 

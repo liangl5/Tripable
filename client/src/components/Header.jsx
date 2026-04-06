@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+import { api } from "../lib/api.js";
 import { useSession, useUserProfile } from "../App";
 import { getDisplayName } from "../lib/userProfile.js";
 import { trackEvent } from "../lib/analytics.js";
@@ -16,6 +17,7 @@ export default function Header() {
   const [isAvatarEditorOpen, setIsAvatarEditorOpen] = useState(false);
   const [pendingInvites, setPendingInvites] = useState([]);
   const [pendingInvitesLoading, setPendingInvitesLoading] = useState(false);
+  const [joinStatus, setJoinStatus] = useState("");
   const [avatarPhotoOverride, setAvatarPhotoOverride] = useState("");
   const [avatarColorOverride, setAvatarColorOverride] = useState("");
   const [avatarCrop, setAvatarCrop] = useState({ zoom: 1, x: 0, y: 0, size: 60, cx: 50, cy: 50 });
@@ -123,6 +125,34 @@ export default function Header() {
     setIsProfileMenuOpen(false);
   };
 
+  const handleDeclineInvite = async (inviteId) => {
+    if (!inviteId) return;
+    try {
+      await supabase
+        .from("PendingTripInvite")
+        .update({ status: "canceled", canceledAt: new Date().toISOString() })
+        .eq("id", inviteId);
+      setPendingInvites((current) => current.filter((invite) => invite.id !== inviteId));
+    } catch (error) {
+      console.error("Failed to decline invite", error);
+    }
+  };
+
+  const handleJoinInvite = async (tripId, inviteId) => {
+    if (!tripId) return;
+    try {
+      setJoinStatus("Joining trip...");
+      await api.joinTrip(tripId);
+      setPendingInvites((current) => current.filter((invite) => invite.id !== inviteId));
+      setIsNotificationOpen(false);
+      setJoinStatus("");
+      navigate(`/trips/${tripId}`);
+    } catch (error) {
+      console.error("Failed to join trip", error);
+      setJoinStatus("");
+    }
+  };
+
   useEffect(() => {
     if (!isProfileMenuOpen && !isNotificationOpen) return undefined;
     const handleOutside = (event) => {
@@ -217,7 +247,7 @@ export default function Header() {
         const normalizedEmail = String(session.user.email || "").trim().toLowerCase();
         const { data: inviteRows, error: inviteError } = await supabase
           .from("PendingTripInvite")
-          .select("id, tripId, role, createdAt")
+          .select("id, tripId, role, createdAt, createdById")
           .ilike("email", normalizedEmail)
           .eq("status", "pending")
           .order("createdAt", { ascending: false });
@@ -244,21 +274,41 @@ export default function Header() {
         if (tripError) throw tripError;
 
         const ownerIds = Array.from(new Set((tripRows || []).map((trip) => trip.createdById).filter(Boolean)));
+        const inviterIds = Array.from(new Set((rows || []).map((invite) => invite.createdById).filter(Boolean)));
         let ownerMap = new Map();
-        if (ownerIds.length > 0) {
+        let inviterMap = new Map();
+        if (ownerIds.length > 0 || inviterIds.length > 0) {
+          const allIds = Array.from(new Set([...ownerIds, ...inviterIds]));
           const { data: ownerRows, error: ownerError } = await supabase
             .from("User")
-            .select("id, name")
-            .in("id", ownerIds);
+            .select("id, name, photoUrl, avatarColor")
+            .in("id", allIds);
           if (ownerError) throw ownerError;
           ownerMap = new Map((ownerRows || []).map((owner) => [owner.id, owner.name || "Trip owner"]));
+          inviterMap = new Map(
+            (ownerRows || []).map((owner) => [
+              owner.id,
+              {
+                id: owner.id,
+                name: owner.name || "Traveler",
+                photoUrl: owner.photoUrl || "",
+                avatarColor: owner.avatarColor || ""
+              }
+            ])
+          );
         }
 
         const tripMap = new Map((tripRows || []).map((trip) => [trip.id, trip]));
         const invitesWithTripName = rows.map((invite) => ({
           ...invite,
           tripName: tripMap.get(invite.tripId)?.name || "Trip invitation",
-          ownerName: ownerMap.get(tripMap.get(invite.tripId)?.createdById) || "Trip owner"
+          ownerName: ownerMap.get(tripMap.get(invite.tripId)?.createdById) || "Trip owner",
+          inviter: inviterMap.get(invite.createdById) || {
+            id: invite.createdById,
+            name: ownerMap.get(invite.createdById) || "Traveler",
+            photoUrl: "",
+            avatarColor: ""
+          }
         }));
 
         setPendingInvites(invitesWithTripName);
@@ -283,39 +333,75 @@ export default function Header() {
             <div className="relative">
               <button
                 type="button"
-                className="flex h-9 w-9 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-ink"
+                className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-ink"
                 aria-label="Notifications"
                 onClick={() => {
                   setIsNotificationOpen((current) => !current);
                   setIsProfileMenuOpen(false);
                 }}
               >
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5" />
-                  <path d="M9 17a3 3 0 0 0 6 0" />
+                <svg className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22z" />
+                  <path d="M19 17H5l1.4-1.4A2 2 0 0 0 7 14.2V11a5 5 0 1 1 10 0v3.2c0 .5.2 1 .6 1.4L19 17z" />
                 </svg>
               </button>
 
               {isNotificationOpen ? (
-                <div className="absolute right-0 mt-2 w-72 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-600 shadow-lg">
+                <div className="absolute right-0 mt-2 w-96 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-600 shadow-lg">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Notifications</p>
+                  {joinStatus ? (
+                    <p className="mt-2 text-sm font-semibold text-slate-600">{joinStatus}</p>
+                  ) : null}
                   {pendingInvitesLoading ? (
                     <p className="mt-2 text-sm text-slate-500">Loading invites...</p>
                   ) : pendingInvites.length ? (
                     <div className="mt-3 space-y-2">
                       {pendingInvites.map((invite) => (
-                        <Link
-                          key={invite.id}
-                          to={`/trips/${invite.tripId}/invite`}
-                          className="block rounded-lg border border-slate-200 px-3 py-2 text-sm text-ink hover:bg-slate-50"
-                          onClick={() => setIsNotificationOpen(false)}
-                        >
-                          <p className="text-sm font-semibold text-ink">{invite.tripName}</p>
-                          <p className="text-xs text-slate-500">Owner: {invite.ownerName}</p>
-                          <p className="text-xs text-slate-500">
-                            Role: {invite.role === "editor" ? "Editor" : "Suggestor"}
-                          </p>
-                        </Link>
+                        <div key={invite.id} className="rounded-lg border border-slate-200 p-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full text-xs font-semibold">
+                              {invite.inviter?.photoUrl ? (
+                                <img
+                                  src={invite.inviter.photoUrl}
+                                  alt={invite.inviter.name || "Traveler"}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <span
+                                  className={`flex h-full w-full items-center justify-center ${
+                                    invite.inviter?.avatarColor || getAvatarColor(invite.inviter?.id)
+                                  }`}
+                                >
+                                  {(invite.inviter?.name || "T")[0].toUpperCase()}
+                                </span>
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm text-ink">
+                                <span className="font-semibold">{invite.inviter?.name || "Someone"}</span> invited you to{" "}
+                                <span className="font-semibold">{invite.tripName}</span>
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {invite.createdAt ? new Date(invite.createdAt).toLocaleString() : ""}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="mt-3 flex items-center gap-2">
+                            <button
+                              type="button"
+                              className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                              onClick={() => handleDeclineInvite(invite.id)}
+                            >
+                              Decline
+                            </button>
+                            <button
+                              className="flex-1 rounded-lg bg-ocean px-3 py-2 text-center text-xs font-semibold text-white hover:bg-blue-600"
+                              onClick={() => handleJoinInvite(invite.tripId, invite.id)}
+                            >
+                              Join trip
+                            </button>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   ) : (
