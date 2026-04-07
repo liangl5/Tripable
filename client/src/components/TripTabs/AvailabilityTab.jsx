@@ -12,6 +12,9 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
   const [availabilityData, setAvailabilityData] = useState({});
   const [userAvailability, setUserAvailability] = useState({});
   const [allUsers, setAllUsers] = useState([]);
+  const [availableUsersByDate, setAvailableUsersByDate] = useState({});
+  const [showAvailabilityHints, setShowAvailabilityHints] = useState(false);
+  const [hoverTooltip, setHoverTooltip] = useState({ visible: false, text: "", x: 0, y: 0 });
   const [comments, setComments] = useState([]);
   const [commentDraft, setCommentDraft] = useState("");
   const [replyingToId, setReplyingToId] = useState(null);
@@ -24,6 +27,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
   const [commentsTableReady, setCommentsTableReady] = useState(true);
   const [loading, setLoading] = useState(false);
   const [userSubmittedAt, setUserSubmittedAt] = useState(null);
+  const [editStartSelectedDates, setEditStartSelectedDates] = useState(new Set());
   const canEditAvailability = true;
   const canEditCells = canEditAvailability && (!showHeatmap || isEditing);
 
@@ -57,36 +61,83 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
     loadAvailability();
   }, [tab.id, userId]);
 
-  // Load heatmap data when showing heatmap
+  // Load member-scoped availability data (trip members only)
   useEffect(() => {
-    if (!showHeatmap) return;
+    if (!showHeatmap && !showAvailabilityHints) return;
 
-    const loadHeatmapData = async () => {
+    const loadAvailabilityData = async () => {
       try {
-        const { data } = await supabase
+        const { data: tripData, error: tripError } = await supabase
+          .from("Trip")
+          .select("createdById")
+          .eq("id", tripId)
+          .single();
+        if (tripError) throw tripError;
+
+        const { data: tripMembers, error: memberError } = await supabase
+          .from("TripMember")
+          .select("userId")
+          .eq("tripId", tripId);
+        if (memberError) throw memberError;
+
+        const memberIds = Array.from(
+          new Set([tripData?.createdById, ...(tripMembers || []).map((member) => member.userId)].filter(Boolean))
+        );
+
+        if (memberIds.length === 0) {
+          setAllUsers([]);
+          setAvailabilityData({});
+          setUserAvailability({});
+          setAvailableUsersByDate({});
+          return;
+        }
+
+        const { data: userProfiles, error: userError } = await supabase
+          .from("User")
+          .select("id, name")
+          .in("id", memberIds);
+        if (userError) throw userError;
+        setAllUsers(userProfiles || []);
+
+        const { data, error: availabilityError } = await supabase
           .from("AvailabilityTabData")
           .select("date, userId")
           .eq("tabId", tab.id)
-          .eq("isSelected", true);
+          .eq("isSelected", true)
+          .in("userId", memberIds);
+        if (availabilityError) throw availabilityError;
 
         if (data) {
           const counts = {};
+          const byDateUserIds = {};
           data.forEach(({ date, userId: uid }) => {
             const dateStr = date.split("T")[0];
             counts[dateStr] = (counts[dateStr] || 0) + 1;
+            if (!byDateUserIds[dateStr]) byDateUserIds[dateStr] = [];
+            byDateUserIds[dateStr].push(uid);
           });
           setAvailabilityData(counts);
-        }
 
-        // Load user availability for table
-        const { data: userProfiles } = await supabase.from("User").select("id, name");
-        setAllUsers(userProfiles || []);
+          const userNameById = {};
+          (userProfiles || []).forEach((user) => {
+            userNameById[user.id] = user.name;
+          });
+
+          const byDateNames = {};
+          Object.entries(byDateUserIds).forEach(([date, ids]) => {
+            byDateNames[date] = ids
+              .map((id) => userNameById[id] || "Traveler")
+              .sort((a, b) => a.localeCompare(b));
+          });
+          setAvailableUsersByDate(byDateNames);
+        }
 
         const { data: allAvailability } = await supabase
           .from("AvailabilityTabData")
           .select("userId, date, isSelected, submittedAt")
           .eq("tabId", tab.id)
-          .eq("isSelected", true);
+          .eq("isSelected", true)
+          .in("userId", memberIds);
 
         const byUser = {};
         (allAvailability || []).forEach(({ userId: uid, date, isSelected }) => {
@@ -97,12 +148,12 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
         });
         setUserAvailability(byUser);
       } catch (error) {
-        console.error("Failed to load heatmap data:", error);
+        console.error("Failed to load availability data:", error);
       }
     };
 
-    loadHeatmapData();
-  }, [showHeatmap, tab.id]);
+    loadAvailabilityData();
+  }, [showHeatmap, showAvailabilityHints, tab.id, tripId]);
 
   useEffect(() => {
     const loadComments = async () => {
@@ -180,6 +231,9 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
 
     return shadeMap;
   }, [visibleAvailabilityDates]);
+  const maxAvailabilityCount = useMemo(() => {
+    return Object.values(availabilityData).reduce((max, value) => Math.max(max, Number(value) || 0), 0);
+  }, [availabilityData]);
   const userNamesById = useMemo(() => {
     const names = {};
     for (const user of allUsers) {
@@ -216,6 +270,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
 
   const handleDatePointerDown = (event, dateStr) => {
     event.preventDefault();
+    hideAvailabilityTooltip();
     if (!canEditCells || !dateStr) return;
     const shouldSelect = !selectedDates.has(dateStr);
     const nextMode = shouldSelect ? "select" : "deselect";
@@ -226,7 +281,31 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
 
   const handleDatePointerEnter = (dateStr) => {
     if (!canEditCells || !isDragging || !dragMode || !dateStr) return;
+    hideAvailabilityTooltip();
     applyDateSelection(dateStr, dragMode);
+  };
+
+  const showAvailabilityTooltip = (event, dateStr) => {
+    if (!dateStr || isDragging || Boolean(dragMode)) return;
+    if (!showHeatmap && !showAvailabilityHints) return;
+
+    const names = availableUsersByDate[dateStr] || [];
+    const text = names.length > 0 ? `Available: ${names.join(", ")}` : "No one available";
+    const rect = event.currentTarget.getBoundingClientRect();
+
+    setHoverTooltip({
+      visible: true,
+      text,
+      x: rect.right + 10,
+      y: rect.top + rect.height / 2
+    });
+  };
+
+  const hideAvailabilityTooltip = () => {
+    setHoverTooltip((current) => {
+      if (!current.visible) return current;
+      return { ...current, visible: false };
+    });
   };
 
   const handleSave = async () => {
@@ -263,6 +342,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
   };
 
   const handleEdit = () => {
+    setEditStartSelectedDates(new Set(selectedDates));
     setIsEditing(true);
     setShowHeatmap(false);
   };
@@ -273,6 +353,11 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
     if (userSubmittedAt) {
       setShowHeatmap(true);
     }
+  };
+
+  const handleResetEditSelection = () => {
+    if (!isEditing) return;
+    setSelectedDates(new Set(editStartSelectedDates));
   };
 
   const handleCommentSubmit = async () => {
@@ -582,7 +667,10 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
     const monthLabel = month.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
     return (
-      <div className={`flex-1 select-none ${!isFirst && "border-l border-slate-200 pl-4"}`}>
+      <div
+        className={`flex-1 select-none ${!isFirst && "border-l border-slate-200 pl-4"}`}
+        onMouseLeave={hideAvailabilityTooltip}
+      >
         <h3 className="font-semibold text-ink mb-4">{monthLabel}</h3>
         <div className="grid grid-cols-7 gap-2">
           {DAY_NAMES.map((day) => (
@@ -596,10 +684,14 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
             const count = dateStr ? availabilityData[dateStr] || 0 : 0;
 
             let bgColor = "bg-white";
+            let inlineStyle;
             if (showHeatmap && count > 0) {
-              if (count >= 3) bgColor = "bg-green-500";
-              else if (count === 2) bgColor = "bg-green-300";
-              else bgColor = "bg-green-100";
+              const intensity = maxAvailabilityCount > 0 ? count / maxAvailabilityCount : 0;
+              const alpha = 0.16 + intensity * 0.62;
+              bgColor = "text-ink";
+              inlineStyle = {
+                backgroundColor: `rgba(34, 197, 94, ${alpha})`
+              };
             } else if (isSelected && !showHeatmap) {
               bgColor = "bg-ocean text-white";
             }
@@ -613,15 +705,24 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
                     setIsDragging(false);
                     setDragMode(null);
                   }}
+                  onPointerLeave={hideAvailabilityTooltip}
+                  onPointerCancel={hideAvailabilityTooltip}
+                  onMouseDown={hideAvailabilityTooltip}
                   onClick={(event) => {
                     event.preventDefault();
                   }}
+                  onMouseEnter={(event) => showAvailabilityTooltip(event, dateStr)}
+                  onMouseLeave={hideAvailabilityTooltip}
                   disabled={!dateStr || (showHeatmap && !isEditing)}
-                  className={`h-8 rounded text-xs font-medium border border-slate-300 ${bgColor} ${
+                  className={`relative h-8 rounded text-xs font-medium border border-slate-300 ${bgColor} ${
                     canEditCells && dateStr ? "cursor-pointer hover:bg-slate-100 select-none" : "cursor-default"
                   }`}
+                  style={inlineStyle}
                 >
                   {day && day.getDate()}
+                  {!showHeatmap && showAvailabilityHints && dateStr && (availabilityData[dateStr] || 0) > 0 ? (
+                    <span className="pointer-events-none absolute bottom-0 left-1 right-1 h-0.5 rounded-full bg-emerald-500" />
+                  ) : null}
                 </button>
               );
           })}
@@ -636,6 +737,14 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
 
   return (
     <div className="p-6">
+      {hoverTooltip.visible ? (
+        <div
+          className="pointer-events-none fixed z-50 -translate-y-1/2 rounded-md bg-slate-800 px-2 py-1 text-xs font-medium text-white shadow-lg"
+          style={{ left: hoverTooltip.x, top: hoverTooltip.y }}
+        >
+          {hoverTooltip.text}
+        </div>
+      ) : null}
       {showHeatmap && !isEditing ? (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
@@ -666,22 +775,21 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
             </div>
           </div>
 
-          <div className="flex gap-4 mb-6">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-green-100 border border-slate-300"></div>
-              <span className="text-xs text-slate-600">1 person</span>
+          <div className="mb-6 rounded-lg border border-slate-200 bg-white p-3">
+            <div className="mb-2 flex items-center justify-between text-xs font-medium text-slate-600">
+              <span>Fewer people available</span>
+              <span>More people available</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-green-300 border border-slate-300"></div>
-              <span className="text-xs text-slate-600">2 people</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-green-500 border border-slate-300"></div>
-              <span className="text-xs text-slate-600">3+ people</span>
+            <div
+              className="h-3 w-full rounded-full border border-slate-200"
+              style={{ background: "linear-gradient(90deg, rgba(34,197,94,0.16) 0%, rgba(34,197,94,0.78) 100%)" }}
+            />
+            <div className="mt-2 text-xs text-slate-500">
+              Continuous scale (max overlap: {maxAvailabilityCount || 0})
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-2 gap-6" onMouseLeave={hideAvailabilityTooltip}>
             <CalendarMonth month={month1} isFirst={true} />
             <CalendarMonth month={month2} isFirst={false} />
           </div>
@@ -806,6 +914,23 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
               {isEditing ? "Select Your Available Dates" : "Your Availability"}
             </h2>
             <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-600">View others</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={showAvailabilityHints}
+                aria-label="View others"
+                onClick={() => setShowAvailabilityHints((current) => !current)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                  showAvailabilityHints ? "bg-ocean" : "bg-slate-300"
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                    showAvailabilityHints ? "translate-x-5" : "translate-x-1"
+                  }`}
+                />
+              </button>
               <button
                 onClick={() => setStartMonth(addMonths(startMonth, -1))}
                 className="h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
@@ -823,13 +948,27 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-6">
+          {showAvailabilityHints ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-800">
+              Hover a date to see who is available.
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-2 gap-6" onMouseLeave={hideAvailabilityTooltip}>
             <CalendarMonth month={month1} isFirst={true} />
             <CalendarMonth month={month2} isFirst={false} />
           </div>
 
           {canEditAvailability && (!showHeatmap || isEditing) && (
             <div className="flex gap-3 mt-4">
+              {isEditing ? (
+                <button
+                  onClick={handleResetEditSelection}
+                  className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200"
+                >
+                  Reset
+                </button>
+              ) : null}
               <button
                 onClick={handleSave}
                 disabled={loading}
