@@ -1051,20 +1051,21 @@ CREATE POLICY "Only trip owner can delete itinerary config" ON "ItineraryTabConf
 -- ✓ TripMember: READ only access to shared data
 --
 -- PERMISSION SUMMARY:
--- ┌─────────────┬───────────┬────────────┬──────────┐
--- │ Resource    │ Owner     │ Editor     │ Suggestor│ Guest    │
--- ├─────────────┼───────────┼────────────┼──────────┤
--- │ Trip Core   │ CRUD      │ R/U        │ R        │ -        │
--- │ Ideas       │ CRUD      │ CRUD       │ CRU own  │ R        │
--- │ Vote        │ CRUD      │ CRUD own   │ CRUD own │ R        │
--- │ Itinerary   │ CRUD      │ CRUD       │ R        │ R        │
--- │ Expenses    │ CRUD      │ CRUD       │ CRU own  │ R        │
--- │ Tabs/Config │ CRUD      │ CRUD       │ R        │ R        │
--- │ Roles       │ CRUD      │ R          │ R        │ R        │
--- │ Invites     │ CRUD      │ -          │ -        │ -        │
--- │ Lists       │ CRUD      │ CRUD       │ R        │ R        │
--- │ Availability│ CRUD any  │ CRUD own   │ CRUD own │ CRUD own │
--- └─────────────┴───────────┴────────────┴──────────┘
+-- ┌──────────────┬───────────┬────────────┬──────────┐
+-- │ Resource     │ Owner     │ Editor     │ Suggestor│
+-- ├──────────────┼───────────┼────────────┼──────────┤
+-- │ Trip Core    │ CRUD      │ R/U        │ R        │
+-- │ Ideas        │ CRUD      │ CRUD       │ CRUD own │
+-- │ Vote         │ CRUD own  │ CRUD own   │ CRUD own │
+-- │ Itinerary    │ CRUD      │ CRUD       │ R        │
+-- │ Expenses     │ CRUD      │ CRUD       │ CRUD own │
+-- │ Tabs/Config  │ CRUD      │ CRUD       │ R        │
+-- │ Roles        │ CRUD      │ R          │ R        │
+-- │ Invites      │ CRUD      │ CRUD       │ -        │
+-- │ Lists        │ CRUD      │ CRUD       │ R        │
+-- │ Availability │ CRUD own  │ CRUD own   │ CRUD own │
+-- │ TabComment   │ CRUD      │ CRUD own   │ CRUD own │
+-- └──────────────┴───────────┴────────────┴──────────┘
 --
 -- Legend: C=Create, R=Read, U=Update, D=Delete, -=No access
 -- (own) = only own content
