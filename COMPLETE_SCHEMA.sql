@@ -24,6 +24,9 @@ ALTER TABLE IF EXISTS "UserTripRole" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "PendingTripInvite" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "AvailabilityTabData" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "AvailabilityTabComment" DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS "TransactionComment" DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS "IdeaComment" DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS "ItineraryDayComment" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "List" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "Transaction" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "TransactionSplit" DISABLE ROW LEVEL SECURITY;
@@ -39,6 +42,9 @@ DROP TABLE IF EXISTS "Vote" CASCADE;
 DROP TABLE IF EXISTS "Idea" CASCADE;
 DROP TABLE IF EXISTS "AvailabilityTabData" CASCADE;
 DROP TABLE IF EXISTS "AvailabilityTabComment" CASCADE;
+DROP TABLE IF EXISTS "TransactionComment" CASCADE;
+DROP TABLE IF EXISTS "IdeaComment" CASCADE;
+DROP TABLE IF EXISTS "ItineraryDayComment" CASCADE;
 DROP TABLE IF EXISTS "PendingTripInvite" CASCADE;
 DROP TABLE IF EXISTS "List" CASCADE;
 DROP TABLE IF EXISTS "UserTripRole" CASCADE;
@@ -223,6 +229,28 @@ CREATE TABLE "AvailabilityTabComment" (
   "updatedAt" TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 12c. IdeaComment (threaded notes under activities)
+CREATE TABLE "IdeaComment" (
+  id TEXT PRIMARY KEY,
+  "ideaId" TEXT NOT NULL REFERENCES "Idea"(id) ON DELETE CASCADE,
+  "userId" TEXT NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
+  "parentCommentId" TEXT REFERENCES "IdeaComment"(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 12d. ItineraryDayComment (threaded notes under itinerary days)
+CREATE TABLE "ItineraryDayComment" (
+  id TEXT PRIMARY KEY,
+  "itineraryDayId" TEXT NOT NULL REFERENCES "ItineraryDay"(id) ON DELETE CASCADE,
+  "userId" TEXT NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
+  "parentCommentId" TEXT REFERENCES "ItineraryDayComment"(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 13. List (organizes ideas into categories)
 CREATE TABLE "List" (
   id TEXT PRIMARY KEY,
@@ -259,6 +287,17 @@ CREATE TABLE "TransactionSplit" (
   amount NUMERIC(12,2) NOT NULL,
   "createdAt" TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE("transactionId", "userId")
+);
+
+-- 15b. TransactionComment (threaded notes under expense transactions)
+CREATE TABLE "TransactionComment" (
+  id TEXT PRIMARY KEY,
+  "transactionId" TEXT NOT NULL REFERENCES "Transaction"(id) ON DELETE CASCADE,
+  "userId" TEXT NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
+  "parentCommentId" TEXT REFERENCES "TransactionComment"(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 16. ItineraryTabConfiguration (which lists appear in itinerary)
@@ -320,6 +359,15 @@ CREATE INDEX idx_availability_tab_composite ON "AvailabilityTabData"("tabId", "u
 CREATE INDEX idx_availability_tab_comment_tab ON "AvailabilityTabComment"("tabId");
 CREATE INDEX idx_availability_tab_comment_created ON "AvailabilityTabComment"("createdAt" DESC);
 CREATE INDEX idx_availability_tab_comment_parent ON "AvailabilityTabComment"("parentCommentId");
+CREATE INDEX idx_transaction_comment_transaction ON "TransactionComment"("transactionId");
+CREATE INDEX idx_transaction_comment_created ON "TransactionComment"("createdAt" DESC);
+CREATE INDEX idx_transaction_comment_parent ON "TransactionComment"("parentCommentId");
+CREATE INDEX idx_idea_comment_idea ON "IdeaComment"("ideaId");
+CREATE INDEX idx_idea_comment_created ON "IdeaComment"("createdAt" DESC);
+CREATE INDEX idx_idea_comment_parent ON "IdeaComment"("parentCommentId");
+CREATE INDEX idx_itinerary_day_comment_day ON "ItineraryDayComment"("itineraryDayId");
+CREATE INDEX idx_itinerary_day_comment_created ON "ItineraryDayComment"("createdAt" DESC);
+CREATE INDEX idx_itinerary_day_comment_parent ON "ItineraryDayComment"("parentCommentId");
 CREATE INDEX idx_itinerary_tab_config_tab ON "ItineraryTabConfiguration"("tabId");
 
 -- Expense indexes (fast transaction and split lookups)
@@ -360,6 +408,9 @@ ALTER TABLE "UserTripRole" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "PendingTripInvite" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "AvailabilityTabData" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "AvailabilityTabComment" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "TransactionComment" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "IdeaComment" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "ItineraryDayComment" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "List" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "Transaction" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "TransactionSplit" ENABLE ROW LEVEL SECURITY;
@@ -854,6 +905,96 @@ CREATE POLICY "Users can delete their own availability comments" ON "Availabilit
   auth.uid()::text = "userId"
 );
 CREATE POLICY "Users can edit their own availability comments" ON "AvailabilityTabComment" FOR UPDATE USING (
+  auth.uid()::text = "userId"
+) WITH CHECK (
+  auth.uid()::text = "userId"
+);
+
+-- IdeaComment policies
+CREATE POLICY "Trip members can view idea comments" ON "IdeaComment" FOR SELECT USING (
+  auth.uid() IS NOT NULL AND
+  auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = (SELECT "tripId" FROM "Idea" WHERE id = "IdeaComment"."ideaId")
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = (SELECT "tripId" FROM "Idea" WHERE id = "IdeaComment"."ideaId")
+    UNION SELECT "createdById" FROM "Trip" WHERE id = (SELECT "tripId" FROM "Idea" WHERE id = "IdeaComment"."ideaId")
+  )
+);
+CREATE POLICY "Trip members can post idea comments" ON "IdeaComment" FOR INSERT WITH CHECK (
+  auth.uid()::text = "userId"
+  AND auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = (SELECT "tripId" FROM "Idea" WHERE id = "IdeaComment"."ideaId")
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = (SELECT "tripId" FROM "Idea" WHERE id = "IdeaComment"."ideaId")
+    UNION SELECT "createdById" FROM "Trip" WHERE id = (SELECT "tripId" FROM "Idea" WHERE id = "IdeaComment"."ideaId")
+  )
+);
+CREATE POLICY "Users can delete their own idea comments" ON "IdeaComment" FOR DELETE USING (
+  auth.uid()::text = "userId"
+);
+CREATE POLICY "Users can edit their own idea comments" ON "IdeaComment" FOR UPDATE USING (
+  auth.uid()::text = "userId"
+) WITH CHECK (
+  auth.uid()::text = "userId"
+);
+
+-- TransactionComment policies
+CREATE POLICY "Trip members can view transaction comments" ON "TransactionComment" FOR SELECT USING (
+  auth.uid() IS NOT NULL AND
+  auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole"
+    WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionComment"."transactionId")
+    UNION SELECT "userId" FROM "TripMember"
+    WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionComment"."transactionId")
+    UNION SELECT "createdById" FROM "Trip"
+    WHERE id = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionComment"."transactionId")
+  )
+);
+CREATE POLICY "Trip members can post transaction comments" ON "TransactionComment" FOR INSERT WITH CHECK (
+  auth.uid()::text = "userId"
+  AND auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole"
+    WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionComment"."transactionId")
+    UNION SELECT "userId" FROM "TripMember"
+    WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionComment"."transactionId")
+    UNION SELECT "createdById" FROM "Trip"
+    WHERE id = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionComment"."transactionId")
+  )
+);
+CREATE POLICY "Users can delete their own transaction comments" ON "TransactionComment" FOR DELETE USING (
+  auth.uid()::text = "userId"
+);
+CREATE POLICY "Users can edit their own transaction comments" ON "TransactionComment" FOR UPDATE USING (
+  auth.uid()::text = "userId"
+) WITH CHECK (
+  auth.uid()::text = "userId"
+);
+
+-- ItineraryDayComment policies
+CREATE POLICY "Trip members can view itinerary day comments" ON "ItineraryDayComment" FOR SELECT USING (
+  auth.uid() IS NOT NULL AND
+  auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole"
+    WHERE "tripId" = (SELECT "tripId" FROM "ItineraryDay" WHERE id = "ItineraryDayComment"."itineraryDayId")
+    UNION SELECT "userId" FROM "TripMember"
+    WHERE "tripId" = (SELECT "tripId" FROM "ItineraryDay" WHERE id = "ItineraryDayComment"."itineraryDayId")
+    UNION SELECT "createdById" FROM "Trip"
+    WHERE id = (SELECT "tripId" FROM "ItineraryDay" WHERE id = "ItineraryDayComment"."itineraryDayId")
+  )
+);
+CREATE POLICY "Trip members can post itinerary day comments" ON "ItineraryDayComment" FOR INSERT WITH CHECK (
+  auth.uid()::text = "userId"
+  AND auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole"
+    WHERE "tripId" = (SELECT "tripId" FROM "ItineraryDay" WHERE id = "ItineraryDayComment"."itineraryDayId")
+    UNION SELECT "userId" FROM "TripMember"
+    WHERE "tripId" = (SELECT "tripId" FROM "ItineraryDay" WHERE id = "ItineraryDayComment"."itineraryDayId")
+    UNION SELECT "createdById" FROM "Trip"
+    WHERE id = (SELECT "tripId" FROM "ItineraryDay" WHERE id = "ItineraryDayComment"."itineraryDayId")
+  )
+);
+CREATE POLICY "Users can delete their own itinerary day comments" ON "ItineraryDayComment" FOR DELETE USING (
+  auth.uid()::text = "userId"
+);
+CREATE POLICY "Users can edit their own itinerary day comments" ON "ItineraryDayComment" FOR UPDATE USING (
   auth.uid()::text = "userId"
 ) WITH CHECK (
   auth.uid()::text = "userId"

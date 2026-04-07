@@ -4,8 +4,20 @@ import TripMapPanel from "../TripMapPanel.jsx";
 import { trackEvent } from "../../lib/analytics.js";
 import ActivityComposerModal from "../ActivityComposerModal.jsx";
 import VoteButtons from "../VoteButtons.jsx";
+import ThreadedComments from "../ThreadedComments.jsx";
 
-export default function ListTab({ tab, trip, tripId, userId, userRole, ideas, onAddIdea, onVoteIdea, onDeleteIdea }) {
+export default function ListTab({
+  tab,
+  trip,
+  tripId,
+  userId,
+  userRole,
+  tripMembers,
+  ideas,
+  onAddIdea,
+  onVoteIdea,
+  onDeleteIdea
+}) {
   const [lists, setLists] = useState([]);
   const [mapPanelWidth, setMapPanelWidth] = useState(50);
   const [collapsedLists, setCollapsedLists] = useState({});
@@ -193,6 +205,10 @@ export default function ListTab({ tab, trip, tripId, userId, userRole, ideas, on
 
   const leftWidth = `${100 - mapPanelWidth}%`;
   const rightWidth = `${mapPanelWidth}%`;
+  const memberNamesById = (tripMembers || []).reduce((acc, member) => {
+    acc[member.id] = member.name || member.email || "Traveler";
+    return acc;
+  }, {});
 
   return (
     <div ref={containerRef} className="flex h-[calc(100dvh-180px)] max-h-[calc(100dvh-180px)] overflow-hidden gap-0">
@@ -317,28 +333,38 @@ export default function ListTab({ tab, trip, tripId, userId, userRole, ideas, on
                 {!collapsedLists[list.id] && (
                   <div className="p-3 space-y-2">
                     {getListIdeas(list.id).map((idea) => (
-                      <div key={idea.id} className="flex items-start gap-2 border-b border-slate-200 pb-2 last:border-0">
-                        <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-ink text-sm">{idea.title}</p>
-                          {idea.location && <p className="text-xs text-slate-600">{idea.location}</p>}
-                          {Number.isFinite(Number(idea.costEstimate)) && (
-                            <span className="text-xs text-ocean font-semibold">${Number(idea.costEstimate).toFixed(2)}</span>
+                      <div key={idea.id} className="border-b border-slate-200 pb-2 last:border-0">
+                        <div className="flex items-start gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-ink text-sm">{idea.title}</p>
+                            {idea.location && <p className="text-xs text-slate-600">{idea.location}</p>}
+                            {Number.isFinite(Number(idea.costEstimate)) && (
+                              <span className="text-xs text-ocean font-semibold">${Number(idea.costEstimate).toFixed(2)}</span>
+                            )}
+                          </div>
+                          <VoteButtons
+                            score={idea.voteScore || 0}
+                            userVote={idea.userVote || 0}
+                            onVote={(voteValue) => void onVoteIdea(idea.id, voteValue)}
+                            layout="stack"
+                          />
+                          {(canManageLists || idea.createdById === userId) && (
+                            <button
+                              onClick={() => setDeleteIdeaConfirm(idea)}
+                              className="text-xs text-coral hover:font-semibold flex-shrink-0"
+                            >
+                              ✕
+                            </button>
                           )}
                         </div>
-                        <VoteButtons
-                          score={idea.voteScore || 0}
-                          userVote={idea.userVote || 0}
-                          onVote={(voteValue) => void onVoteIdea(idea.id, voteValue)}
-                          layout="stack"
+                        <ThreadedComments
+                          tableName="IdeaComment"
+                          resourceColumn="ideaId"
+                          resourceId={idea.id}
+                          userId={userId}
+                          userNamesById={memberNamesById}
+                          title="Comments"
                         />
-                        {(canManageLists || idea.createdById === userId) && (
-                          <button
-                            onClick={() => setDeleteIdeaConfirm(idea)}
-                            className="text-xs text-coral hover:font-semibold flex-shrink-0"
-                          >
-                            ✕
-                          </button>
-                        )}
                       </div>
                     ))}
                     <button

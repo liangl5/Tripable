@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import ThreadedComments from "../ThreadedComments.jsx";
 
 export default function TransactionTab({ tab, tripId, userId, userRole, tripMembers }) {
   const [transactions, setTransactions] = useState([]);
@@ -125,6 +126,11 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
     });
     setFormData({ ...formData, splits: newSplits });
   };
+
+  const memberNamesById = (tripMembers || []).reduce((acc, member) => {
+    acc[member.id] = member.name || member.email || "Traveler";
+    return acc;
+  }, {});
 
   if (loading) {
     return <div className="p-6 text-center text-slate-600">Loading transactions...</div>;
@@ -280,6 +286,15 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
                   Delete
                 </button>
               )}
+
+              <ThreadedComments
+                tableName="TransactionComment"
+                resourceColumn="transactionId"
+                resourceId={transaction.id}
+                userId={userId}
+                userNamesById={memberNamesById}
+                title="Comments"
+              />
             </div>
           ))}
         </div>
