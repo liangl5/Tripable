@@ -288,6 +288,7 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
             trip={trip}
             userId={userId}
             userRole={userRole}
+            tripMembers={tripMembers}
             ideas={ideas}
             onAddIdea={handleAddIdea}
             onVoteIdea={handleVoteIdea}
@@ -301,6 +302,7 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
             tripId={tripId}
             userId={userId}
             userRole={userRole}
+            tripMembers={tripMembers}
             ideas={ideas}
             trip={trip}
           />

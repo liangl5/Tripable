@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { clearGeneratedItinerary, slugify } from "../../lib/tripPlanning";
+import ThreadedComments from "../ThreadedComments.jsx";
 
-export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, trip }) {
+export default function ItineraryTab({ tab, tripId, userId, userRole, tripMembers, ideas, trip }) {
   const [days, setDays] = useState([]);
   const [itineraryItems, setItineraryItems] = useState([]);
   const [allowedListIds, setAllowedListIds] = useState(null);
@@ -477,6 +478,10 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
     const idea = ideas.find((candidate) => candidate.id === ideaId);
     return getVoteSummary(idea?.votes);
   };
+  const memberNamesById = (tripMembers || []).reduce((acc, member) => {
+    acc[member.id] = member.name || member.email || "Traveler";
+    return acc;
+  }, {});
 
   if (loading) {
     return <div className="p-6 text-center text-slate-600">Loading itinerary...</div>;
@@ -642,6 +647,14 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, ideas, tri
                       </div>
                     </div>
                   ))}
+                <ThreadedComments
+                  tableName="ItineraryDayComment"
+                  resourceColumn="itineraryDayId"
+                  resourceId={day.id}
+                  userId={userId}
+                  userNamesById={memberNamesById}
+                  title="Day Comments"
+                />
               </div>
             </div>
           ))}
