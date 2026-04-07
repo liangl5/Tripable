@@ -14,6 +14,10 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
   const [allUsers, setAllUsers] = useState([]);
   const [comments, setComments] = useState([]);
   const [commentDraft, setCommentDraft] = useState("");
+  const [replyingToId, setReplyingToId] = useState(null);
+  const [replyDraft, setReplyDraft] = useState("");
+  const [editingCommentId, setEditingCommentId] = useState(null);
+  const [editDraft, setEditDraft] = useState("");
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentsSaving, setCommentsSaving] = useState(false);
   const [commentsError, setCommentsError] = useState("");
@@ -108,9 +112,9 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
       try {
         const { data, error } = await supabase
           .from("AvailabilityTabComment")
-          .select("id, tabId, userId, body, createdAt")
+          .select("id, tabId, userId, body, parentCommentId, createdAt, updatedAt")
           .eq("tabId", tab.id)
-          .order("createdAt", { ascending: false });
+          .order("createdAt", { ascending: true });
 
         if (error) {
           const message = String(error.message || "");
@@ -244,6 +248,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
       tabId: tab.id,
       userId,
       body,
+      parentCommentId: null,
       createdAt: now
     };
 
@@ -257,6 +262,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
           tabId: tab.id,
           userId,
           body,
+          parentCommentId: null,
           createdAt: now
         }
       ]);
@@ -270,6 +276,254 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
     } finally {
       setCommentsSaving(false);
     }
+  };
+
+  const handleReplySubmit = async (parentCommentId) => {
+    const body = replyDraft.trim();
+    if (!body || commentsSaving || !commentsTableReady || !parentCommentId) return;
+
+    setCommentsSaving(true);
+    setCommentsError("");
+    const now = new Date().toISOString();
+    const optimistic = {
+      id: crypto.randomUUID(),
+      tabId: tab.id,
+      userId,
+      body,
+      parentCommentId,
+      createdAt: now
+    };
+
+    try {
+      setComments((current) => [...current, optimistic]);
+      setReplyDraft("");
+      setReplyingToId(null);
+
+      const { error } = await supabase.from("AvailabilityTabComment").insert([
+        {
+          id: optimistic.id,
+          tabId: tab.id,
+          userId,
+          body,
+          parentCommentId,
+          createdAt: now
+        }
+      ]);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error("Failed to post reply:", error);
+      setComments((current) => current.filter((comment) => comment.id !== optimistic.id));
+      setCommentsError("Could not post reply.");
+      setReplyDraft(body);
+      setReplyingToId(parentCommentId);
+    } finally {
+      setCommentsSaving(false);
+    }
+  };
+
+  const handleStartEditComment = (comment) => {
+    setEditingCommentId(comment.id);
+    setEditDraft(comment.body || "");
+  };
+
+  const handleCancelEditComment = () => {
+    setEditingCommentId(null);
+    setEditDraft("");
+  };
+
+  const handleSaveEditComment = async (commentId) => {
+    const body = editDraft.trim();
+    if (!body || !commentId || commentsSaving) return;
+
+    const previous = comments;
+    const now = new Date().toISOString();
+    setCommentsSaving(true);
+    setCommentsError("");
+    setComments((current) =>
+      current.map((comment) => (comment.id === commentId ? { ...comment, body, updatedAt: now } : comment))
+    );
+
+    try {
+      const { error } = await supabase
+        .from("AvailabilityTabComment")
+        .update({ body, updatedAt: now })
+        .eq("id", commentId)
+        .eq("userId", userId);
+      if (error) throw error;
+      setEditingCommentId(null);
+      setEditDraft("");
+    } catch (error) {
+      console.error("Failed to edit comment:", error);
+      setComments(previous);
+      setCommentsError("Could not edit comment.");
+    } finally {
+      setCommentsSaving(false);
+    }
+  };
+
+  const collectCommentIdsForDelete = (allComments, rootId) => {
+    const ids = new Set([rootId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const comment of allComments) {
+        if (comment.parentCommentId && ids.has(comment.parentCommentId) && !ids.has(comment.id)) {
+          ids.add(comment.id);
+          changed = true;
+        }
+      }
+    }
+    return ids;
+  };
+
+  const handleDeleteComment = async (commentId) => {
+    if (!commentId || commentsSaving) return;
+    const previous = comments;
+    const idsToRemove = collectCommentIdsForDelete(comments, commentId);
+
+    setCommentsSaving(true);
+    setCommentsError("");
+    setComments((current) => current.filter((comment) => !idsToRemove.has(comment.id)));
+
+    try {
+      const { error } = await supabase.from("AvailabilityTabComment").delete().eq("id", commentId).eq("userId", userId);
+      if (error) throw error;
+    } catch (error) {
+      console.error("Failed to delete comment:", error);
+      setComments(previous);
+      setCommentsError("Could not delete comment.");
+    } finally {
+      setCommentsSaving(false);
+    }
+  };
+
+  const commentsByParent = useMemo(() => {
+    const map = new Map();
+    for (const comment of comments) {
+      const parentId = comment.parentCommentId || "__root__";
+      if (!map.has(parentId)) map.set(parentId, []);
+      map.get(parentId).push(comment);
+    }
+    return map;
+  }, [comments]);
+
+  const renderComments = (parentId = "__root__", depth = 0) => {
+    const branch = commentsByParent.get(parentId) || [];
+    return branch.map((comment) => {
+      const authorName = userNamesById[comment.userId] || "Traveler";
+      const createdLabel = new Date(comment.createdAt).toLocaleString();
+      const isOwner = comment.userId === userId;
+      const children = renderComments(comment.id, depth + 1);
+
+      return (
+        <div key={comment.id} className={depth > 0 ? "mt-3 ml-8" : "mt-3"}>
+          <div className="flex items-start gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-300 text-xs font-semibold text-slate-700">
+              {authorName.slice(0, 1).toUpperCase()}
+            </div>
+            <div className="max-w-full rounded-2xl bg-white px-3 py-2 shadow-sm">
+              <p className="text-xs font-semibold text-ink">{authorName}</p>
+              {editingCommentId === comment.id ? (
+                <div className="mt-1">
+                  <textarea
+                    value={editDraft}
+                    onChange={(event) => setEditDraft(event.target.value)}
+                    className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#4C6FFF]"
+                  />
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSaveEditComment(comment.id)}
+                      disabled={!editDraft.trim() || commentsSaving}
+                      className="rounded-full bg-[#1877F2] px-3 py-1 text-xs font-semibold text-white disabled:opacity-60"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelEditComment}
+                      className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{comment.body}</p>
+              )}
+              <div className="mt-1 flex items-center gap-3 text-[11px]">
+                <span className="text-slate-400">{createdLabel}</span>
+                {comment.updatedAt && comment.updatedAt !== comment.createdAt ? (
+                  <span className="text-slate-400">(edited)</span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReplyingToId(comment.id);
+                    setReplyDraft("");
+                  }}
+                  className="font-semibold text-[#1877F2] hover:underline"
+                >
+                  Reply
+                </button>
+                {isOwner ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleStartEditComment(comment)}
+                      className="font-semibold text-slate-600 hover:underline"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteComment(comment.id)}
+                      className="font-semibold text-coral hover:underline"
+                    >
+                      Delete
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          {replyingToId === comment.id ? (
+            <div className="mt-2 ml-11 rounded-xl bg-white p-3 shadow-sm">
+              <textarea
+                value={replyDraft}
+                onChange={(event) => setReplyDraft(event.target.value)}
+                placeholder="Write a reply..."
+                className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#4C6FFF]"
+              />
+              <div className="mt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReplyingToId(null);
+                    setReplyDraft("");
+                  }}
+                  className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleReplySubmit(comment.id)}
+                  disabled={!replyDraft.trim() || commentsSaving}
+                  className="rounded-full bg-[#1877F2] px-3 py-1 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  Reply
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {children}
+        </div>
+      );
+    });
   };
 
   const CalendarMonth = ({ month, isFirst }) => {
@@ -464,24 +718,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
                 ) : comments.length === 0 ? (
                   <p className="text-sm text-slate-500">No comments yet. Start the conversation.</p>
                 ) : (
-                  <div className="space-y-3">
-                    {comments.map((comment) => {
-                      const authorName = userNamesById[comment.userId] || "Traveler";
-                      const createdLabel = new Date(comment.createdAt).toLocaleString();
-                      return (
-                        <div key={comment.id} className="flex items-start gap-3">
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-300 text-xs font-semibold text-slate-700">
-                            {authorName.slice(0, 1).toUpperCase()}
-                          </div>
-                          <div className="max-w-full rounded-2xl bg-white px-3 py-2 shadow-sm">
-                            <p className="text-xs font-semibold text-ink">{authorName}</p>
-                            <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{comment.body}</p>
-                            <p className="mt-1 text-[11px] text-slate-400">{createdLabel}</p>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <div>{renderComments()}</div>
                 )}
               </>
             )}

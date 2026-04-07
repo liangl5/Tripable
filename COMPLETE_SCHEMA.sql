@@ -217,8 +217,10 @@ CREATE TABLE "AvailabilityTabComment" (
   id TEXT PRIMARY KEY,
   "tabId" TEXT NOT NULL REFERENCES "TripTabConfiguration"(id) ON DELETE CASCADE,
   "userId" TEXT NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
+  "parentCommentId" TEXT REFERENCES "AvailabilityTabComment"(id) ON DELETE CASCADE,
   body TEXT NOT NULL,
-  "createdAt" TIMESTAMPTZ DEFAULT NOW()
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 13. List (organizes ideas into categories)
@@ -317,6 +319,7 @@ CREATE INDEX idx_availability_tab_data_user ON "AvailabilityTabData"("userId");
 CREATE INDEX idx_availability_tab_composite ON "AvailabilityTabData"("tabId", "userId");
 CREATE INDEX idx_availability_tab_comment_tab ON "AvailabilityTabComment"("tabId");
 CREATE INDEX idx_availability_tab_comment_created ON "AvailabilityTabComment"("createdAt" DESC);
+CREATE INDEX idx_availability_tab_comment_parent ON "AvailabilityTabComment"("parentCommentId");
 CREATE INDEX idx_itinerary_tab_config_tab ON "ItineraryTabConfiguration"("tabId");
 
 -- Expense indexes (fast transaction and split lookups)
@@ -848,6 +851,11 @@ CREATE POLICY "Trip members can post availability comments" ON "AvailabilityTabC
   )
 );
 CREATE POLICY "Users can delete their own availability comments" ON "AvailabilityTabComment" FOR DELETE USING (
+  auth.uid()::text = "userId"
+);
+CREATE POLICY "Users can edit their own availability comments" ON "AvailabilityTabComment" FOR UPDATE USING (
+  auth.uid()::text = "userId"
+) WITH CHECK (
   auth.uid()::text = "userId"
 );
 
