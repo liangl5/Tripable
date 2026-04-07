@@ -141,6 +141,45 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
 
   const month1 = startOfMonth(startMonth);
   const month2 = addMonths(startMonth, 1);
+  const displayedDates = useMemo(() => {
+    const dates = [];
+    const cursor = new Date(startOfMonth(startMonth));
+    const rangeEnd = new Date(addMonths(startOfMonth(startMonth), 2));
+    rangeEnd.setDate(rangeEnd.getDate() - 1);
+
+    while (cursor.getTime() <= rangeEnd.getTime()) {
+      dates.push(formatISO(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return dates;
+  }, [startMonth]);
+  const visibleAvailabilityDates = useMemo(() => {
+    return displayedDates.filter((date) =>
+      Object.values(userAvailability).some((dates) => Array.isArray(dates) && dates.includes(date))
+    );
+  }, [displayedDates, userAvailability]);
+  const dateShadeByColumn = useMemo(() => {
+    const shadeMap = {};
+    let shade = "light";
+    let previous = null;
+
+    for (const date of visibleAvailabilityDates) {
+      if (previous) {
+        const prevDate = new Date(`${previous}T00:00:00`);
+        prevDate.setDate(prevDate.getDate() + 1);
+        const expectedNext = formatISO(prevDate);
+        if (date !== expectedNext) {
+          shade = shade === "light" ? "dark" : "light";
+        }
+      }
+
+      shadeMap[date] = shade;
+      previous = date;
+    }
+
+    return shadeMap;
+  }, [visibleAvailabilityDates]);
   const userNamesById = useMemo(() => {
     const names = {};
     for (const user of allUsers) {
@@ -616,13 +655,6 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
               >
                 →
               </button>
-              <button
-                onClick={handleSave}
-                disabled={loading}
-                className="rounded-lg bg-ocean px-3 py-1 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-50"
-              >
-                Save Availability
-              </button>
               {canEditAvailability && (
                 <button
                   onClick={handleEdit}
@@ -657,22 +689,65 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
           <div className="mt-8">
             <h3 className="text-lg font-semibold text-ink mb-4">Member Availability</h3>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-max text-sm">
                 <thead className="border-b border-slate-300">
                   <tr>
-                    <th className="text-left py-2 px-2 font-semibold text-ink">Member</th>
-                    <th className="text-center py-2 px-2 font-semibold text-slate-600">Days Available</th>
+                    <th className="sticky left-0 z-20 whitespace-nowrap border-r border-slate-300 bg-white py-2 px-3 text-left font-semibold text-ink">
+                      Member
+                    </th>
+                    {visibleAvailabilityDates.map((date) => {
+                      const headerLabel = new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric"
+                      });
+                      const shadeClass = dateShadeByColumn[date] === "dark" ? "bg-slate-100" : "bg-white";
+                      return (
+                        <th
+                          key={date}
+                          className={`whitespace-nowrap px-2 py-2 text-center text-xs font-semibold text-slate-600 ${shadeClass}`}
+                        >
+                          {headerLabel}
+                        </th>
+                      );
+                    })}
+                    <th className="sticky right-0 z-20 whitespace-nowrap border-l border-slate-300 bg-white py-2 px-3 text-center font-semibold text-slate-600">
+                      Days Available
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {allUsers.map((user) => (
-                    <tr key={user.id} className="border-b border-slate-200 hover:bg-slate-50">
-                      <td className="py-2 px-2 text-ink">{user.name}</td>
-                      <td className="text-center py-2 px-2 text-slate-600">
-                        {userAvailability[user.id]?.length || 0} days
-                      </td>
-                    </tr>
-                  ))}
+                  {allUsers.map((user) => {
+                    const memberDates = new Set(userAvailability[user.id] || []);
+                    const availableCount = visibleAvailabilityDates.reduce(
+                      (count, date) => (memberDates.has(date) ? count + 1 : count),
+                      0
+                    );
+
+                    return (
+                      <tr key={user.id} className="border-b border-slate-200 hover:bg-slate-50">
+                        <td className="sticky left-0 z-10 whitespace-nowrap border-r border-slate-300 bg-white py-2 px-3 font-medium text-ink">
+                          {user.name}
+                        </td>
+                        {visibleAvailabilityDates.map((date) => {
+                          const isAvailable = memberDates.has(date);
+                          const shadeClass = dateShadeByColumn[date] === "dark" ? "bg-slate-100" : "bg-white";
+                          return (
+                            <td key={`${user.id}-${date}`} className={`px-2 py-2 text-center ${shadeClass}`}>
+                              <span
+                                className={isAvailable ? "font-semibold text-emerald-600" : "font-semibold text-slate-400"}
+                                aria-label={isAvailable ? "Available" : "Not available"}
+                              >
+                                {isAvailable ? "✓" : "✕"}
+                              </span>
+                            </td>
+                          );
+                        })}
+                        <td className="sticky right-0 z-10 whitespace-nowrap border-l border-slate-300 bg-white py-2 px-3 text-center font-semibold text-slate-700">
+                          {availableCount}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
