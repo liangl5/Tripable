@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { DAY_NAMES, addMonths, formatISO, monthKey, startOfMonth } from "../../lib/calendarHelpers.js";
 
@@ -12,6 +12,12 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
   const [availabilityData, setAvailabilityData] = useState({});
   const [userAvailability, setUserAvailability] = useState({});
   const [allUsers, setAllUsers] = useState([]);
+  const [comments, setComments] = useState([]);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsSaving, setCommentsSaving] = useState(false);
+  const [commentsError, setCommentsError] = useState("");
+  const [commentsTableReady, setCommentsTableReady] = useState(true);
   const [loading, setLoading] = useState(false);
   const [userSubmittedAt, setUserSubmittedAt] = useState(null);
   const canEditAvailability = true;
@@ -94,8 +100,50 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
     loadHeatmapData();
   }, [showHeatmap, tab.id]);
 
+  useEffect(() => {
+    const loadComments = async () => {
+      if (!showHeatmap) return;
+      setCommentsLoading(true);
+      setCommentsError("");
+      try {
+        const { data, error } = await supabase
+          .from("AvailabilityTabComment")
+          .select("id, tabId, userId, body, createdAt")
+          .eq("tabId", tab.id)
+          .order("createdAt", { ascending: false });
+
+        if (error) {
+          const message = String(error.message || "");
+          if (message.toLowerCase().includes("relation") || message.toLowerCase().includes("does not exist")) {
+            setCommentsTableReady(false);
+            setComments([]);
+            return;
+          }
+          throw error;
+        }
+
+        setCommentsTableReady(true);
+        setComments(data || []);
+      } catch (error) {
+        console.error("Failed to load availability comments:", error);
+        setCommentsError("Failed to load comments.");
+      } finally {
+        setCommentsLoading(false);
+      }
+    };
+
+    loadComments();
+  }, [showHeatmap, tab.id]);
+
   const month1 = startOfMonth(startMonth);
   const month2 = addMonths(startMonth, 1);
+  const userNamesById = useMemo(() => {
+    const names = {};
+    for (const user of allUsers) {
+      names[user.id] = user.name;
+    }
+    return names;
+  }, [allUsers]);
 
   useEffect(() => {
     const stopDrag = () => {
@@ -181,6 +229,46 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
     // Reset selected dates to submitted dates
     if (userSubmittedAt) {
       setShowHeatmap(true);
+    }
+  };
+
+  const handleCommentSubmit = async () => {
+    const body = commentDraft.trim();
+    if (!body || commentsSaving || !commentsTableReady) return;
+
+    setCommentsSaving(true);
+    setCommentsError("");
+    const now = new Date().toISOString();
+    const optimistic = {
+      id: crypto.randomUUID(),
+      tabId: tab.id,
+      userId,
+      body,
+      createdAt: now
+    };
+
+    try {
+      setComments((current) => [optimistic, ...current]);
+      setCommentDraft("");
+
+      const { error } = await supabase.from("AvailabilityTabComment").insert([
+        {
+          id: optimistic.id,
+          tabId: tab.id,
+          userId,
+          body,
+          createdAt: now
+        }
+      ]);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error("Failed to post comment:", error);
+      setComments((current) => current.filter((comment) => comment.id !== optimistic.id));
+      setCommentsError("Could not post comment.");
+      setCommentDraft(body);
+    } finally {
+      setCommentsSaving(false);
     }
   };
 
@@ -334,6 +422,69 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <div className="mt-8 rounded-2xl border border-slate-200 bg-[#F0F2F5] p-4">
+            <h3 className="mb-3 text-base font-semibold text-ink">Comments</h3>
+
+            {!commentsTableReady ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                Comments are not enabled yet in your DB. Add table <code>AvailabilityTabComment</code> in schema.
+              </div>
+            ) : (
+              <>
+                <div className="mb-4 flex items-start gap-3 rounded-xl bg-white p-3 shadow-sm">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#4C6FFF] text-xs font-semibold text-white">
+                    {(userNamesById[userId] || "You").slice(0, 1).toUpperCase()}
+                  </div>
+                  <div className="flex-1">
+                    <textarea
+                      value={commentDraft}
+                      onChange={(event) => setCommentDraft(event.target.value)}
+                      placeholder="Write a comment..."
+                      className="min-h-[72px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#4C6FFF]"
+                    />
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleCommentSubmit}
+                        disabled={!commentDraft.trim() || commentsSaving}
+                        className="rounded-full bg-[#1877F2] px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-[#1665cc] disabled:opacity-60"
+                      >
+                        {commentsSaving ? "Posting..." : "Post"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {commentsError ? <p className="mb-3 text-sm text-coral">{commentsError}</p> : null}
+
+                {commentsLoading ? (
+                  <p className="text-sm text-slate-500">Loading comments...</p>
+                ) : comments.length === 0 ? (
+                  <p className="text-sm text-slate-500">No comments yet. Start the conversation.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {comments.map((comment) => {
+                      const authorName = userNamesById[comment.userId] || "Traveler";
+                      const createdLabel = new Date(comment.createdAt).toLocaleString();
+                      return (
+                        <div key={comment.id} className="flex items-start gap-3">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-300 text-xs font-semibold text-slate-700">
+                            {authorName.slice(0, 1).toUpperCase()}
+                          </div>
+                          <div className="max-w-full rounded-2xl bg-white px-3 py-2 shadow-sm">
+                            <p className="text-xs font-semibold text-ink">{authorName}</p>
+                            <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{comment.body}</p>
+                            <p className="mt-1 text-[11px] text-slate-400">{createdLabel}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       ) : (

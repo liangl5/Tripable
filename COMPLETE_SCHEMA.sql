@@ -23,6 +23,7 @@ ALTER TABLE IF EXISTS "TripTabConfiguration" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "UserTripRole" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "PendingTripInvite" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "AvailabilityTabData" DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS "AvailabilityTabComment" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "List" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "Transaction" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "TransactionSplit" DISABLE ROW LEVEL SECURITY;
@@ -37,6 +38,7 @@ DROP TABLE IF EXISTS "ItineraryDay" CASCADE;
 DROP TABLE IF EXISTS "Vote" CASCADE;
 DROP TABLE IF EXISTS "Idea" CASCADE;
 DROP TABLE IF EXISTS "AvailabilityTabData" CASCADE;
+DROP TABLE IF EXISTS "AvailabilityTabComment" CASCADE;
 DROP TABLE IF EXISTS "PendingTripInvite" CASCADE;
 DROP TABLE IF EXISTS "List" CASCADE;
 DROP TABLE IF EXISTS "UserTripRole" CASCADE;
@@ -210,6 +212,15 @@ CREATE TABLE "AvailabilityTabData" (
   UNIQUE("tabId", "userId", "date")
 );
 
+-- 12b. AvailabilityTabComment (threaded notes under group availability)
+CREATE TABLE "AvailabilityTabComment" (
+  id TEXT PRIMARY KEY,
+  "tabId" TEXT NOT NULL REFERENCES "TripTabConfiguration"(id) ON DELETE CASCADE,
+  "userId" TEXT NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 13. List (organizes ideas into categories)
 CREATE TABLE "List" (
   id TEXT PRIMARY KEY,
@@ -304,6 +315,8 @@ CREATE INDEX idx_trip_tab_trip ON "TripTabConfiguration"("tripId");
 CREATE INDEX idx_availability_tab_data_tab ON "AvailabilityTabData"("tabId");
 CREATE INDEX idx_availability_tab_data_user ON "AvailabilityTabData"("userId");
 CREATE INDEX idx_availability_tab_composite ON "AvailabilityTabData"("tabId", "userId");
+CREATE INDEX idx_availability_tab_comment_tab ON "AvailabilityTabComment"("tabId");
+CREATE INDEX idx_availability_tab_comment_created ON "AvailabilityTabComment"("createdAt" DESC);
 CREATE INDEX idx_itinerary_tab_config_tab ON "ItineraryTabConfiguration"("tabId");
 
 -- Expense indexes (fast transaction and split lookups)
@@ -343,6 +356,7 @@ ALTER TABLE "TripTabConfiguration" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "UserTripRole" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "PendingTripInvite" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "AvailabilityTabData" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "AvailabilityTabComment" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "List" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "Transaction" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "TransactionSplit" ENABLE ROW LEVEL SECURITY;
@@ -814,6 +828,27 @@ CREATE POLICY "Users can delete their own availability" ON "AvailabilityTabData"
     UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
     UNION SELECT "createdById" FROM "Trip" WHERE id = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabData"."tabId")
   )
+);
+
+-- AvailabilityTabComment policies
+CREATE POLICY "Trip members can view availability comments" ON "AvailabilityTabComment" FOR SELECT USING (
+  auth.uid() IS NOT NULL AND
+  auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabComment"."tabId")
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabComment"."tabId")
+    UNION SELECT "createdById" FROM "Trip" WHERE id = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabComment"."tabId")
+  )
+);
+CREATE POLICY "Trip members can post availability comments" ON "AvailabilityTabComment" FOR INSERT WITH CHECK (
+  auth.uid()::text = "userId"
+  AND auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabComment"."tabId")
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabComment"."tabId")
+    UNION SELECT "createdById" FROM "Trip" WHERE id = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabComment"."tabId")
+  )
+);
+CREATE POLICY "Users can delete their own availability comments" ON "AvailabilityTabComment" FOR DELETE USING (
+  auth.uid()::text = "userId"
 );
 
 -- List policies: Owner and editor can create lists
