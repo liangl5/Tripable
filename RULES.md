@@ -3,7 +3,6 @@
 3. Never use local storage, always update through database calls.
 4. If environment variables are needed for deployment and local testing, view ./.env and ./client/.env.local first. These are the environment variables that the user manually sets in vercel, so please let the user know if environment variable edits are required and keep these two files up to date. Never create another environment file or any copies of the data within the environment files.
 5. User roles are specified in a table format as follows:
-
 -- PERMISSION SUMMARY:
 -- ┌──────────────┬───────────┬────────────┬──────────┐
 -- │ Resource     │ Owner     │ Editor     │ Suggestor│
