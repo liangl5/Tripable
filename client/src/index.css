@@ -86,6 +86,25 @@ body {
     radial-gradient(circle at 90% 20%, rgba(255, 184, 107, 0.1), transparent 16%);
 }
 
+@keyframes auth-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(30%);
+  }
+  100% {
+    transform: translateX(200%);
+  }
+}
+
+.auth-progress-bar {
+  height: 100%;
+  width: 40%;
+  background: #38bdf8;
+  animation: auth-progress 1.2s ease-in-out infinite;
+}
+
 .tripable-grid {
   background-image:
     linear-gradient(rgba(76, 111, 255, 0.05) 1px, transparent 1px),
@@ -95,4 +114,12 @@ body {
 
 .mock-map-pin {
   box-shadow: 0 10px 18px rgba(76, 111, 255, 0.18);
+}
+
+.invite-email-input:-webkit-autofill,
+.invite-email-input:-webkit-autofill:hover,
+.invite-email-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #1f2937;
+  -webkit-box-shadow: 0 0 0 1000px #eaf3ff inset;
+  box-shadow: 0 0 0 1000px #eaf3ff inset;
 }

@@ -98,7 +98,6 @@ export default function ItineraryPage() {
         </section>
 
         <div className="mt-8">
-          {tripLoading || itineraryLoading ? <p className="text-sm">Loading itinerary...</p> : null}
           {error ? <p className="text-sm text-coral">{error}</p> : null}
           <ItineraryView itinerary={itinerary} />
         </div>

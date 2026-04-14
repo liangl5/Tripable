@@ -412,9 +412,7 @@ export default function TripMapPanel({
           <>
             <div ref={mapContainerRef} className="absolute inset-0" />
             {!jsMapReady ? (
-              <div className="absolute inset-0 grid place-items-center bg-slate-100/80 text-sm font-semibold text-slate-500 backdrop-blur-sm">
-                Loading interactive map...
-              </div>
+              <div className="absolute inset-0 bg-slate-100/80 backdrop-blur-sm" />
             ) : null}
           </>
         ) : (

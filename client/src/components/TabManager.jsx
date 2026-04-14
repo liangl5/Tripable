@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getTripTabs, reorderTabs, deleteTab, createTab, updateTab } from "../lib/tabManagement.js";
 import { trackEvent } from "../lib/analytics.js";
 import { useTripStore } from "../hooks/useTripStore.js";
+import { supabase } from "../lib/supabase.js";
 import AvailabilityTab from "./TripTabs/AvailabilityTab.jsx";
 import ListTab from "./TripTabs/ListTab.jsx";
 import ItineraryTab from "./TripTabs/ItineraryTab.jsx";
@@ -34,7 +35,6 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
   const [tabCreateName, setTabCreateName] = useState("");
   const [tabCreateError, setTabCreateError] = useState("");
   const canManageTabs = userRole === "owner" || userRole === "editor";
-  const storageKey = `tripable.activeTab.${tripId}`;
 
   // Load tabs on mount
   useEffect(() => {
@@ -44,8 +44,23 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
         const loadedTabs = await getTripTabs(tripId);
         setTabs(loadedTabs);
         if (loadedTabs.length > 0) {
-          const stored = localStorage.getItem(storageKey);
-          const nextActive = loadedTabs.some((tab) => tab.id === stored) ? stored : loadedTabs[0].id;
+          let storedTabId = "";
+          if (userId) {
+            const { data, error } = await supabase
+              .from("TripTabPreference")
+              .select("activeTabId")
+              .eq("tripId", tripId)
+              .eq("userId", userId)
+              .maybeSingle();
+            if (error) {
+              if (!String(error.message || "").includes("TripTabPreference")) {
+                throw error;
+              }
+            } else {
+              storedTabId = data?.activeTabId || "";
+            }
+          }
+          const nextActive = loadedTabs.some((tab) => tab.id === storedTabId) ? storedTabId : loadedTabs[0].id;
           setActiveTab(nextActive);
           setHydratedTab(true);
         }
@@ -57,12 +72,22 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
     };
 
     loadTabs();
-  }, [tripId, storageKey]);
+  }, [tripId, userId]);
 
   useEffect(() => {
-    if (!activeTab) return;
+    if (!activeTab || !userId) return;
     const activeTabData = tabs.find((tab) => tab.id === activeTab);
-    localStorage.setItem(storageKey, activeTab);
+    void supabase
+      .from("TripTabPreference")
+      .upsert(
+        {
+          tripId,
+          userId,
+          activeTabId: activeTab,
+          updatedAt: new Date().toISOString()
+        },
+        { onConflict: "tripId,userId" }
+      );
     if (activeTabData && hydratedTab) {
       void trackEvent("trip_tab_viewed", {
         trip_id: tripId,
@@ -70,7 +95,7 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
         tab_type: activeTabData.tabType || "custom"
       });
     }
-  }, [activeTab, tabs, tripId, storageKey, hydratedTab]);
+  }, [activeTab, tabs, tripId, userId, hydratedTab]);
 
   const executeTabDelete = async (tabId) => {
     if (!canManageTabs) return;
@@ -266,7 +291,7 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
   const activeTabData = tabs.find((t) => t.id === activeTab);
 
   if (loading) {
-    return <div className="p-6 text-center text-slate-600">Loading tabs...</div>;
+    return <div className="p-6" />;
   }
 
   const renderTabPanel = (tab) => {

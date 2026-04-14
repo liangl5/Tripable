@@ -732,7 +732,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
   };
 
   if (loading) {
-    return <div className="p-6 text-center text-slate-600">Loading availability...</div>;
+    return <div className="p-6" />;
   }
 
   return (

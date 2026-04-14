@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useUserProfile } from "../App";
 import { formatDateRange } from "../lib/timeFormat.js";
@@ -19,38 +19,36 @@ const getInitials = (name) => {
   return parts[0][0].toUpperCase();
 };
 
-export default function TripList({ trips, selectionMode = false, openOnCardClick = false }) {
+export default function TripList({ trips, selectionMode = false, openOnCardClick = false, onCardClick = null }) {
+  const navigate = useNavigate();
   const { profile } = useUserProfile();
   const duplicateTrip = useTripStore((state) => state.duplicateTrip);
   const updateTripMeta = useTripStore((state) => state.updateTripMeta);
   const deleteTrip = useTripStore((state) => state.deleteTrip);
+  const leaveTrip = useTripStore((state) => state.leaveTrip);
   const [menuOpenId, setMenuOpenId] = useState(null);
   const [renameTrip, setRenameTrip] = useState(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameNotice, setRenameNotice] = useState(null);
   const [renameNoticeAt, setRenameNoticeAt] = useState(0);
-  const [renameUndoNotice, setRenameUndoNotice] = useState("");
-  const [renameUndoNoticeAt, setRenameUndoNoticeAt] = useState(0);
   const [renameSaving, setRenameSaving] = useState(false);
-  const [renameUndoSaving, setRenameUndoSaving] = useState(false);
   const [shareTrip, setShareTrip] = useState(null);
   const [inviteStatus, setInviteStatus] = useState("");
   const [inviteStatusAt, setInviteStatusAt] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleteNotice, setDeleteNotice] = useState(null);
   const [deleteNoticeAt, setDeleteNoticeAt] = useState(0);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [copyNotice, setCopyNotice] = useState(null);
   const [copyNoticeAt, setCopyNoticeAt] = useState(0);
   const [copyStatus, setCopyStatus] = useState("");
   const [copyStatusAt, setCopyStatusAt] = useState(0);
   const [selectedTripIds, setSelectedTripIds] = useState(() => new Set());
-  const [hiddenTripIds, setHiddenTripIds] = useState(() => new Set());
   const [duplicateLoading, setDuplicateLoading] = useState(false);
   const [shareMenuOpenId, setShareMenuOpenId] = useState(null);
   const [shareMenuPinnedId, setShareMenuPinnedId] = useState(null);
   const [lastShareTrip, setLastShareTrip] = useState(null);
   const menuRef = useRef(null);
-  const deleteTimeoutsRef = useRef(new Map());
 
   useEffect(() => {
     if (!menuOpenId) return undefined;
@@ -89,12 +87,6 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
   }, [renameNotice]);
 
   useEffect(() => {
-    if (!renameUndoNotice) return undefined;
-    const timer = setTimeout(() => setRenameUndoNotice(""), 10000);
-    return () => clearTimeout(timer);
-  }, [renameUndoNotice]);
-
-  useEffect(() => {
     if (!deleteNotice) return undefined;
     const timer = setTimeout(() => setDeleteNotice(null), 10000);
     return () => clearTimeout(timer);
@@ -117,12 +109,6 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
     setSelectedTripIds(new Set());
     return undefined;
   }, [selectionMode]);
-
-  useEffect(() => {
-    if (!renameUndoSaving) return undefined;
-    const timer = setTimeout(() => setRenameUndoSaving(false), 2000);
-    return () => clearTimeout(timer);
-  }, [renameUndoSaving]);
 
   const handleRenameSave = async () => {
     if (!renameTrip?.id) return;
@@ -156,15 +142,6 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
     setInviteStatusAt(Date.now());
   };
 
-  const showRenameUndoNotice = (message) => {
-    setRenameUndoNotice(message);
-    setRenameUndoNoticeAt(Date.now());
-  };
-
-  const showActionUndone = () => {
-    showRenameUndoNotice("Action undone");
-  };
-
   const showDeleteNotice = (trip) => {
     setDeleteNotice({
       id: trip.id,
@@ -187,68 +164,7 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
     setCopyStatusAt(Date.now());
   };
 
-  const scheduleTripDelete = (trip) => {
-    if (!trip?.id) return;
-    setDeleteConfirm(null);
-    setHiddenTripIds((current) => new Set([...current, trip.id]));
-    showDeleteNotice(trip);
-
-    const timeoutId = setTimeout(async () => {
-      try {
-        await deleteTrip(trip.id);
-      } catch (error) {
-        console.error("Failed to delete trip", error);
-        setHiddenTripIds((current) => {
-          const next = new Set(current);
-          next.delete(trip.id);
-          return next;
-        });
-        showInviteStatus("Unable to delete trip.");
-      } finally {
-        deleteTimeoutsRef.current.delete(trip.id);
-      }
-    }, 10000);
-
-    deleteTimeoutsRef.current.set(trip.id, timeoutId);
-  };
-
-  const undoTripDelete = (tripId) => {
-    if (!tripId) return;
-    const timeoutId = deleteTimeoutsRef.current.get(tripId);
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-      deleteTimeoutsRef.current.delete(tripId);
-    }
-    setHiddenTripIds((current) => {
-      const next = new Set(current);
-      next.delete(tripId);
-      return next;
-    });
-    setDeleteNotice(null);
-    showActionUndone();
-  };
-
-  const undoTripCopy = async (tripId) => {
-    if (!tripId) return;
-    try {
-      await deleteTrip(tripId);
-      setHiddenTripIds((current) => {
-        const next = new Set(current);
-        next.delete(tripId);
-        return next;
-      });
-      setCopyNotice(null);
-      showActionUndone();
-    } catch (error) {
-      console.error("Failed to undo trip copy", error);
-      showInviteStatus("Unable to undo copy.");
-    }
-  };
-
-  const visibleTrips = useMemo(
-    () => trips.filter((trip) => !hiddenTripIds.has(trip.id)),
-    [trips, hiddenTripIds]
-  );
+  const visibleTrips = useMemo(() => trips, [trips]);
 
   const toggleTripSelection = (tripId) => {
     setSelectedTripIds((current) => {
@@ -288,12 +204,19 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
   const handleBulkDelete = () => {
     const ids = Array.from(selectedTripIds);
     if (!ids.length) return;
-    ids.forEach((tripId) => {
-      const trip = trips.find((item) => item.id === tripId);
-      if (trip) {
-        scheduleTripDelete(trip);
-      }
-    });
+    void Promise.all(
+      ids.map(async (tripId) => {
+        const trip = trips.find((item) => item.id === tripId);
+        if (!trip) return;
+        try {
+          await deleteTrip(trip.id);
+          showDeleteNotice(trip);
+        } catch (error) {
+          console.error("Failed to delete trip", error);
+          showInviteStatus("Unable to delete trip.");
+        }
+      })
+    );
     setSelectedTripIds(new Set());
   };
 
@@ -332,7 +255,7 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
             disabled={!selectedTripIds.size || duplicateLoading}
             className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-ink hover:border-ocean hover:text-ocean disabled:opacity-60"
           >
-            {duplicateLoading ? "Making copy..." : "Make copies"}
+            {duplicateLoading ? "Making copy..." : "Make copy"}
           </button>
           <button
             type="button"
@@ -351,7 +274,7 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
             className={`relative overflow-visible rounded-3xl border border-slate-200 bg-white/90 transition ${
               selectionMode ? "cursor-pointer hover:border-ocean" : ""
             } ${
-              !selectionMode && openOnCardClick ? "cursor-pointer hover:bg-slate-100" : ""
+              !selectionMode && (openOnCardClick || onCardClick) ? "cursor-pointer hover:bg-slate-50" : ""
             } ${selectionMode && selectedTripIds.has(trip.id) ? "border-ocean ring-2 ring-ocean/30" : ""}`}
             onClickCapture={
               selectionMode
@@ -363,9 +286,13 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
                 : undefined
             }
             onClick={
-              !selectionMode && openOnCardClick
+              !selectionMode && (openOnCardClick || onCardClick)
                 ? () => {
-                    window.location.href = `/trips/${trip.id}`;
+                    if (onCardClick) {
+                      onCardClick(trip.id);
+                    } else {
+                      navigate(`/trips/${trip.id}`);
+                    }
                   }
                 : undefined
             }
@@ -444,84 +371,91 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
                     </svg>
                     {duplicateLoading ? "Making copy..." : "Make a copy"}
                   </button>
-                  <div
-                    className="group relative"
-                    onMouseEnter={() => setShareMenuOpenId(trip.id)}
-                    onMouseLeave={() => {
-                      if (shareMenuPinnedId !== trip.id) {
-                        setShareMenuOpenId(null);
-                      }
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-slate-100"
-                      onClick={() => {
-                        setShareMenuOpenId(trip.id);
-                        setShareMenuPinnedId(trip.id);
+                  {trip.userRole === "owner" || trip.userRole === "editor" ? (
+                    <div
+                      className="group relative"
+                      onMouseEnter={() => setShareMenuOpenId(trip.id)}
+                      onMouseLeave={() => {
+                        if (shareMenuPinnedId !== trip.id) {
+                          setShareMenuOpenId(null);
+                        }
                       }}
                     >
-                      <svg className="h-4 w-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" />
-                        <path d="M16 6l-4-4-4 4" />
-                        <path d="M12 2v13" />
-                      </svg>
-                      Share
-                      <svg className="ml-auto h-5 w-5 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M7 5l5 5-5 5" />
-                      </svg>
-                    </button>
-                    {shareMenuOpenId === trip.id && (
-                      <div
-                        className="absolute left-full top-1/2 z-10 -ml-1 w-44 -translate-y-1/2 rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-lg"
-                        onMouseDown={(event) => event.stopPropagation()}
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-slate-100"
+                        onClick={() => {
+                          setShareMenuOpenId(trip.id);
+                          setShareMenuPinnedId(trip.id);
+                        }}
                       >
-                        <button
-                          type="button"
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-slate-100"
-                          onClick={() => {
-                            setMenuOpenId(null);
-                            setShareMenuOpenId(null);
-                            setShareMenuPinnedId(null);
-                            setShareTrip(trip);
-                            setInviteStatus("");
-                            setInviteStatusAt(0);
-                          }}
-                        >
                         <svg className="h-4 w-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                          <circle cx="12" cy="7" r="4" />
+                          <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" />
+                          <path d="M16 6l-4-4-4 4" />
+                          <path d="M12 2v13" />
                         </svg>
                         Share
-                      </button>
-                        <button
-                          type="button"
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-slate-100"
-                          onClick={async () => {
-                            const link = `${window.location.origin}/trips/${trip.id}/invite`;
-                            await navigator.clipboard.writeText(link);
-                            setMenuOpenId(null);
-                            setShareMenuOpenId(null);
-                            setShareMenuPinnedId(null);
-                            showInviteStatus("Link copied");
-                            setLastShareTrip(trip);
-                          }}
-                        >
-                        <svg className="h-4 w-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <rect x="9" y="9" width="13" height="13" rx="2" />
-                          <rect x="2" y="2" width="13" height="13" rx="2" />
+                        <svg className="ml-auto h-5 w-5 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
+                          <path d="M7 5l5 5-5 5" />
                         </svg>
-                        Copy link
                       </button>
+                      {shareMenuOpenId === trip.id && (
+                        <div
+                          className="absolute left-full top-1/2 z-10 -ml-1 w-44 -translate-y-1/2 rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-lg"
+                          onMouseDown={(event) => event.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-slate-100"
+                            onClick={() => {
+                              setMenuOpenId(null);
+                              setShareMenuOpenId(null);
+                              setShareMenuPinnedId(null);
+                              setShareTrip(trip);
+                              setInviteStatus("");
+                              setInviteStatusAt(0);
+                            }}
+                          >
+                          <svg className="h-4 w-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                            <circle cx="12" cy="7" r="4" />
+                          </svg>
+                          Share
+                        </button>
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-slate-100"
+                            onClick={async () => {
+                              const link = `${window.location.origin}/trips/${trip.id}/invite`;
+                              await navigator.clipboard.writeText(link);
+                              setMenuOpenId(null);
+                              setShareMenuOpenId(null);
+                              setShareMenuPinnedId(null);
+                              showInviteStatus("Link copied");
+                              setLastShareTrip(trip);
+                            }}
+                          >
+                          <svg className="h-4 w-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" />
+                            <rect x="2" y="2" width="13" height="13" rx="2" />
+                          </svg>
+                          Copy link
+                        </button>
+                      </div>
+                      )}
                     </div>
-                    )}
-                  </div>
+                  ) : null}
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-coral hover:bg-rose-50"
+                    className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left ${
+                      trip.canDelete === false ? "text-amber-700 hover:bg-amber-50" : "text-coral hover:bg-rose-50"
+                    }`}
                     onClick={() => {
                       setMenuOpenId(null);
-                      setDeleteConfirm(trip);
+                      setDeleteConfirm({
+                        ...trip,
+                        actionType: trip.canDelete === false ? "leave" : "delete"
+                      });
                     }}
                   >
                     <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -531,7 +465,7 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
                       <path d="M10 11v6" />
                       <path d="M14 11v6" />
                     </svg>
-                    Delete trip
+                    {trip.canDelete === false ? "Leave trip" : "Delete trip"}
                   </button>
                 </div>
               )}
@@ -546,6 +480,7 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
                 {trip.startDate && trip.endDate ? (
                   <p className="mt-2 text-sm text-slate-500">{formatDateRange(trip.startDate, trip.endDate)}</p>
                 ) : null}
+                <p className="mt-2 text-sm font-semibold text-slate-500">Owner: {trip.ownerDisplayName || "Trip owner"}</p>
               </div>
 
               <div className="flex items-center justify-between gap-3">
@@ -559,10 +494,15 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
                     const allMembers = trip.members && trip.members.length
                       ? trip.members
                       : [{ id: trip.createdById || "owner", name: trip.ownerDisplayName || "Trip owner" }];
-                    const maxVisible = 5;
-                    const visibleMembers = allMembers.slice(0, maxVisible);
-                    const overflowCount = Math.max(allMembers.length - maxVisible, 0);
-                    const memberNames = allMembers
+                    const sortedMembers = [...allMembers].sort((a, b) =>
+                      String(a.name || "Traveler").localeCompare(String(b.name || "Traveler"), undefined, {
+                        sensitivity: "base"
+                      })
+                    );
+                    const maxVisible = 2;
+                    const visibleMembers = sortedMembers.slice(0, maxVisible);
+                    const overflowCount = Math.max(sortedMembers.length - maxVisible, 0);
+                    const memberNames = sortedMembers
                       .map((member) => member.name || "Traveler")
                       .filter(Boolean)
                       .join(", ");
@@ -572,41 +512,32 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
                         <div className="group relative flex items-center">
                           {visibleMembers.map((member, index) => {
                             const isCurrentUser = profile?.id && member.id === profile.id;
-                            const effectivePhotoUrl = member.photoUrl || (isCurrentUser ? profile.photoUrl : "");
                             const effectiveAvatarColor = member.avatarColor || (isCurrentUser ? profile.avatarColor : "");
                             return (
                             <div
                               key={member.id}
                               className={`relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white text-xs font-semibold ${
                                 index === 0 ? "z-10" : "-ml-2"
-                              } ${
-                                effectivePhotoUrl
-                                  ? "bg-slate-100 text-slate-600"
-                                  : effectiveAvatarColor || getAvatarColor(member.id)
-                              }`}
-                              style={{ zIndex: 10 - index }}
+                              } ${effectiveAvatarColor || getAvatarColor(member.id)}`}
+                              style={{ zIndex: 10 + index }}
                             >
-                              {effectivePhotoUrl ? (
-                                <img src={effectivePhotoUrl} alt={member.name || "Traveler"} className="h-full w-full object-cover" />
-                              ) : (
-                                <span>{getInitials(member.name)}</span>
-                              )}
+                              <span>{getInitials(member.name)}</span>
                             </div>
                           );
                           })}
                           {overflowCount > 0 && (
                             <div
                               className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white bg-slate-200 text-xs font-semibold text-slate-700 -ml-2"
-                              style={{ zIndex: 10 - visibleMembers.length }}
+                              style={{ zIndex: 10 + visibleMembers.length }}
                               title={`${overflowCount} more`}
                             >
                               +{overflowCount}
                             </div>
                           )}
                           {memberNames ? (
-                            <div className="pointer-events-none absolute left-0 bottom-12 z-20 hidden w-max max-w-[260px] rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-white shadow-lg group-hover:block">
+                            <div className="pointer-events-none absolute bottom-12 left-1/2 z-20 hidden w-max max-w-[260px] -translate-x-1/2 rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-white shadow-lg group-hover:block">
                               {memberNames}
-                              <span className="absolute left-4 top-full h-0 w-0 border-x-8 border-x-transparent border-t-8 border-t-ink" />
+                              <span className="absolute left-1/2 top-full h-0 w-0 -translate-x-1/2 border-x-8 border-x-transparent border-t-8 border-t-ink" />
                             </div>
                           ) : null}
                         </div>
@@ -615,15 +546,7 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
                   })()}
                 </div>
               </div>
-              {openOnCardClick ? null : (
-                <Link
-                  to={`/trips/${trip.id}`}
-                  className="w-full rounded-full bg-ink px-4 py-2 text-center text-xs font-semibold text-white shadow-sm hover:bg-slate-800"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  View Trip
-                </Link>
-              )}
+
             </div>
           </div>
         ))}
@@ -688,31 +611,63 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
           onClick={() => setDeleteConfirm(null)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-card"
+            className="relative w-full max-w-sm overflow-hidden rounded-2xl bg-white p-5 shadow-card"
             onClick={(event) => event.stopPropagation()}
           >
-            <h3 className="text-lg font-semibold text-ink">Delete trip?</h3>
+            {deleteLoading ? (
+              <>
+                <div className="absolute inset-0 rounded-2xl bg-white/60" />
+                <div className="absolute left-0 top-0 h-1 w-full bg-slate-200">
+                  <div className="auth-progress-bar" />
+                </div>
+              </>
+            ) : null}
+            <h3 className="text-lg font-semibold text-ink">
+              {deleteConfirm.actionType === "leave" ? "Leave trip?" : "Delete trip?"}
+            </h3>
             <p className="mt-2 text-sm text-slate-600">
-              Delete &quot;{deleteConfirm.name || "this trip"}&quot;? This cannot be undone.
+              {deleteConfirm.actionType === "leave"
+                ? `Leave \"${deleteConfirm.name || "this trip"}\"? You will need a new invite link to rejoin.`
+                : `Delete \"${deleteConfirm.name || "this trip"}\"? This cannot be undone.`}
             </p>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 onClick={() => setDeleteConfirm(null)}
-                className="rounded-xl px-3 py-1.5 text-sm font-semibold text-slate-600"
+                className="rounded-xl px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-60"
+                disabled={deleteLoading}
               >
                 Cancel
               </button>
               <button
                 onClick={async () => {
                   try {
-                    scheduleTripDelete(deleteConfirm);
+                    setDeleteLoading(true);
+                    if (deleteConfirm.actionType === "leave") {
+                      await leaveTrip(deleteConfirm.id);
+                      showInviteStatus("Left trip.");
+                    } else {
+                      await deleteTrip(deleteConfirm.id);
+                      showDeleteNotice(deleteConfirm);
+                    }
+                    setDeleteConfirm(null);
                   } catch (error) {
-                    console.error("Failed to delete trip", error);
+                    if (deleteConfirm.actionType === "leave") {
+                      console.error("Failed to leave trip", error);
+                      showInviteStatus("Unable to leave trip.");
+                    } else {
+                      console.error("Failed to delete trip", error);
+                      showInviteStatus("Unable to delete trip.");
+                    }
+                  } finally {
+                    setDeleteLoading(false);
                   }
                 }}
-                className="rounded-xl bg-coral px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-600"
+                className={`rounded-xl px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60 ${
+                  deleteConfirm.actionType === "leave" ? "bg-amber-500 hover:bg-amber-600" : "bg-coral hover:bg-red-600"
+                }`}
+                disabled={deleteLoading}
               >
-                Delete
+                {deleteConfirm.actionType === "leave" ? "Leave" : "Delete"}
               </button>
             </div>
           </div>
@@ -765,26 +720,6 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
                     <span>
                       “{renameNotice.from}” renamed to “{renameNotice.to}”
                     </span>
-                    {renameSaving && !renameUndoSaving ? (
-                      <span className="text-base font-semibold text-white/80">Saving...</span>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="text-base font-semibold text-sky-200 underline hover:text-white"
-                      onClick={async () => {
-                        try {
-                          setRenameUndoSaving(true);
-                          await updateTripMeta(renameNotice.tripId, { name: renameNotice.from });
-                          showRenameUndoNotice("Action undone");
-                        } catch (error) {
-                          console.error("Failed to undo rename", error);
-                        } finally {
-                          setRenameNotice(null);
-                        }
-                      }}
-                    >
-                      Undo
-                    </button>
                     <button
                       type="button"
                       className="ml-auto text-white/70 hover:text-white"
@@ -797,29 +732,6 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
                 )
               }
             : null,
-          renameUndoNotice
-            ? {
-                key: "rename-undo",
-                ts: renameUndoNoticeAt,
-                node: (
-                  <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
-                    <span>{renameUndoNotice}</span>
-                    <button
-                      type="button"
-                      className="ml-auto text-white/70 hover:text-white"
-                      onClick={() => {
-                        setRenameUndoNotice("");
-                        setRenameUndoNoticeAt(0);
-                      }}
-                      aria-label="Dismiss notification"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                )
-              }
-            : null
-          ,
           deleteNotice
             ? {
                 key: "delete",
@@ -827,13 +739,6 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
                 node: (
                   <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
                     <span>“{deleteNotice.name}” deleted</span>
-                    <button
-                      type="button"
-                      className="text-base font-semibold text-sky-200 underline hover:text-white"
-                      onClick={() => undoTripDelete(deleteNotice.id)}
-                    >
-                      Undo
-                    </button>
                     <button
                       type="button"
                       className="ml-auto text-white/70 hover:text-white"
@@ -854,13 +759,6 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
                 node: (
                   <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
                     <span>Copy of “{copyNotice.name}” created</span>
-                    <button
-                      type="button"
-                      className="text-base font-semibold text-sky-200 underline hover:text-white"
-                      onClick={() => undoTripCopy(copyNotice.id)}
-                    >
-                      Undo
-                    </button>
                     <button
                       type="button"
                       className="ml-auto text-white/70 hover:text-white"

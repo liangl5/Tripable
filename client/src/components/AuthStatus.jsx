@@ -1,14 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useSession, useUserProfile } from "../App";
-import { getDisplayName } from "../lib/userProfile.js";
 import { trackEvent } from "../lib/analytics.js";
 import TripableLogoLink from "./TripableLogoLink.jsx";
 
 export function AuthStatus() {
   const session = useSession();
-  const { profile, refreshProfile } = useUserProfile();
+  const { refreshProfile } = useUserProfile();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const authMode = searchParams.get('mode');
@@ -18,9 +17,10 @@ export function AuthStatus() {
   const [loading, setLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(authMode !== 'signin');
   const [message, setMessage] = useState('');
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  const isBusy = loading || isRedirecting;
 
   const returnUrl = searchParams.get('return') || '/';
-  const displayName = useMemo(() => getDisplayName(profile, session), [profile, session]);
 
   useEffect(() => {
     if (authMode === 'signin') {
@@ -31,6 +31,13 @@ export function AuthStatus() {
       setIsSignUp(true);
     }
   }, [authMode]);
+
+  useEffect(() => {
+    if (!session) return;
+    setIsRedirecting(true);
+    const timer = setTimeout(() => navigate(returnUrl), 300);
+    return () => clearTimeout(timer);
+  }, [session, navigate, returnUrl]);
 
   const handleSignUp = async (e) => {
     e.preventDefault();
@@ -88,20 +95,16 @@ export function AuthStatus() {
       void trackEvent("auth_sign_in_succeeded", {
         has_return_url: Boolean(returnUrl)
       });
-      setMessage('Signed in successfully!');
+      setMessage('');
       setEmail('');
       setPassword('');
       setConfirmPassword('');
       const { data } = await supabase.auth.getSession();
       await refreshProfile(data?.session || null);
-      setTimeout(() => navigate(returnUrl), 1000);
+      setIsRedirecting(true);
+      setTimeout(() => navigate(returnUrl), 300);
     }
     setLoading(false);
-  };
-
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    void trackEvent("auth_sign_out", {});
   };
 
   const switchMode = () => {
@@ -115,41 +118,32 @@ export function AuthStatus() {
     setConfirmPassword('');
   };
 
-  if (session) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 px-4">
-        <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8">
-          <TripableLogoLink className="mb-6" compact showTagline={false} />
-          <div className="space-y-4">
-            <p className="text-slate-600">
-              Logged in as: <span className="font-semibold">{displayName}</span>
-            </p>
-            <button
-              onClick={handleSignOut}
-              className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-semibold"
-            >
-              Sign Out
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 px-4">
       <div className="w-full max-w-md">
-        <div className="bg-white rounded-lg shadow-lg p-8">
-          <TripableLogoLink className="mb-2" compact showTagline={false} />
-          <p className="text-slate-500 mb-8">Plan trips together, effortlessly</p>
+        <div className="relative bg-white rounded-lg shadow-lg p-8">
+          {isBusy && (
+            <>
+              <div className="absolute inset-0 z-10 rounded-lg bg-white/60" />
+              <div className="absolute left-0 top-0 z-20 h-1 w-full overflow-hidden rounded-t-lg bg-slate-200">
+                <div className="auth-progress-bar" />
+              </div>
+            </>
+          )}
+          <div className={isBusy ? "pointer-events-none select-none" : ""}>
+            <TripableLogoLink className="mb-2" compact showTagline={false} />
+            <p className="text-slate-500 mb-8">Plan trips together, effortlessly</p>
 
           {/* Tab Navigation */}
           <div className="flex gap-2 mb-8 bg-slate-100 p-1 rounded-lg">
             <button
               onClick={() => isSignUp ? null : switchMode()}
+              disabled={isBusy}
               className={`flex-1 py-2 px-4 rounded-md font-semibold transition ${
                 isSignUp
                   ? 'bg-blue-600 text-white'
+                  : isBusy
+                  ? 'text-slate-600'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white'
               }`}
             >
@@ -157,9 +151,12 @@ export function AuthStatus() {
             </button>
             <button
               onClick={() => !isSignUp ? null : switchMode()}
+              disabled={isBusy}
               className={`flex-1 py-2 px-4 rounded-md font-semibold transition ${
                 !isSignUp
                   ? 'bg-blue-600 text-white'
+                  : isBusy
+                  ? 'text-slate-600'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white'
               }`}
             >
@@ -178,6 +175,7 @@ export function AuthStatus() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                disabled={isBusy}
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
               />
             </div>
@@ -192,6 +190,7 @@ export function AuthStatus() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={isSignUp ? 6 : undefined}
+                disabled={isBusy}
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
               />
             </div>
@@ -208,6 +207,7 @@ export function AuthStatus() {
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   required
                   minLength={6}
+                  disabled={isBusy}
                   className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition ${
                     password && confirmPassword && password !== confirmPassword
                       ? 'border-red-500 bg-red-50'
@@ -237,12 +237,18 @@ export function AuthStatus() {
 
             <button
               type="submit"
-              disabled={loading || (isSignUp && password && confirmPassword && password !== confirmPassword)}
-              className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-semibold disabled:bg-slate-400 disabled:cursor-not-allowed"
+              disabled={
+                isBusy ||
+                (isSignUp && password && confirmPassword && password !== confirmPassword)
+              }
+              className={`w-full px-4 py-2 rounded-lg transition font-semibold disabled:bg-slate-400 disabled:cursor-not-allowed ${
+                isBusy ? "bg-blue-600 text-white" : "bg-blue-600 text-white hover:bg-blue-700"
+              }`}
             >
-              {loading ? 'Loading...' : (isSignUp ? 'Create Account' : 'Sign In')}
+              {isSignUp ? 'Create Account' : 'Sign In'}
             </button>
           </form>
+          </div>
         </div>
       </div>
     </div>

@@ -99,11 +99,7 @@ export default function App() {
   }, [location.pathname, location.search]);
 
   if (loading) {
-    return (
-      <div className="mx-auto flex min-h-screen max-w-6xl items-center justify-center px-6 py-12 text-sm text-slate-500">
-        Loading...
-      </div>
-    );
+    return <div className="min-h-screen bg-slate-50" />;
   }
 
   return (
@@ -111,11 +107,7 @@ export default function App() {
       <UserProfileContext.Provider value={{ profile, profileLoading, profileError, refreshProfile }}>
         <div className="app-shell min-h-screen">
           <Suspense
-            fallback={
-              <div className="mx-auto flex min-h-screen max-w-6xl items-center justify-center px-6 py-12 text-sm text-slate-500">
-                Loading...
-              </div>
-            }
+            fallback={<div className="min-h-screen bg-slate-50" />}
           >
             <Routes>
               <Route path="/" element={<HomePage />} />

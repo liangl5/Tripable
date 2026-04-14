@@ -21,12 +21,13 @@ export default function HomePage() {
   const loadTrips = useTripStore((state) => state.loadTrips);
   const tripsLoading = useTripStore((state) => state.tripsLoading);
   const error = useTripStore((state) => state.error);
-  const [pendingInvites, setPendingInvites] = useState([]);
-  const [pendingInvitesLoading, setPendingInvitesLoading] = useState(false);
   const [tripCards, setTripCards] = useState([]);
+  const [tripCardsLoading, setTripCardsLoading] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [localSession, setLocalSession] = useState(null);
+  const [tripNavigationLoading, setTripNavigationLoading] = useState(false);
+  const [navigationProgress, setNavigationProgress] = useState(0);
 
   const effectiveSession = session || localSession;
   const currentUserId = effectiveSession?.user?.id;
@@ -77,82 +78,13 @@ export default function HomePage() {
   }, [session]);
 
   useEffect(() => {
-    if (!effectiveSession?.user?.email) {
-      setPendingInvites([]);
-      return;
-    }
-
-    const loadPendingInvites = async () => {
-      setPendingInvitesLoading(true);
-      try {
-        const normalizedEmail = String(effectiveSession.user.email || "").trim().toLowerCase();
-        const { data: inviteRows, error: inviteError } = await supabase
-          .from("PendingTripInvite")
-          .select("id, tripId, role, createdAt")
-          .ilike("email", normalizedEmail)
-          .eq("status", "pending")
-          .order("createdAt", { ascending: false });
-
-        if (inviteError) {
-          // Backwards compatibility if pending invite table is not deployed yet.
-          if (String(inviteError.message || "").includes("PendingTripInvite")) {
-            setPendingInvites([]);
-            return;
-          }
-          throw inviteError;
-        }
-
-        const rows = inviteRows || [];
-        if (!rows.length) {
-          setPendingInvites([]);
-          return;
-        }
-
-        const tripIds = rows.map((invite) => invite.tripId);
-        const { data: tripRows, error: tripError } = await supabase
-          .from("Trip")
-          .select("id, name, createdById")
-          .in("id", tripIds);
-        if (tripError) throw tripError;
-
-        const ownerIds = Array.from(
-          new Set((tripRows || []).map((trip) => trip.createdById).filter(Boolean))
-        );
-        let ownerMap = new Map();
-        if (ownerIds.length > 0) {
-          const { data: ownerRows, error: ownerError } = await supabase
-          .from("User")
-          .select("id, name, photoUrl, avatarColor")
-            .in("id", ownerIds);
-          if (ownerError) throw ownerError;
-          ownerMap = new Map((ownerRows || []).map((owner) => [owner.id, owner.name || "Trip owner"]));
-        }
-
-        const tripMap = new Map((tripRows || []).map((trip) => [trip.id, trip]));
-        const invitesWithTripName = rows.map((invite) => ({
-          ...invite,
-          tripName: tripMap.get(invite.tripId)?.name || "Trip invitation",
-          ownerName: ownerMap.get(tripMap.get(invite.tripId)?.createdById) || "Trip owner"
-        }));
-        setPendingInvites(invitesWithTripName);
-      } catch (inviteLoadError) {
-        console.error("Failed to load pending invites:", inviteLoadError);
-        setPendingInvites([]);
-      } finally {
-        setPendingInvitesLoading(false);
-      }
-    };
-
-    void loadPendingInvites();
-  }, [effectiveSession]);
-
-  useEffect(() => {
     if (!effectiveSession?.user?.id || !trips.length) {
       setTripCards([]);
       return;
     }
 
     const loadTripCardMeta = async () => {
+      setTripCardsLoading(true);
       try {
         const tripIds = trips.map((trip) => trip.id);
         const ownerIds = Array.from(new Set(trips.map((trip) => trip.createdById).filter(Boolean)));
@@ -162,7 +94,7 @@ export default function HomePage() {
         if (ownerIds.length > 0) {
           const { data: ownerRows, error: ownerError } = await supabase
           .from("User")
-          .select("id, name, photoUrl, avatarColor")
+          .select("id, name, avatarColor")
             .in("id", ownerIds);
           if (ownerError) throw ownerError;
           ownerMap = new Map((ownerRows || []).map((owner) => [owner.id, owner.name || "Trip owner"]));
@@ -182,24 +114,10 @@ export default function HomePage() {
         if (memberIds.length > 0) {
           const { data: memberUsers, error: memberUsersError } = await supabase
             .from("User")
-            .select("id, name")
+            .select("id, name, avatarColor")
             .in("id", memberIds);
           if (memberUsersError) throw memberUsersError;
           userMap = new Map((memberUsers || []).map((user) => [user.id, user]));
-        }
-
-        let inviteRows = [];
-        const { data: inviteData, error: inviteError } = await supabase
-          .from("PendingTripInvite")
-          .select("tripId, email")
-          .in("tripId", tripIds)
-          .eq("status", "pending");
-        if (inviteError) {
-          if (!String(inviteError.message || "").includes("PendingTripInvite")) {
-            throw inviteError;
-          }
-        } else {
-          inviteRows = inviteData || [];
         }
 
         const membersByTrip = new Map();
@@ -218,16 +136,9 @@ export default function HomePage() {
             pushMember(row.tripId, {
               id: user.id,
               name: user.name || "Traveler",
-              photoUrl: user.photoUrl,
               avatarColor: user.avatarColor
             });
           }
-        });
-
-        (inviteRows || []).forEach((invite) => {
-          const email = String(invite.email || "").trim();
-          if (!email) return;
-          pushMember(invite.tripId, { id: `invite:${email}`, name: email, photoUrl: "" });
         });
 
         const { data: roleRows, error: roleError } = await supabase
@@ -249,13 +160,11 @@ export default function HomePage() {
               ? {
                   id: ownerUser.id,
                   name: ownerMap.get(trip.createdById) || "Trip owner",
-                  photoUrl: ownerUser.photoUrl,
                   avatarColor: ownerUser.avatarColor
                 }
               : {
                   id: trip.createdById,
                   name: ownerMap.get(trip.createdById) || "Trip owner",
-                  photoUrl: "",
                   avatarColor: ""
                 };
             const uniqueMembers = [ownerMember, ...members].reduce((acc, member) => {
@@ -283,21 +192,42 @@ export default function HomePage() {
             canDelete: trip.createdById === effectiveSession.user.id
           }))
         );
+      } finally {
+        setTripCardsLoading(false);
       }
     };
 
     void loadTripCardMeta();
-  }, [effectiveSession, trips, profile?.photoUrl, profile?.avatarColor]);
+  }, [effectiveSession, trips, profile?.avatarColor]);
 
+  const handleTripCardClick = async (tripId) => {
+    if (!tripId) return;
+    setTripNavigationLoading(true);
+    setNavigationProgress(30);
+    
+    try {
+      await new Promise(resolve => setTimeout(resolve, 150));
+      setNavigationProgress(60);
+      
+      await new Promise(resolve => setTimeout(resolve, 150));
+      setNavigationProgress(90);
+      
+      await new Promise(resolve => setTimeout(resolve, 200));
+      setNavigationProgress(100);
+      
+      await new Promise(resolve => setTimeout(resolve, 200));
+      navigate(`/trips/${tripId}`);
+    } catch (error) {
+      console.error("Failed to navigate to trip", error);
+      setTripNavigationLoading(false);
+    }
+  };
 
   // If user is NOT logged in, show marketing home page
   if (sessionLoading) {
     return (
       <div className="min-h-screen bg-slate-50">
         <Header />
-        <div className="mx-auto flex max-w-6xl flex-col px-6 py-12">
-          <p className="text-sm text-slate-600">Loading...</p>
-        </div>
       </div>
     );
   }
@@ -322,6 +252,14 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <Header />
+      {tripNavigationLoading ? (
+        <div className="h-1 w-full overflow-hidden bg-slate-200">
+          <div
+            className="h-full bg-gradient-to-r from-ocean to-blue-500 transition-all"
+            style={{ width: `${navigationProgress}%` }}
+          />
+        </div>
+      ) : null}
       <div className="mx-auto flex max-w-6xl flex-col px-6 py-12">
         <header className="mb-10 flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -349,43 +287,40 @@ export default function HomePage() {
           </div>
         </header>
 
-        {pendingInvitesLoading ? <p className="mb-4 text-sm text-slate-600">Checking pending invites...</p> : null}
-        {pendingInvites.length > 0 ? (
-          <section className="mb-8">
-            <h2 className="text-lg font-semibold text-ink">Pending invitations</h2>
-            <p className="mt-1 text-sm text-slate-600">You have invites waiting for your response.</p>
-            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {pendingInvites.map((invite) => (
-                <div key={invite.id} className="rounded-3xl border border-slate-200 bg-white/90">
-                  <div className="h-40 rounded-t-3xl bg-gradient-to-br from-sky-100 via-indigo-100 to-rose-100" />
-                  <div className="flex flex-col gap-4 p-6">
-                    <div>
-                      <h3 className="truncate text-xl font-semibold tracking-tight text-ink">{invite.tripName}</h3>
-                      <p className="mt-2 text-sm font-semibold text-slate-500">Owner: {invite.ownerName}</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-500">
-                        Role: {invite.role === "editor" ? "Editor" : "Suggestor"}
-                      </p>
+        {tripsLoading || tripCardsLoading ? (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <div
+                key={`trip-skeleton-${index}`}
+                className="overflow-hidden rounded-3xl border border-slate-200 bg-white/90"
+              >
+                <div className="h-40 animate-pulse bg-slate-200" />
+                <div className="space-y-4 p-6">
+                  <div className="space-y-2">
+                    <div className="h-6 w-3/4 animate-pulse rounded bg-slate-200" />
+                    <div className="h-4 w-1/2 animate-pulse rounded bg-slate-100" />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="h-4 w-1/3 animate-pulse rounded bg-slate-100" />
+                    <div className="flex items-center -space-x-2">
+                      <div className="h-9 w-9 animate-pulse rounded-full border border-white bg-slate-200" />
+                      <div className="h-9 w-9 animate-pulse rounded-full border border-white bg-slate-200" />
+                      <div className="h-9 w-9 animate-pulse rounded-full border border-white bg-slate-200" />
                     </div>
-                    <Link
-                      to={`/trips/${invite.tripId}/invite`}
-                      className="w-full rounded-full bg-ink px-4 py-2 text-center text-xs font-semibold text-white shadow-sm hover:bg-slate-800"
-                    >
-                      Review invite
-                    </Link>
                   </div>
                 </div>
-              ))}
-            </div>
-          </section>
+              </div>
+            ))}
+          </div>
         ) : null}
-
-        {tripsLoading && <p className="text-sm text-slate-600">Loading trips...</p>}
         {error ? <p className="text-sm text-coral">{error}</p> : null}
-        <TripList
-          trips={tripCards.length ? tripCards : trips}
-          selectionMode={selectionMode}
-          openOnCardClick
-        />
+        {!tripsLoading && !tripCardsLoading ? (
+          <TripList
+            trips={tripCards.length ? tripCards : trips}
+            selectionMode={selectionMode}
+            onCardClick={handleTripCardClick}
+          />
+        ) : null}
       </div>
     </div>
   );

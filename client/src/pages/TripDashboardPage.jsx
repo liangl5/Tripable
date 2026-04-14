@@ -579,9 +579,8 @@ export default function TripDashboardPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50">
         <Header />
-        <div className="text-slate-600">Loading trip...</div>
       </div>
     );
   }

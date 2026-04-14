@@ -484,7 +484,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
   }, {});
 
   if (loading) {
-    return <div className="p-6 text-center text-slate-600">Loading itinerary...</div>;
+    return <div className="p-6" />;
   }
 
   return (

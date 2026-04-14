@@ -3,7 +3,6 @@ import {
   clearIdeaMeta,
   clearGeneratedItinerary,
   createItineraryDraft,
-  getGeneratedItinerary,
   hydrateIdea,
   hydrateIdeas,
   hydrateTrip,
@@ -12,9 +11,6 @@ import {
   pruneTripMeta,
   removeIdeaMeta,
   removeTripMeta,
-  saveGeneratedItinerary,
-  saveIdeaMeta,
-  saveTripMeta,
   slugify
 } from "./tripPlanning.js";
 
@@ -624,8 +620,6 @@ async function syncTripMetaPersistence(tripId, createdById, payload, options = {
 
   if (persisted) {
     pruneTripMeta(tripId, Object.keys(payload || {}));
-  } else if (options.allowLocalFallback !== false) {
-    saveTripMeta(tripId, payload);
   }
 
   return persisted;
@@ -975,19 +969,7 @@ async function migrateHydratedIdeas(tripId, viewerUserId, tripOwnerId, ideas) {
       if (persistedDetails) {
         removeIdeaMeta(tripId, idea.id);
       } else {
-        saveIdeaMeta(tripId, idea.id, {
-          entryType: payload.entryType,
-          parentIdeaId: payload.parentIdeaId,
-          mapQuery: payload.mapQuery,
-          coordinates: payload.coordinates,
-          photoUrl: payload.photoUrl,
-          photoAttributions: payload.photoAttributions,
-          listId: payload.listId,
-          tabId: payload.tabId,
-          costEstimate: payload.costEstimate,
-          listName: payload.category,
-          recommendationSource: payload.recommendationSource
-        });
+        console.warn("Idea details persistence skipped; details columns are missing.");
       }
     })
   );
@@ -1248,8 +1230,7 @@ export const api = {
     const formattedTrip = await formatTripDetails(trip, userId, members, leaders, availability, surveyDates);
 
     // NOTE: Legacy metadata persistence removed in v2.0
-    // Trip now uses normalized tables (TripDestination, List, Transaction) instead of JSONB
-    // Migration from localStorage happens at create time in createTrip()
+    // Trip now uses normalized tables (TripDestination, List, Transaction) instead of JSONB.
 
     return formattedTrip;
   },
@@ -1635,16 +1616,28 @@ export const api = {
   async sendTripInvites(payload) {
     const user = await getOrCreateUser();
     const shouldNotify = payload?.notify !== false;
-    const invitees = Array.isArray(payload?.invitees)
+    const inviteeObjects = Array.isArray(payload?.invitees)
       ? payload.invitees
           .map((invitee) => {
-            if (typeof invitee === "string") return invitee;
-            if (invitee && typeof invitee === "object") return invitee.email;
-            return "";
+            if (typeof invitee === "string") {
+              return { email: invitee, role: payload?.defaultRole };
+            }
+            if (invitee && typeof invitee === "object") {
+              return {
+                email: invitee.email,
+                role: invitee.role || payload?.defaultRole
+              };
+            }
+            return null;
           })
-          .map((email) => String(email || "").trim().toLowerCase())
           .filter(Boolean)
+          .map((invitee) => ({
+            email: String(invitee.email || "").trim().toLowerCase(),
+            role: invitee.role || "suggestor"
+          }))
+          .filter((invitee) => invitee.email)
       : [];
+    const invitees = inviteeObjects.map((invitee) => invitee.email);
 
     if (!payload?.tripId || !payload?.tripName || invitees.length === 0) {
       return {
@@ -1675,6 +1668,7 @@ export const api = {
         tripId: payload.tripId,
         tripName: payload.tripName,
         invitees,
+        inviteesDetailed: inviteeObjects,
         inviterName: user?.name || "A teammate",
         inviterUserId: user?.id || null,
         inviteUrl,
@@ -2158,19 +2152,7 @@ export const api = {
     if (persistedDetails) {
       removeIdeaMeta(tripId, ideaId);
     } else {
-      saveIdeaMeta(tripId, ideaId, {
-        entryType: payload.entryType,
-        parentIdeaId: payload.parentIdeaId || null,
-        mapQuery: payload.mapQuery,
-        coordinates: payload.coordinates || null,
-        photoUrl: payload.photoUrl || "",
-        photoAttributions: payload.photoAttributions || [],
-        listId: payload.listId || "",
-        tabId: payload.tabId || null,
-        costEstimate: payload.costEstimate ?? null,
-        listName: payload.category,
-        recommendationSource: payload.recommendationSource || null
-      });
+      console.warn("Idea details persistence skipped; details columns are missing.");
     }
 
     return formatIdeaWithPersistedDetails(tripId, idea, user.id, [], payload);
@@ -2212,19 +2194,7 @@ export const api = {
     if (persistedDetails) {
       removeIdeaMeta(tripId, ideaId);
     } else {
-      saveIdeaMeta(tripId, ideaId, {
-        entryType: payload.entryType,
-        parentIdeaId: payload.parentIdeaId || null,
-        mapQuery: payload.mapQuery,
-        coordinates: payload.coordinates || null,
-        photoUrl: payload.photoUrl || "",
-        photoAttributions: payload.photoAttributions || [],
-        listId: payload.listId || "",
-        tabId: payload.tabId || null,
-        costEstimate: payload.costEstimate ?? null,
-        listName: payload.category,
-        recommendationSource: payload.recommendationSource || null
-      });
+      console.warn("Idea details persistence skipped; details columns are missing.");
     }
 
     const { data: updatedIdea, error: updatedIdeaError } = await supabase
@@ -2360,15 +2330,10 @@ export const api = {
 
     const ideas = await this.getIdeas(tripId);
     const itinerary = createItineraryDraft(trip, ideas);
-    return saveGeneratedItinerary(tripId, itinerary);
+    return itinerary;
   },
 
   async getItinerary(tripId) {
-    const saved = getGeneratedItinerary(tripId);
-    if (saved) {
-      return saved;
-    }
-
     const { data: days } = await supabase
       .from("ItineraryDay")
       .select("*, items:ItineraryItem(*)")

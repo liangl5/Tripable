@@ -133,7 +133,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
   }, {});
 
   if (loading) {
-    return <div className="p-6 text-center text-slate-600">Loading transactions...</div>;
+    return <div className="p-6" />;
   }
 
   return (
