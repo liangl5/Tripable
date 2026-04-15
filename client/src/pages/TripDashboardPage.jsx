@@ -147,18 +147,8 @@ export default function TripDashboardPage() {
       }
     };
 
-        setFlashNotice({
-          kind: "trip_deleted",
-          name: deletedTripName,
-          message: "deleted",
-          createdAt: Date.now()
-        });
-        navigate("/");
-      input.focus();
-      input.setSelectionRange(0, input.value.length);
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [editTripNameOpen]);
+    loadTripData();
+  }, [tripId, currentUserId, navigate]);
 
   const handleCopyInviteLink = async () => {
     const inviteLink = `${window.location.origin}/trips/${tripId}/invite`;
@@ -507,15 +497,13 @@ export default function TripDashboardPage() {
       const deletedTripName = String(trip?.name || "Trip");
       await supabase.from("Trip").delete().eq("id", tripId);
       void trackEvent("trip_deleted_dashboard", { trip_id: tripId });
-      navigate("/", {
-        state: {
-          flashNotice: {
-            kind: "trip_deleted",
-            name: deletedTripName,
-            message: "deleted"
-          }
-        }
+      setFlashNotice({
+        kind: "trip_deleted",
+        name: deletedTripName,
+        message: "deleted",
+        createdAt: Date.now()
       });
+      navigate("/");
     } catch (error) {
       console.error("Failed to delete trip:", error);
       setActionStatus("Failed to delete trip.");

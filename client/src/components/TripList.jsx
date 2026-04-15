@@ -45,8 +45,6 @@ export default function TripList({
   const [deleteNotice, setDeleteNotice] = useState(null);
   const [deleteNoticeAt, setDeleteNoticeAt] = useState(0);
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [copyNotice, setCopyNotice] = useState(null);
-  const [copyNoticeAt, setCopyNoticeAt] = useState(0);
   const [copyStatus, setCopyStatus] = useState("");
   const [copyStatusAt, setCopyStatusAt] = useState(0);
   const [selectedTripIds, setSelectedTripIds] = useState(() => new Set());
@@ -107,12 +105,6 @@ export default function TripList({
   }, [deleteNotice]);
 
   useEffect(() => {
-    if (!copyNotice) return undefined;
-    const timer = setTimeout(() => setCopyNotice(null), 10000);
-    return () => clearTimeout(timer);
-  }, [copyNotice]);
-
-  useEffect(() => {
     if (!copyStatus) return undefined;
     const timer = setTimeout(() => setCopyStatus(""), 10000);
     return () => clearTimeout(timer);
@@ -165,7 +157,6 @@ export default function TripList({
     });
     setInviteStatus("");
     setDeleteNotice(null);
-    setCopyNotice(null);
     setRenameNotice(null);
     showCopyStatus(`“${trip.name || "Trip"}” deleted`);
   };
@@ -178,11 +169,6 @@ export default function TripList({
       message: "created",
       createdAt: Date.now()
     });
-    setCopyNotice({
-      id: trip.id,
-      name: trip.name || "Trip"
-    });
-    setCopyNoticeAt(nextToastTs());
   };
 
   const showCopyStatus = (message) => {
@@ -259,25 +245,6 @@ export default function TripList({
                   type="button"
                   className="ml-auto text-white/70 hover:text-white"
                   onClick={() => setDeleteNotice(null)}
-                  aria-label="Dismiss notification"
-                >
-                  ✕
-                </button>
-              </div>
-            )
-          }
-        : null,
-      copyNotice
-        ? {
-            key: "copy",
-            ts: copyNoticeAt,
-            node: (
-              <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
-                <span>Copy of “{copyNotice.name}” created</span>
-                <button
-                  type="button"
-                  className="ml-auto text-white/70 hover:text-white"
-                  onClick={() => setCopyNotice(null)}
                   aria-label="Dismiss notification"
                 >
                   ✕
