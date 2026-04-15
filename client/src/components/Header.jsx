@@ -19,6 +19,8 @@ export default function Header() {
   const [joinStatus, setJoinStatus] = useState("");
   const [avatarColorOverride, setAvatarColorOverride] = useState("");
   const [draftColor, setDraftColor] = useState("");
+  const [navigationLoading, setNavigationLoading] = useState(false);
+  const [navigationProgress, setNavigationProgress] = useState(0);
   const menuRef = useRef(null);
 
   const displayName = getDisplayName(profile, session);
@@ -105,6 +107,28 @@ export default function Header() {
     } catch (error) {
       console.error("Failed to join trip", error);
       setJoinStatus("");
+    }
+  };
+
+  const handleNavigateHome = async () => {
+    setNavigationLoading(true);
+    setNavigationProgress(30);
+    
+    try {
+      await new Promise(resolve => setTimeout(resolve, 150));
+      setNavigationProgress(60);
+      
+      await new Promise(resolve => setTimeout(resolve, 150));
+      setNavigationProgress(90);
+      
+      await new Promise(resolve => setTimeout(resolve, 200));
+      setNavigationProgress(100);
+      
+      await new Promise(resolve => setTimeout(resolve, 200));
+      navigate("/");
+    } catch (error) {
+      console.error("Failed to navigate", error);
+      setNavigationLoading(false);
     }
   };
 
@@ -219,14 +243,33 @@ export default function Header() {
   }, [session]);
 
   return (
-    <header className="relative z-[70] border-b border-slate-200 bg-[#1e4840]">
+    <>
+      <header className="relative z-[70] border-b border-slate-200 bg-[#1e4840]">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
-        <Link to="/" className="text-2xl font-extrabold tracking-tight text-[#ecf5e9]">
+        <button
+          type="button"
+          onClick={handleNavigateHome}
+          className="text-2xl font-extrabold tracking-tight text-[#ecf5e9] hover:underline"
+          aria-label="Home"
+        >
           Tripable
-        </Link>
+        </button>
 
         {session ? (
           <div className="relative flex items-center gap-2" ref={menuRef}>
+            <button
+              type="button"
+              className="text-base font-semibold text-[#ecf5e9] hover:underline"
+              aria-label="My Trips"
+              onClick={() => {
+                handleNavigateHome();
+                setIsProfileMenuOpen(false);
+                setIsNotificationOpen(false);
+              }}
+            >
+              My Trips
+            </button>
+
             <div className="relative">
               <button
                 type="button"
@@ -470,5 +513,14 @@ export default function Header() {
         )}
       </div>
     </header>
+    {navigationLoading ? (
+        <div className="h-1 w-full overflow-hidden bg-slate-200">
+          <div
+            className="h-full bg-gradient-to-r from-ocean to-blue-500 transition-all"
+            style={{ width: `${navigationProgress}%` }}
+          />
+        </div>
+      ) : null}
+    </>
   );
 }
