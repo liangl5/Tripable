@@ -55,6 +55,7 @@ export default function TripDashboardPage() {
   const leaveTrip = useTripStore((state) => state.leaveTrip);
   const leaveTripLoading = useTripStore((state) => state.leaveTripLoading);
   const sendTripInvites = useTripStore((state) => state.sendTripInvites);
+  const setFlashNotice = useTripStore((state) => state.setFlashNotice);
 
   const currentUserId = session?.user?.id;
 
@@ -146,24 +147,13 @@ export default function TripDashboardPage() {
       }
     };
 
-    loadTripData();
-  }, [tripId, navigate, currentUserId, loadIdeas]);
-
-  useEffect(() => {
-    if (!shareOpen || userRole !== "owner") return;
-    void loadPendingInvites();
-  }, [shareOpen, userRole]);
-
-  useEffect(() => {
-    if (!editTripNameOpen) return;
-    setTripNameDraft(String(trip?.name || ""));
-  }, [editTripNameOpen, trip?.name]);
-
-  useEffect(() => {
-    if (!editTripNameOpen) return;
-    const timer = setTimeout(() => {
-      const input = tripNameInputRef.current;
-      if (!input) return;
+        setFlashNotice({
+          kind: "trip_deleted",
+          name: deletedTripName,
+          message: "deleted",
+          createdAt: Date.now()
+        });
+        navigate("/");
       input.focus();
       input.setSelectionRange(0, input.value.length);
     }, 0);
@@ -427,7 +417,7 @@ export default function TripDashboardPage() {
       }
 
       let pendingCreated = 0;
-      const newlyNotifiedEmails = [];
+      const newlyNotifiedInvitees = [];
 
       for (const invite of eligibleInvites) {
         const { error: pendingInsertError } = await supabase
@@ -444,15 +434,18 @@ export default function TripDashboardPage() {
           ]);
         if (pendingInsertError) throw pendingInsertError;
         pendingCreated += 1;
-        newlyNotifiedEmails.push(invite.email);
+        newlyNotifiedInvitees.push({
+          email: invite.email,
+          role: invite.role === "editor" ? "editor" : "suggestor"
+        });
       }
 
       let mailSummary = "";
-      if (notifyInvitees && newlyNotifiedEmails.length > 0) {
+      if (notifyInvitees && newlyNotifiedInvitees.length > 0) {
         const result = await sendTripInvites({
           tripId,
           tripName: trip.name,
-          invitees: newlyNotifiedEmails,
+          invitees: newlyNotifiedInvitees,
           inviteUrl: `${window.location.origin}/trips/${tripId}/invite`,
           notify: notifyInvitees
         });
@@ -511,9 +504,18 @@ export default function TripDashboardPage() {
 
     try {
       setActionLoading(true);
+      const deletedTripName = String(trip?.name || "Trip");
       await supabase.from("Trip").delete().eq("id", tripId);
       void trackEvent("trip_deleted_dashboard", { trip_id: tripId });
-      navigate("/");
+      navigate("/", {
+        state: {
+          flashNotice: {
+            kind: "trip_deleted",
+            name: deletedTripName,
+            message: "deleted"
+          }
+        }
+      });
     } catch (error) {
       console.error("Failed to delete trip:", error);
       setActionStatus("Failed to delete trip.");

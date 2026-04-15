@@ -22,6 +22,7 @@ export const useTripStore = create((set, get) => ({
   surveyDatesSaving: false,
   leadersSaving: false,
   itineraryLoading: false,
+  flashNotice: null,
   error: null,
 
   loadTrips: async () => {
@@ -64,6 +65,14 @@ export const useTripStore = create((set, get) => ({
       set({ error: error.message, createTripLoading: false });
       throw error;
     }
+  },
+
+  setFlashNotice: (flashNotice) => {
+    set({ flashNotice });
+  },
+
+  clearFlashNotice: () => {
+    set({ flashNotice: null });
   },
 
   sendTripInvites: async (payload) => {

@@ -19,13 +19,19 @@ const getInitials = (name) => {
   return parts[0][0].toUpperCase();
 };
 
-export default function TripList({ trips, selectionMode = false, openOnCardClick = false, onCardClick = null }) {
+export default function TripList({
+  trips,
+  selectionMode = false,
+  openOnCardClick = false,
+  onCardClick = null
+}) {
   const navigate = useNavigate();
   const { profile } = useUserProfile();
   const duplicateTrip = useTripStore((state) => state.duplicateTrip);
   const updateTripMeta = useTripStore((state) => state.updateTripMeta);
   const deleteTrip = useTripStore((state) => state.deleteTrip);
   const leaveTrip = useTripStore((state) => state.leaveTrip);
+  const setFlashNotice = useTripStore((state) => state.setFlashNotice);
   const [menuOpenId, setMenuOpenId] = useState(null);
   const [renameTrip, setRenameTrip] = useState(null);
   const [renameValue, setRenameValue] = useState("");
@@ -49,6 +55,14 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
   const [shareMenuPinnedId, setShareMenuPinnedId] = useState(null);
   const [lastShareTrip, setLastShareTrip] = useState(null);
   const menuRef = useRef(null);
+  const toastTsRef = useRef(0);
+
+  const nextToastTs = () => {
+    const now = Date.now();
+    const next = now > toastTsRef.current ? now : toastTsRef.current + 1;
+    toastTsRef.current = next;
+    return next;
+  };
 
   useEffect(() => {
     if (!menuOpenId) return undefined;
@@ -129,7 +143,7 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
         from: previousName,
         to: nextName
       });
-      setRenameNoticeAt(Date.now());
+      setRenameNoticeAt(nextToastTs());
     } catch (error) {
       console.error("Failed to rename trip", error);
     } finally {
@@ -139,29 +153,164 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
 
   const showInviteStatus = (message) => {
     setInviteStatus(message);
-    setInviteStatusAt(Date.now());
+    setInviteStatusAt(nextToastTs());
   };
 
   const showDeleteNotice = (trip) => {
-    setDeleteNotice({
-      id: trip.id,
-      name: trip.name || "Trip"
+    setFlashNotice({
+      kind: "trip_deleted",
+      name: trip.name || "Trip",
+      message: "deleted",
+      createdAt: Date.now()
     });
-    setDeleteNoticeAt(Date.now());
+    setInviteStatus("");
+    setDeleteNotice(null);
+    setCopyNotice(null);
+    setRenameNotice(null);
+    showCopyStatus(`“${trip.name || "Trip"}” deleted`);
   };
 
   const showCopyNotice = (trip) => {
     if (!trip?.id) return;
+    setFlashNotice({
+      kind: "trip_copied",
+      name: trip.name || "Trip",
+      message: "created",
+      createdAt: Date.now()
+    });
     setCopyNotice({
       id: trip.id,
       name: trip.name || "Trip"
     });
-    setCopyNoticeAt(Date.now());
+    setCopyNoticeAt(nextToastTs());
   };
 
   const showCopyStatus = (message) => {
     setCopyStatus(message);
-    setCopyStatusAt(Date.now());
+    setCopyStatusAt(nextToastTs());
+  };
+
+  const renderNotifications = () => {
+    const notifications = [
+      inviteStatus
+        ? {
+            key: "invite",
+            ts: inviteStatusAt,
+            node: (
+              <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
+                <span>{inviteStatus}</span>
+                {lastShareTrip ? (
+                  <button
+                    type="button"
+                    className="text-base font-semibold text-sky-200 underline hover:text-white"
+                    onClick={() => {
+                      setShareTrip(lastShareTrip);
+                      setInviteStatus("");
+                      setInviteStatusAt(0);
+                    }}
+                  >
+                    Manage access
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="ml-auto text-white/70 hover:text-white"
+                  onClick={() => {
+                    setInviteStatus("");
+                    setInviteStatusAt(0);
+                  }}
+                  aria-label="Dismiss notification"
+                >
+                  ✕
+                </button>
+              </div>
+            )
+          }
+        : null,
+      renameNotice
+        ? {
+            key: "rename",
+            ts: renameNoticeAt || 0,
+            node: (
+              <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
+                <span>
+                  “{renameNotice.from}” renamed to “{renameNotice.to}”
+                </span>
+                <button
+                  type="button"
+                  className="ml-auto text-white/70 hover:text-white"
+                  onClick={() => setRenameNotice(null)}
+                  aria-label="Dismiss notification"
+                >
+                  ✕
+                </button>
+              </div>
+            )
+          }
+        : null,
+      deleteNotice
+        ? {
+            key: "delete",
+            ts: deleteNoticeAt,
+            node: (
+              <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
+                <span>“{deleteNotice.name}” deleted</span>
+                <button
+                  type="button"
+                  className="ml-auto text-white/70 hover:text-white"
+                  onClick={() => setDeleteNotice(null)}
+                  aria-label="Dismiss notification"
+                >
+                  ✕
+                </button>
+              </div>
+            )
+          }
+        : null,
+      copyNotice
+        ? {
+            key: "copy",
+            ts: copyNoticeAt,
+            node: (
+              <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
+                <span>Copy of “{copyNotice.name}” created</span>
+                <button
+                  type="button"
+                  className="ml-auto text-white/70 hover:text-white"
+                  onClick={() => setCopyNotice(null)}
+                  aria-label="Dismiss notification"
+                >
+                  ✕
+                </button>
+              </div>
+            )
+          }
+        : null,
+      copyStatus
+        ? {
+            key: "copy-status",
+            ts: copyStatusAt,
+            node: (
+              <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
+                <span>{copyStatus}</span>
+                <button
+                  type="button"
+                  className="ml-auto text-white/70 hover:text-white"
+                  onClick={() => setCopyStatus("")}
+                  aria-label="Dismiss notification"
+                >
+                  ✕
+                </button>
+              </div>
+            )
+          }
+        : null
+    ]
+      .filter(Boolean)
+      .sort((a, b) => b.ts - a.ts);
+
+    const latest = notifications[0];
+    return latest ? <div className="fixed bottom-4 right-6 z-[70]">{latest.node}</div> : null;
   };
 
   const visibleTrips = useMemo(() => trips, [trips]);
@@ -230,10 +379,13 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
 
   if (!visibleTrips.length) {
     return (
-      <div className="rounded-3xl border border-dashed border-slate-300 bg-white/60 p-8 text-center">
-        <p className="text-lg font-semibold">No trips yet</p>
-        <p className="mt-2 text-sm text-slate-500">Create a trip to start collaborating.</p>
-      </div>
+      <>
+        <div className="rounded-3xl border border-dashed border-slate-300 bg-white/60 p-8 text-center">
+          <p className="text-lg font-semibold">No trips yet</p>
+          <p className="mt-2 text-sm text-slate-500">Create a trip to start collaborating.</p>
+        </div>
+        {renderNotifications()}
+      </>
     );
   }
 
@@ -674,133 +826,7 @@ export default function TripList({ trips, selectionMode = false, openOnCardClick
         </div>
       ) : null}
 
-      {(() => {
-        const notifications = [
-          inviteStatus
-            ? {
-                key: "invite",
-                ts: inviteStatusAt,
-                node: (
-                  <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
-                    <span>{inviteStatus}</span>
-                    {lastShareTrip ? (
-                      <button
-                        type="button"
-                        className="text-base font-semibold text-sky-200 underline hover:text-white"
-                        onClick={() => {
-                          setShareTrip(lastShareTrip);
-                          setInviteStatus("");
-                          setInviteStatusAt(0);
-                        }}
-                      >
-                        Manage access
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="ml-auto text-white/70 hover:text-white"
-                      onClick={() => {
-                        setInviteStatus("");
-                        setInviteStatusAt(0);
-                      }}
-                      aria-label="Dismiss notification"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                )
-              }
-            : null,
-          renameNotice
-            ? {
-                key: "rename",
-                ts: renameNoticeAt || 0,
-                node: (
-                  <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
-                    <span>
-                      “{renameNotice.from}” renamed to “{renameNotice.to}”
-                    </span>
-                    <button
-                      type="button"
-                      className="ml-auto text-white/70 hover:text-white"
-                      onClick={() => setRenameNotice(null)}
-                      aria-label="Dismiss notification"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                )
-              }
-            : null,
-          deleteNotice
-            ? {
-                key: "delete",
-                ts: deleteNoticeAt,
-                node: (
-                  <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
-                    <span>“{deleteNotice.name}” deleted</span>
-                    <button
-                      type="button"
-                      className="ml-auto text-white/70 hover:text-white"
-                      onClick={() => setDeleteNotice(null)}
-                      aria-label="Dismiss notification"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                )
-              }
-            : null
-          ,
-          copyNotice
-            ? {
-                key: "copy",
-                ts: copyNoticeAt,
-                node: (
-                  <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
-                    <span>Copy of “{copyNotice.name}” created</span>
-                    <button
-                      type="button"
-                      className="ml-auto text-white/70 hover:text-white"
-                      onClick={() => setCopyNotice(null)}
-                      aria-label="Dismiss notification"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                )
-              }
-            : null
-          ,
-          copyStatus
-            ? {
-                key: "copy-status",
-                ts: copyStatusAt,
-                node: (
-                  <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
-                    <span>{copyStatus}</span>
-                    <button
-                      type="button"
-                      className="ml-auto text-white/70 hover:text-white"
-                      onClick={() => setCopyStatus("")}
-                      aria-label="Dismiss notification"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                )
-              }
-            : null
-        ]
-          .filter(Boolean)
-          .sort((a, b) => b.ts - a.ts);
-
-        const latest = notifications[0];
-
-        return latest ? (
-          <div className="fixed bottom-4 right-6 z-[70]">{latest.node}</div>
-        ) : null;
-      })()}
+      {renderNotifications()}
     </>
   );
 }

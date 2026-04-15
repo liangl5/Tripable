@@ -21,6 +21,8 @@ export default function HomePage() {
   const loadTrips = useTripStore((state) => state.loadTrips);
   const tripsLoading = useTripStore((state) => state.tripsLoading);
   const error = useTripStore((state) => state.error);
+  const flashNotice = useTripStore((state) => state.flashNotice);
+  const clearFlashNotice = useTripStore((state) => state.clearFlashNotice);
   const [tripCards, setTripCards] = useState([]);
   const [tripCardsLoading, setTripCardsLoading] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -200,6 +202,12 @@ export default function HomePage() {
     void loadTripCardMeta();
   }, [effectiveSession, trips, profile?.avatarColor]);
 
+  useEffect(() => {
+    if (!flashNotice) return undefined;
+    const timer = setTimeout(() => clearFlashNotice(), 10000);
+    return () => clearTimeout(timer);
+  }, [flashNotice, clearFlashNotice]);
+
   const handleTripCardClick = async (tripId) => {
     if (!tripId) return;
     setTripNavigationLoading(true);
@@ -322,6 +330,25 @@ export default function HomePage() {
           />
         ) : null}
       </div>
+      {flashNotice ? (
+        <div className="fixed bottom-4 right-6 z-[80] inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
+          <span>
+            {flashNotice.kind === "trip_deleted"
+              ? `“${flashNotice.name || "Trip"}” deleted`
+              : flashNotice.kind === "trip_copied"
+                ? `Copy of “${flashNotice.name || "Trip"}” created`
+                : flashNotice.message || "Done"}
+          </span>
+          <button
+            type="button"
+            className="ml-auto text-white/70 hover:text-white"
+            onClick={() => clearFlashNotice()}
+            aria-label="Dismiss notification"
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

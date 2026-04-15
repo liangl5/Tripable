@@ -5,12 +5,11 @@ import { api } from "../lib/api.js";
 import { useSession, useUserProfile } from "../App";
 import { getDisplayName } from "../lib/userProfile.js";
 import { trackEvent } from "../lib/analytics.js";
-import TripableLogoLink from "./TripableLogoLink.jsx";
 import { AVATAR_COLOR_CHOICES, getAvatarColor } from "../lib/avatarColors.js";
 
 export default function Header() {
   const session = useSession();
-  const { profile, refreshProfile } = useUserProfile();
+  const { profile, profileLoading, refreshProfile } = useUserProfile();
   const navigate = useNavigate();
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
@@ -24,7 +23,10 @@ export default function Header() {
 
   const displayName = getDisplayName(profile, session);
   const userId = profile?.id || session?.user?.id;
-  const avatarColor = avatarColorOverride || profile?.avatarColor || getAvatarColor(userId);
+  const avatarColor =
+    avatarColorOverride ||
+    profile?.avatarColor ||
+    (profileLoading ? "bg-slate-200 text-slate-700" : getAvatarColor(userId));
   const pendingInviteCount = pendingInvites.length;
 
   const resetAvatarDraft = () => {
@@ -217,16 +219,18 @@ export default function Header() {
   }, [session]);
 
   return (
-    <header className="relative z-[70] border-b border-slate-200 bg-white">
+    <header className="relative z-[70] border-b border-slate-200 bg-[#1e4840]">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
-        <TripableLogoLink className="w-fit" compact />
+        <Link to="/" className="text-2xl font-extrabold tracking-tight text-[#ecf5e9]">
+          Tripable
+        </Link>
 
         {session ? (
           <div className="relative flex items-center gap-2" ref={menuRef}>
             <div className="relative">
               <button
                 type="button"
-                className="relative flex h-10 w-10 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-ink"
+                className="relative flex h-10 w-10 items-center justify-center rounded-full text-[#ecf5e9] hover:bg-[#ecf5e9]/20 hover:text-[#ecf5e9]"
                 aria-label="Notifications"
                 onClick={() => {
                   setIsNotificationOpen((current) => !current);

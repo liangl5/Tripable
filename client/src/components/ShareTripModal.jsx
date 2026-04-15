@@ -581,16 +581,80 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
                       setInviteLoading(true);
                       setInviteStatus("");
                       try {
+                        const memberEmailSet = new Set(
+                          accessMembers
+                            .map((member) => String(member.email || "").trim().toLowerCase())
+                            .filter(Boolean)
+                        );
+
+                        const candidateRows = normalizedRows.filter((row) => !memberEmailSet.has(row.email));
+                        if (!candidateRows.length) {
+                          setInviteStatus("All invitees are already members.");
+                          return;
+                        }
+
+                        const candidateEmails = candidateRows.map((row) => row.email);
+                        let existingPendingSet = new Set();
+                        const { data: existingPendingRows, error: existingPendingError } = await supabase
+                          .from("PendingTripInvite")
+                          .select("email")
+                          .eq("tripId", trip.id)
+                          .in("email", candidateEmails)
+                          .eq("status", "pending");
+
+                        if (existingPendingError && !String(existingPendingError.message || "").includes("PendingTripInvite")) {
+                          throw existingPendingError;
+                        }
+
+                        if (!existingPendingError) {
+                          existingPendingSet = new Set(
+                            (existingPendingRows || [])
+                              .map((row) => String(row.email || "").trim().toLowerCase())
+                              .filter(Boolean)
+                          );
+                        }
+
+                        const rowsToCreate = candidateRows.filter((row) => !existingPendingSet.has(row.email));
+                        if (!rowsToCreate.length) {
+                          setInviteStatus("All invitees already have pending invites.");
+                          return;
+                        }
+
+                        const pendingRows = rowsToCreate.map((invitee) => ({
+                          id: crypto.randomUUID(),
+                          tripId: trip.id,
+                          email: invitee.email,
+                          role: invitee.role === "editor" ? "editor" : "suggestor",
+                          status: "pending",
+                          createdById: session?.user?.id || null
+                        }));
+
+                        const { error: pendingInsertError } = await supabase
+                          .from("PendingTripInvite")
+                          .insert(pendingRows);
+
+                        const missingPendingInviteTable =
+                          pendingInsertError && String(pendingInsertError.message || "").includes("PendingTripInvite");
+                        if (pendingInsertError && !missingPendingInviteTable) {
+                          throw pendingInsertError;
+                        }
+
                         await sendTripInvites({
                           tripId: trip.id,
                           tripName: trip.name || "Trip",
-                          invitees: normalizedRows.map(({ email, role }) => ({ email, role })),
+                          invitees: rowsToCreate.map(({ email, role }) => ({ email, role })),
                           inviteUrl: `${window.location.origin}/trips/${trip.id}/invite`,
                           notify: notifyInvites
                         });
-                        setInviteStatus("Invites sent.");
+
+                        if (missingPendingInviteTable) {
+                          setInviteStatus("Invites sent, but pending invite tracking is unavailable in this environment.");
+                        } else {
+                          setInviteStatus("Invites sent.");
+                        }
                         setInviteRows([{ email: "", role: "editor" }]);
                         setInviteErrors({});
+                        await loadAccessMembers();
                       } catch (error) {
                         setInviteStatus(error?.message || "Unable to send invites.");
                       } finally {
