@@ -20,6 +20,7 @@ export default function HomePage() {
   const hasLoadedTripsRef = useRef(false);
   const trips = useTripStore((state) => state.trips);
   const loadTrips = useTripStore((state) => state.loadTrips);
+  const loadIdeas = useTripStore((state) => state.loadIdeas);
   const tripsLoading = useTripStore((state) => state.tripsLoading);
   const error = useTripStore((state) => state.error);
   const flashNotice = useTripStore((state) => state.flashNotice);
@@ -278,25 +279,102 @@ export default function HomePage() {
         : "Create a trip to start collaborating.";
 
   const handleTripCardClick = async (tripId) => {
-    if (!tripId) return;
+    if (!tripId || !currentUserId) return;
     setTripNavigationLoading(true);
-    setNavigationProgress(30);
-    
+    setNavigationProgress(15);
+
     try {
-      await new Promise(resolve => setTimeout(resolve, 150));
-      setNavigationProgress(60);
-      
-      await new Promise(resolve => setTimeout(resolve, 150));
-      setNavigationProgress(90);
-      
-      await new Promise(resolve => setTimeout(resolve, 200));
+      const { data: tripData, error: tripError } = await supabase
+        .from("Trip")
+        .select("*")
+        .eq("id", tripId)
+        .single();
+
+      if (tripError || !tripData) throw tripError || new Error("Trip not found");
+      setNavigationProgress(35);
+
+      const [
+        { data: memberRelations, error: memberRelationsError },
+        { data: roleRows, error: roleRowsError },
+        pendingInviteResult
+      ] = await Promise.all([
+        supabase
+          .from("TripMember")
+          .select("userId")
+          .eq("tripId", tripId),
+        supabase
+          .from("UserTripRole")
+          .select("userId, role")
+          .eq("tripId", tripId),
+        supabase
+          .from("PendingTripInvite")
+          .select("id, email, role, status, createdAt")
+          .eq("tripId", tripId)
+          .eq("status", "pending")
+          .order("createdAt", { ascending: false })
+      ]);
+
+      if (memberRelationsError) throw memberRelationsError;
+      if (roleRowsError) throw roleRowsError;
+
+      const memberIds = Array.from(
+        new Set([tripData.createdById, ...(memberRelations || []).map((member) => member.userId)].filter(Boolean))
+      );
+
+      let membersData = [];
+      if (memberIds.length) {
+        const { data, error: membersError } = await supabase
+          .from("User")
+          .select("id, name, email")
+          .in("id", memberIds);
+        if (membersError) throw membersError;
+        membersData = data || [];
+      }
+
+      const roleMap = {};
+      (roleRows || []).forEach((row) => {
+        roleMap[row.userId] = row.userId === tripData.createdById
+          ? "owner"
+          : row.role === "editor"
+            ? "editor"
+            : "suggestor";
+      });
+      roleMap[tripData.createdById] = "owner";
+      const derivedRole = tripData.createdById === currentUserId
+        ? "owner"
+        : roleMap[currentUserId] || "suggestor";
+
+      let pendingInvites = [];
+      if (pendingInviteResult.error) {
+        if (!String(pendingInviteResult.error.message || "").includes("PendingTripInvite")) {
+          throw pendingInviteResult.error;
+        }
+      } else {
+        pendingInvites = pendingInviteResult.data || [];
+      }
+
+      setNavigationProgress(70);
+      await loadIdeas(tripId);
       setNavigationProgress(100);
-      
-      await new Promise(resolve => setTimeout(resolve, 200));
-      navigate(`/trips/${tripId}`);
+      await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise((resolve) => setTimeout(resolve, 140));
+
+      navigate(`/trips/${tripId}`, {
+        state: {
+          prefetchedTripData: {
+            trip: tripData,
+            tripMembers: membersData,
+            memberRoles: roleMap,
+            userRole: derivedRole,
+            existingPendingInvites: pendingInvites
+          }
+        }
+      });
     } catch (error) {
       console.error("Failed to navigate to trip", error);
+    } finally {
       setTripNavigationLoading(false);
+      setNavigationProgress(0);
     }
   };
 
@@ -330,9 +408,9 @@ export default function HomePage() {
     <div className="flex h-screen flex-col overflow-hidden bg-[#ecf5e9]">
       <Header />
       {tripNavigationLoading ? (
-        <div className="h-1 w-full overflow-hidden bg-slate-200">
+        <div className="h-1.5 w-full overflow-hidden bg-slate-200">
           <div
-            className="h-full bg-gradient-to-r from-ocean to-blue-500 transition-all"
+            className="h-full bg-gradient-to-r from-[#fcae4e] to-[#f7942e] transition-all"
             style={{ width: `${navigationProgress}%` }}
           />
         </div>
@@ -413,7 +491,7 @@ export default function HomePage() {
             <button
               type="button"
               onClick={() => setSelectionMode((current) => !current)}
-              className="rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-[#1e4840] shadow-card hover:border-[#1e4840] hover:text-[#1e4840] disabled:opacity-60"
+              className="rounded-full border border-transparent bg-white px-5 py-3 text-sm font-semibold text-[#1e4840] hover:border-[#1e4840] hover:text-[#1e4840] disabled:opacity-60"
               disabled={!filteredTrips.length}
             >
               {selectionMode ? "Done" : "Select"}
@@ -465,7 +543,7 @@ export default function HomePage() {
         <div className="fixed bottom-4 right-6 z-[80] inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
           <span>
             {flashNotice.kind === "trip_deleted"
-              ? `“${flashNotice.name || "Trip"}” deleted`
+              ? flashNotice.message || `“${flashNotice.name || "Trip"}” deleted`
               : flashNotice.kind === "trip_copied"
                 ? `Copy of “${flashNotice.name || "Trip"}” created`
                 : flashNotice.message || "Done"}

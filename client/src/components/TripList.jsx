@@ -153,17 +153,25 @@ export default function TripList({
     setInviteStatusAt(nextToastTs());
   };
 
-  const showDeleteNotice = (trip) => {
+  const showDeleteNotice = (tripOrTrips) => {
+    const tripsDeleted = Array.isArray(tripOrTrips) ? tripOrTrips.filter(Boolean) : [tripOrTrips].filter(Boolean);
+    if (!tripsDeleted.length) return;
+    const isMultiple = tripsDeleted.length > 1;
+    const primaryTrip = tripsDeleted[0];
+    const summary = isMultiple ? `${tripsDeleted.length} trips deleted` : `“${primaryTrip.name || "Trip"}” deleted`;
     setFlashNotice({
       kind: "trip_deleted",
-      name: trip.name || "Trip",
-      message: "deleted",
+      name: isMultiple ? `${tripsDeleted.length} trips` : primaryTrip.name || "Trip",
+      message: summary,
       createdAt: Date.now()
     });
+    setDeleteNotice({
+      name: isMultiple ? `${tripsDeleted.length} trips` : primaryTrip.name || "Trip",
+      message: summary
+    });
+    setDeleteNoticeAt(nextToastTs());
     setInviteStatus("");
-    setDeleteNotice(null);
     setRenameNotice(null);
-    showCopyStatus(`“${trip.name || "Trip"}” deleted`);
   };
 
   const showCopyNotice = (trip) => {
@@ -245,7 +253,7 @@ export default function TripList({
             ts: deleteNoticeAt,
             node: (
               <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
-                <span>“{deleteNotice.name}” deleted</span>
+                <span>{deleteNotice.message || `“${deleteNotice.name}” deleted`}</span>
                 <button
                   type="button"
                   className="ml-auto text-white/70 hover:text-white"
@@ -325,20 +333,11 @@ export default function TripList({
   const handleBulkDelete = () => {
     const ids = Array.from(selectedTripIds);
     if (!ids.length) return;
-    void Promise.all(
-      ids.map(async (tripId) => {
-        const trip = trips.find((item) => item.id === tripId);
-        if (!trip) return;
-        try {
-          await deleteTrip(trip.id);
-          showDeleteNotice(trip);
-        } catch (error) {
-          console.error("Failed to delete trip", error);
-          showInviteStatus("Unable to delete trip.");
-        }
-      })
-    );
-    setSelectedTripIds(new Set());
+    setDeleteConfirm({
+      actionType: "delete",
+      ids,
+      name: ids.length === 1 ? trips.find((item) => item.id === ids[0])?.name || "this trip" : `${ids.length} selected trips`
+    });
   };
 
   const toggleSelectAll = () => {
@@ -364,7 +363,7 @@ export default function TripList({
   return (
     <>
       {selectionMode ? (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-[#1e4840]">
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-[#1e4840]">
           <span>{selectedTripIds.size} selected</span>
           <button
             type="button"
@@ -385,7 +384,7 @@ export default function TripList({
             type="button"
             onClick={handleBulkDelete}
             disabled={!selectedTripIds.size}
-            className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-semibold text-coral hover:bg-rose-100 disabled:opacity-60"
+            className="rounded-full border border-[#fc4e51] bg-[#fc4e51] px-4 py-2 text-xs font-semibold text-white hover:bg-[#e64548] disabled:opacity-60"
           >
             Delete selected
           </button>
@@ -402,10 +401,13 @@ export default function TripList({
               selectionMode ? "cursor-pointer" : ""
             } ${
               !selectionMode && (openOnCardClick || onCardClick) ? "cursor-pointer hover:bg-slate-50" : ""
-            } ${selectionMode && selectedTripIds.has(trip.id) ? "ring-2 ring-[#1e4840]/30" : ""}`}
+            } ${selectionMode && selectedTripIds.has(trip.id) ? "ring-1 ring-[#1e4840]" : ""}`}
             onClickCapture={
               selectionMode
                 ? (event) => {
+                    if (event.target.closest("[data-trip-select-checkbox]")) {
+                      return;
+                    }
                     event.preventDefault();
                     event.stopPropagation();
                     toggleTripSelection(trip.id);
@@ -430,6 +432,41 @@ export default function TripList({
               <img src={planeImage} alt="" className="h-full w-full object-cover object-right" aria-hidden="true" />
             </div>
             <div className="pointer-events-none absolute left-0 right-0 top-0 h-20 rounded-t-3xl bg-gradient-to-b from-[#1e4840]/20 via-[#1e4840]/10 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+            {selectionMode ? (
+              <label
+                className="absolute right-4 top-4 z-20 inline-flex h-10 w-10 items-center justify-center"
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <input
+                  data-trip-select-checkbox
+                  type="checkbox"
+                  checked={selectedTripIds.has(trip.id)}
+                  onChange={() => toggleTripSelection(trip.id)}
+                  className="sr-only"
+                />
+                <span className={`flex h-6 w-6 items-center justify-center rounded-full border transition ${
+                  selectedTripIds.has(trip.id)
+                    ? "border-[#1e4840] bg-[#1e4840]"
+                    : "border-[#1e4840] bg-transparent"
+                }`}>
+                  <svg
+                    viewBox="0 0 24 24"
+                    className={`h-4 w-4 transition ${
+                      selectedTripIds.has(trip.id) ? "text-white opacity-100" : "text-[#1e4840] opacity-100"
+                    }`}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M5 12l4 4 10-10" />
+                  </svg>
+                </span>
+              </label>
+            ) : null}
             {!selectionMode ? (
               <div
                 className="absolute left-4 right-4 top-3 flex items-center justify-between"
@@ -783,12 +820,18 @@ export default function TripList({
               </>
             ) : null}
             <h3 className="text-lg font-semibold text-ink">
-              {deleteConfirm.actionType === "leave" ? "Leave trip?" : "Delete trip?"}
+              {deleteConfirm.actionType === "leave"
+                ? "Leave trip?"
+                : deleteConfirm.ids?.length
+                  ? `Delete ${deleteConfirm.ids.length} selected trips?`
+                  : "Delete trip?"}
             </h3>
             <p className="mt-2 text-sm text-slate-600">
               {deleteConfirm.actionType === "leave"
                 ? `Leave \"${deleteConfirm.name || "this trip"}\"? You will need a new invite link to rejoin.`
-                : `Delete \"${deleteConfirm.name || "this trip"}\"? This cannot be undone.`}
+                : deleteConfirm.ids?.length
+                  ? `Delete these ${deleteConfirm.ids.length} selected trips? This cannot be undone.`
+                  : `Delete \"${deleteConfirm.name || "this trip"}\"? This cannot be undone.`}
             </p>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
@@ -806,8 +849,15 @@ export default function TripList({
                       await leaveTrip(deleteConfirm.id);
                       showInviteStatus("Left trip.");
                     } else {
-                      await deleteTrip(deleteConfirm.id);
-                      showDeleteNotice(deleteConfirm);
+                      const idsToDelete = deleteConfirm.ids?.length ? deleteConfirm.ids : [deleteConfirm.id];
+                      const tripsToDelete = idsToDelete
+                        .map((tripId) => trips.find((item) => item.id === tripId))
+                        .filter(Boolean);
+                      await Promise.all(tripsToDelete.map(async (trip) => deleteTrip(trip.id)));
+                      showDeleteNotice(tripsToDelete.length > 1 ? tripsToDelete : tripsToDelete[0]);
+                      if (deleteConfirm.ids?.length) {
+                        setSelectedTripIds(new Set());
+                      }
                     }
                     setDeleteConfirm(null);
                   } catch (error) {
@@ -822,8 +872,10 @@ export default function TripList({
                     setDeleteLoading(false);
                   }
                 }}
-                className={`rounded-xl px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60 ${
-                  deleteConfirm.actionType === "leave" ? "bg-amber-500 hover:bg-amber-600" : "bg-coral hover:bg-red-600"
+                className={`rounded-xl px-3 py-1.5 text-sm font-semibold disabled:opacity-60 ${
+                  deleteConfirm.actionType === "leave"
+                    ? "bg-amber-500 text-white hover:bg-amber-600"
+                    : "bg-[#fc4e51] text-white hover:bg-[#e64548]"
                 }`}
                 disabled={deleteLoading}
               >

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import Header from "../components/Header.jsx";
 import TabManager from "../components/TabManager.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
@@ -28,6 +28,7 @@ function normalizeRole(role) {
 
 export default function TripDashboardPage() {
   const { tripId } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const session = useSession();
   const [trip, setTrip] = useState(null);
@@ -83,6 +84,21 @@ export default function TripDashboardPage() {
   useEffect(() => {
     if (!currentUserId) {
       navigate("/auth");
+      return;
+    }
+
+    const prefetchedTripData = location.state?.prefetchedTripData;
+    if (prefetchedTripData?.trip?.id === tripId) {
+      setTrip(prefetchedTripData.trip);
+      setTripMembers(prefetchedTripData.tripMembers || []);
+      setMemberRoles(prefetchedTripData.memberRoles || {});
+      setUserRole(prefetchedTripData.userRole || "suggestor");
+      setExistingPendingInvites(prefetchedTripData.existingPendingInvites || []);
+      setLoading(false);
+      void trackEvent("trip_dashboard_loaded", {
+        trip_id: tripId,
+        ideas_count: useTripStore.getState().ideas.length || 0
+      });
       return;
     }
 
@@ -148,7 +164,7 @@ export default function TripDashboardPage() {
     };
 
     loadTripData();
-  }, [tripId, currentUserId, navigate]);
+  }, [tripId, currentUserId, navigate, location.state]);
 
   const handleCopyInviteLink = async () => {
     const inviteLink = `${window.location.origin}/trips/${tripId}/invite`;
@@ -571,6 +587,12 @@ export default function TripDashboardPage() {
     return (
       <div className="min-h-screen bg-[#ecf5e9]">
         <Header />
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <div className="inline-flex items-center gap-3 rounded-xl bg-white/80 px-4 py-3 text-sm font-semibold text-[#1e4840] shadow-sm">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#1e4840]/30 border-t-[#1e4840]" />
+            Loading trip...
+          </div>
+        </div>
       </div>
     );
   }
@@ -647,7 +669,7 @@ export default function TripDashboardPage() {
             {userRole === "owner" ? (
               <button
                 onClick={handleDeleteTrip}
-                className="rounded-lg bg-coral px-4 py-2 text-sm font-semibold text-white hover:bg-red-600"
+                className="rounded-lg bg-[#fc4e51] px-4 py-2 text-sm font-semibold text-white hover:bg-[#e64548]"
               >
                 Delete Trip
               </button>

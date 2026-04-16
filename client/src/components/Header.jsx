@@ -260,14 +260,14 @@ export default function Header() {
             <button
               type="button"
               className="text-base font-semibold text-[#ecf5e9] hover:underline"
-              aria-label="My Trips"
+              aria-label="All Trips"
               onClick={() => {
                 handleNavigateHome();
                 setIsProfileMenuOpen(false);
                 setIsNotificationOpen(false);
               }}
             >
-              My Trips
+              All Trips
             </button>
 
             <div className="relative">
@@ -514,9 +514,9 @@ export default function Header() {
       </div>
     </header>
     {navigationLoading ? (
-        <div className="h-1 w-full overflow-hidden bg-slate-200">
+        <div className="h-1.5 w-full overflow-hidden bg-slate-200">
           <div
-            className="h-full bg-gradient-to-r from-ocean to-blue-500 transition-all"
+            className="h-full bg-gradient-to-r from-[#fcae4e] to-[#f7942e] transition-all"
             style={{ width: `${navigationProgress}%` }}
           />
         </div>

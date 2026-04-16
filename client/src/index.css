@@ -101,7 +101,7 @@ body {
 .auth-progress-bar {
   height: 100%;
   width: 40%;
-  background: #38bdf8;
+  background: linear-gradient(90deg, #fcae4e, #f7942e);
   animation: auth-progress 1.2s ease-in-out infinite;
 }
 
