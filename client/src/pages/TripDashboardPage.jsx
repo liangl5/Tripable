@@ -569,7 +569,7 @@ export default function TripDashboardPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-[#ecf5e9]">
         <Header />
       </div>
     );
@@ -585,7 +585,7 @@ export default function TripDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
+    <div className="min-h-screen flex flex-col bg-[#ecf5e9]">
       <Header />
 
       {/* Trip Header */}

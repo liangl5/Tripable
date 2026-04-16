@@ -70,7 +70,7 @@ export default function UserProfilePage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-[#ecf5e9]">
       <Header />
       <div className="mx-auto flex max-w-2xl flex-col px-6 py-12">
         <h1 className="text-3xl font-semibold text-ink mb-8">Profile Settings</h1>

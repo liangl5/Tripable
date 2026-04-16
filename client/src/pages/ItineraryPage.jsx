@@ -56,7 +56,7 @@ export default function ItineraryPage() {
   const totalStops = itinerary?.days?.reduce((sum, day) => sum + day.items.length, 0) || 0;
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-[#ecf5e9]">
       <Header />
       <div className="mx-auto max-w-6xl px-6 py-12">
         <div className="flex flex-wrap items-center justify-end gap-4">

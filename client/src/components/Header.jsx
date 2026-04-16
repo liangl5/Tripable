@@ -244,8 +244,8 @@ export default function Header() {
 
   return (
     <>
-      <header className="relative z-[70] border-b border-slate-200 bg-[#1e4840]">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
+      <header className="relative z-[70] bg-[#1e4840]">
+      <div className="flex items-center justify-between gap-4 px-10 py-4">
         <button
           type="button"
           onClick={handleNavigateHome}

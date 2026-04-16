@@ -167,7 +167,7 @@ export default function CreateTripPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-[#ecf5e9]">
       <Header />
       <div className="mx-auto max-w-5xl px-6 py-12">
       <section className="grid justify-items-center gap-6">

@@ -5,6 +5,7 @@ import { useUserProfile } from "../App";
 import { formatDateRange } from "../lib/timeFormat.js";
 import { getAvatarColor } from "../lib/avatarColors.js";
 import ShareTripModal from "./ShareTripModal.jsx";
+import planeImage from "../../imgs/plane.png";
 
 const ROLE_LABELS = {
   owner: "Owner",
@@ -23,7 +24,11 @@ export default function TripList({
   trips,
   selectionMode = false,
   openOnCardClick = false,
-  onCardClick = null
+  onCardClick = null,
+  starredTripIds = new Set(),
+  onToggleStar = null,
+  emptyStateTitle = "No trips yet",
+  emptyStateDescription = "Create a trip to start collaborating."
 }) {
   const navigate = useNavigate();
   const { profile } = useUserProfile();
@@ -347,9 +352,9 @@ export default function TripList({
   if (!visibleTrips.length) {
     return (
       <>
-        <div className="rounded-3xl border border-dashed border-slate-300 bg-white/60 p-8 text-center">
-          <p className="text-lg font-semibold">No trips yet</p>
-          <p className="mt-2 text-sm text-slate-500">Create a trip to start collaborating.</p>
+        <div className="rounded-3xl border border-dashed border-slate-300 bg-white/60 p-8 text-center text-[#1e4840]">
+          <p className="text-lg font-semibold">{emptyStateTitle}</p>
+          <p className="mt-2 text-sm text-[#1e4840]/75">{emptyStateDescription}</p>
         </div>
         {renderNotifications()}
       </>
@@ -359,12 +364,12 @@ export default function TripList({
   return (
     <>
       {selectionMode ? (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600">
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-[#1e4840]">
           <span>{selectedTripIds.size} selected</span>
           <button
             type="button"
             onClick={toggleSelectAll}
-            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-ink hover:border-ocean hover:text-ocean"
+            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-[#1e4840] hover:border-[#1e4840] hover:text-[#1e4840]"
           >
             {selectedTripIds.size === visibleTrips.length ? "Deselect all" : "Select all"}
           </button>
@@ -372,7 +377,7 @@ export default function TripList({
             type="button"
             onClick={handleBulkCopy}
             disabled={!selectedTripIds.size || duplicateLoading}
-            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-ink hover:border-ocean hover:text-ocean disabled:opacity-60"
+            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-[#1e4840] hover:border-[#1e4840] hover:text-[#1e4840] disabled:opacity-60"
           >
             {duplicateLoading ? "Making copy..." : "Make copy"}
           </button>
@@ -388,13 +393,16 @@ export default function TripList({
       ) : null}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {visibleTrips.map((trip) => (
+          (() => {
+            const isStarred = starredTripIds?.has(trip.id);
+            return (
           <div
             key={trip.id}
-            className={`relative overflow-visible rounded-3xl border border-slate-200 bg-white/90 transition ${
-              selectionMode ? "cursor-pointer hover:border-ocean" : ""
+            className={`group relative overflow-visible rounded-3xl bg-white/90 transition ${
+              selectionMode ? "cursor-pointer" : ""
             } ${
               !selectionMode && (openOnCardClick || onCardClick) ? "cursor-pointer hover:bg-slate-50" : ""
-            } ${selectionMode && selectedTripIds.has(trip.id) ? "border-ocean ring-2 ring-ocean/30" : ""}`}
+            } ${selectionMode && selectedTripIds.has(trip.id) ? "ring-2 ring-[#1e4840]/30" : ""}`}
             onClickCapture={
               selectionMode
                 ? (event) => {
@@ -418,40 +426,69 @@ export default function TripList({
             role={selectionMode ? "button" : undefined}
             aria-pressed={selectionMode ? selectedTripIds.has(trip.id) : undefined}
           >
-            <div className="h-40 rounded-t-3xl bg-gradient-to-br from-sky-100 via-indigo-100 to-rose-100" />
-            <div
-              className="absolute right-4 top-4"
-              ref={menuRef}
-              data-trip-menu
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={(event) => event.stopPropagation()}
-            >
-              <button
-                type="button"
-                onClick={() => setMenuOpenId(menuOpenId === trip.id ? null : trip.id)}
-                className="flex h-9 w-9 items-center justify-center rounded-full text-slate-600 hover:bg-white/40 hover:text-ink"
-                aria-label="Trip actions"
+            <div className="h-40 overflow-hidden rounded-t-3xl bg-[#dcead7]">
+              <img src={planeImage} alt="" className="h-full w-full object-cover object-right" aria-hidden="true" />
+            </div>
+            <div className="pointer-events-none absolute left-0 right-0 top-0 h-20 rounded-t-3xl bg-gradient-to-b from-[#1e4840]/20 via-[#1e4840]/10 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+            {!selectionMode ? (
+              <div
+                className="absolute left-4 right-4 top-3 flex items-center justify-between"
+                ref={menuRef}
+                data-trip-menu
                 onMouseDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setMenuOpenId(menuOpenId === trip.id ? null : trip.id);
-                }}
+                onClick={(event) => event.stopPropagation()}
               >
-                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor" aria-hidden="true">
-                  <circle cx="12" cy="5" r="1.6" />
-                  <circle cx="12" cy="12" r="1.6" />
-                  <circle cx="12" cy="19" r="1.6" />
-                </svg>
-              </button>
-              {menuOpenId === trip.id && (
-                <div
-                  className="absolute right-0 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-lg"
-                  onMouseDown={(event) => event.stopPropagation()}
-                  onClick={(event) => event.stopPropagation()}
-                >
+                {onToggleStar ? (
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-slate-100"
+                    className={`flex h-9 w-9 items-center justify-center rounded-full bg-transparent hover:bg-white/40 ${
+                      isStarred ? "text-[#1e4840]" : "text-[#1e4840]"
+                    }`}
+                    aria-label={isStarred ? "Unstar trip" : "Star trip"}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onToggleStar(trip.id);
+                    }}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-5 w-5"
+                      fill={isStarred ? "currentColor" : "none"}
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      aria-hidden="true"
+                    >
+                      <path d="m12 3 2.9 6.4 6.9.6-5.2 4.5 1.6 6.8L12 17.9 5.8 21.3l1.6-6.8L2.2 10l6.9-.6L12 3z" />
+                    </svg>
+                  </button>
+                ) : <span />}
+                <div className="relative">
+                  <button
+                    type="button"
+                    className="flex h-9 w-9 items-center justify-center rounded-full text-[#1e4840] hover:bg-white/40 hover:text-[#1e4840]"
+                    aria-label="Trip actions"
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setMenuOpenId(menuOpenId === trip.id ? null : trip.id);
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor" aria-hidden="true">
+                      <circle cx="12" cy="5" r="1.6" />
+                      <circle cx="12" cy="12" r="1.6" />
+                      <circle cx="12" cy="19" r="1.6" />
+                    </svg>
+                  </button>
+                  {menuOpenId === trip.id && (
+                    <div
+                      className="absolute right-0 top-full mt-0 w-56 rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-lg"
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[#1e4840] hover:bg-slate-100"
                     onClick={() => {
                       setMenuOpenId(null);
                       setRenameTrip(trip);
@@ -466,7 +503,7 @@ export default function TripList({
                   </button>
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-slate-100"
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[#1e4840] hover:bg-slate-100"
                     onClick={async () => {
                       setMenuOpenId(null);
                       setDuplicateLoading(true);
@@ -525,7 +562,7 @@ export default function TripList({
                         >
                           <button
                             type="button"
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-slate-100"
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[#1e4840] hover:bg-slate-100"
                             onClick={() => {
                               setMenuOpenId(null);
                               setShareMenuOpenId(null);
@@ -543,7 +580,7 @@ export default function TripList({
                         </button>
                           <button
                             type="button"
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-slate-100"
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[#1e4840] hover:bg-slate-100"
                             onClick={async () => {
                               const link = `${window.location.origin}/trips/${trip.id}/invite`;
                               await navigator.clipboard.writeText(link);
@@ -567,7 +604,7 @@ export default function TripList({
                   <button
                     type="button"
                     className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left ${
-                      trip.canDelete === false ? "text-amber-700 hover:bg-amber-50" : "text-coral hover:bg-rose-50"
+                      trip.canDelete === false ? "text-[#1e4840] hover:bg-slate-100" : "text-[#1e4840] hover:bg-slate-100"
                     }`}
                     onClick={() => {
                       setMenuOpenId(null);
@@ -586,24 +623,26 @@ export default function TripList({
                     </svg>
                     {trip.canDelete === false ? "Leave trip" : "Delete trip"}
                   </button>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            <div className="flex flex-col gap-4 p-6">
+              </div>
+            ) : null}
+            <div className="flex flex-col gap-4 px-6 pt-6 pb-3">
               <div>
-                <h3 className="truncate text-xl font-semibold tracking-tight text-ink">
+                <h3 className="truncate text-xl font-semibold tracking-tight text-[#1e4840]">
                   {trip.destination?.name || trip.destination?.label
                     ? `${trip.name} at ${trip.destination.name || trip.destination.label}`
                     : trip.name}
                 </h3>
                 {trip.startDate && trip.endDate ? (
-                  <p className="mt-2 text-sm text-slate-500">{formatDateRange(trip.startDate, trip.endDate)}</p>
+                  <p className="mt-2 text-sm text-[#1e4840]/75">{formatDateRange(trip.startDate, trip.endDate)}</p>
                 ) : null}
-                <p className="mt-2 text-sm font-semibold text-slate-500">Owner: {trip.ownerDisplayName || "Trip owner"}</p>
+                <p className="mt-2 text-sm font-semibold text-[#1e4840]/75">Owner: {trip.ownerDisplayName || "Trip owner"}</p>
               </div>
 
               <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-semibold text-slate-500">
+                <div className="text-sm font-semibold text-[#1e4840]/75">
                   {trip.createdAt || trip.created_at
                     ? new Date(trip.createdAt || trip.created_at).toLocaleDateString()
                     : ""}
@@ -628,7 +667,7 @@ export default function TripList({
 
                     return (
                       <>
-                        <div className="group relative flex items-center">
+                        <div className="group/member relative flex items-center">
                           {visibleMembers.map((member, index) => {
                             const isCurrentUser = profile?.id && member.id === profile.id;
                             const effectiveAvatarColor = member.avatarColor || (isCurrentUser ? profile.avatarColor : "");
@@ -653,8 +692,8 @@ export default function TripList({
                               +{overflowCount}
                             </div>
                           )}
-                          {memberNames ? (
-                            <div className="pointer-events-none absolute bottom-12 left-1/2 z-20 hidden w-max max-w-[260px] -translate-x-1/2 rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-white shadow-lg group-hover:block">
+                          {memberNames && !selectionMode ? (
+                            <div className="pointer-events-none absolute bottom-12 left-1/2 z-20 hidden w-max max-w-[260px] -translate-x-1/2 rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-white shadow-lg group-hover/member:block">
                               {memberNames}
                               <span className="absolute left-1/2 top-full h-0 w-0 -translate-x-1/2 border-x-8 border-x-transparent border-t-8 border-t-ink" />
                             </div>
@@ -668,6 +707,8 @@ export default function TripList({
 
             </div>
           </div>
+            );
+          })()
         ))}
       </div>
 

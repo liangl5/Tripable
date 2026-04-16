@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession, useUserProfile } from "../App";
@@ -11,6 +11,7 @@ import Features from "../components/Features.jsx";
 import Demo from "../components/Demo.jsx";
 import CTA from "../components/CTA.jsx";
 import Footer from "../components/Footer.jsx";
+import PeopleAltIcon from "@mui/icons-material/PeopleAlt";
 
 export default function HomePage() {
   const session = useSession();
@@ -25,6 +26,8 @@ export default function HomePage() {
   const clearFlashNotice = useTripStore((state) => state.clearFlashNotice);
   const [tripCards, setTripCards] = useState([]);
   const [tripCardsLoading, setTripCardsLoading] = useState(false);
+  const [activeTripTab, setActiveTripTab] = useState("all");
+  const [starredTripIds, setStarredTripIds] = useState(() => new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [localSession, setLocalSession] = useState(null);
@@ -78,6 +81,22 @@ export default function HomePage() {
     }
     setLocalSession(null);
   }, [session]);
+
+  useEffect(() => {
+    if (!currentUserId) {
+      setStarredTripIds(new Set());
+      return;
+    }
+
+    try {
+      const storedIds = window.localStorage.getItem(`tripable_starred_trips_${currentUserId}`);
+      const parsedIds = storedIds ? JSON.parse(storedIds) : [];
+      setStarredTripIds(new Set(Array.isArray(parsedIds) ? parsedIds.filter(Boolean) : []));
+    } catch (error) {
+      console.error("Failed to load starred trips", error);
+      setStarredTripIds(new Set());
+    }
+  }, [currentUserId]);
 
   useEffect(() => {
     if (!effectiveSession?.user?.id || !trips.length) {
@@ -208,6 +227,56 @@ export default function HomePage() {
     return () => clearTimeout(timer);
   }, [flashNotice, clearFlashNotice]);
 
+  const filteredTrips = useMemo(() => {
+    if (activeTripTab === "mine") {
+      return tripCards.filter((trip) => trip.userRole === "owner");
+    }
+
+    if (activeTripTab === "starred") {
+      return tripCards.filter((trip) => starredTripIds.has(trip.id));
+    }
+
+    if (activeTripTab === "shared") {
+      return tripCards.filter((trip) => trip.userRole !== "owner");
+    }
+
+    return tripCards;
+  }, [activeTripTab, starredTripIds, tripCards]);
+
+  const starredStorageKey = currentUserId ? `tripable_starred_trips_${currentUserId}` : null;
+
+  const toggleTripStar = (tripId) => {
+    if (!tripId || !starredStorageKey) return;
+    setStarredTripIds((current) => {
+      const next = new Set(current);
+      if (next.has(tripId)) {
+        next.delete(tripId);
+      } else {
+        next.add(tripId);
+      }
+      window.localStorage.setItem(starredStorageKey, JSON.stringify(Array.from(next)));
+      return next;
+    });
+  };
+
+  const emptyStateTitle =
+    activeTripTab === "mine"
+      ? "No trips created by you yet"
+      : activeTripTab === "starred"
+      ? "No starred trips yet"
+      : activeTripTab === "shared"
+        ? "No shared trips yet"
+        : "No trips yet";
+
+  const emptyStateDescription =
+    activeTripTab === "mine"
+      ? "Create a new trip to start planning."
+      : activeTripTab === "starred"
+      ? "Star trips from the cards to save them here."
+      : activeTripTab === "shared"
+        ? "Trips shared with you will show up here."
+        : "Create a trip to start collaborating.";
+
   const handleTripCardClick = async (tripId) => {
     if (!tripId) return;
     setTripNavigationLoading(true);
@@ -234,7 +303,7 @@ export default function HomePage() {
   // If user is NOT logged in, show marketing home page
   if (sessionLoading) {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-[#ecf5e9]">
         <Header />
       </div>
     );
@@ -258,7 +327,7 @@ export default function HomePage() {
 
   // If user IS logged in, show trip dashboard
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="flex h-screen flex-col overflow-hidden bg-[#ecf5e9]">
       <Header />
       {tripNavigationLoading ? (
         <div className="h-1 w-full overflow-hidden bg-slate-200">
@@ -268,67 +337,129 @@ export default function HomePage() {
           />
         </div>
       ) : null}
-      <div className="mx-auto flex max-w-6xl flex-col px-6 py-12">
-        <header className="mb-10 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-semibold text-ink">My Trips</h1>
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <aside className="w-full bg-[#f4f7f2] lg:h-full lg:w-72">
+          <div className="px-6 pb-6 pt-10">
+          <Link
+            to="/trips/new"
+            className="inline-flex w-fit -ml-1 items-center justify-start gap-2 rounded-2xl bg-[#1e4840] px-5 py-4 text-base font-bold text-white shadow-card hover:bg-[#152f2a]"
+          >
+            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
+            </svg>
+            Create new trip
+          </Link>
+
+          <div className="ml-[-24px] mt-5 w-[calc(100%+24px)]">
+            {[
+              { id: "all", label: "All trips" },
+              { id: "mine", label: "My trips" },
+              { id: "shared", label: "Shared with me" },
+              { id: "starred", label: "Starred" }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTripTab(tab.id)}
+                className={`flex w-full items-center justify-between rounded-r-full rounded-l-none pl-0 pr-6 py-2 text-left text-base font-semibold transition ${
+                  activeTripTab === tab.id
+                    ? "bg-[#baf59c] text-[#1e4840] shadow-card"
+                    : "text-[#1e4840] hover:bg-gray-200"
+                }`}
+              >
+                <span className="flex items-center gap-2 pl-[34px]">
+                  {tab.id === "all" ? (
+                    <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M4 6h16" />
+                      <path d="M4 12h16" />
+                      <path d="M4 18h16" />
+                    </svg>
+                  ) : null}
+                  {tab.id === "mine" ? (
+                    <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="8" r="4" />
+                      <path d="M5 20c1.5-3 4-5 7-5s5.5 2 7 5" />
+                    </svg>
+                  ) : null}
+                  {tab.id === "shared" ? (
+                    <PeopleAltIcon sx={{ fontSize: 24 }} />
+                  ) : null}
+                  {tab.id === "starred" ? (
+                    <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z" />
+                    </svg>
+                  ) : null}
+                  {tab.label}
+                </span>
+              </button>
+            ))}
           </div>
-          <div className="flex flex-wrap items-center gap-3">
+          </div>
+        </aside>
+
+        <main className="min-w-0 flex-1 overflow-y-auto px-6 py-10">
+          <div className="mx-auto w-full max-w-6xl">
+          <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
+            <h2 className="text-3xl font-semibold text-[#1e4840]">
+              {activeTripTab === "mine"
+                ? "My trips"
+                : activeTripTab === "starred"
+                  ? "Starred trips"
+                  : activeTripTab === "shared"
+                    ? "Shared with me"
+                    : "All trips"}
+            </h2>
             <button
               type="button"
               onClick={() => setSelectionMode((current) => !current)}
-              className="rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-ink shadow-card hover:border-ocean hover:text-ocean disabled:opacity-60"
-              disabled={!trips.length}
+              className="rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-[#1e4840] shadow-card hover:border-[#1e4840] hover:text-[#1e4840] disabled:opacity-60"
+              disabled={!filteredTrips.length}
             >
               {selectionMode ? "Done" : "Select"}
             </button>
-            <Link
-              to="/trips/new"
-              className="inline-flex items-center gap-2 rounded-full bg-ocean px-5 py-3 text-sm font-semibold text-white shadow-card hover:bg-blue-600"
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 5v14" />
-                <path d="M5 12h14" />
-              </svg>
-              Create new trip
-            </Link>
-          </div>
-        </header>
+          </header>
 
-        {tripsLoading || tripCardsLoading ? (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {Array.from({ length: 8 }).map((_, index) => (
-              <div
-                key={`trip-skeleton-${index}`}
-                className="overflow-hidden rounded-3xl border border-slate-200 bg-white/90"
-              >
-                <div className="h-40 animate-pulse bg-slate-200" />
-                <div className="space-y-4 p-6">
-                  <div className="space-y-2">
-                    <div className="h-6 w-3/4 animate-pulse rounded bg-slate-200" />
-                    <div className="h-4 w-1/2 animate-pulse rounded bg-slate-100" />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="h-4 w-1/3 animate-pulse rounded bg-slate-100" />
-                    <div className="flex items-center -space-x-2">
-                      <div className="h-9 w-9 animate-pulse rounded-full border border-white bg-slate-200" />
-                      <div className="h-9 w-9 animate-pulse rounded-full border border-white bg-slate-200" />
-                      <div className="h-9 w-9 animate-pulse rounded-full border border-white bg-slate-200" />
+          {tripsLoading || tripCardsLoading ? (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {Array.from({ length: 8 }).map((_, index) => (
+                <div
+                  key={`trip-skeleton-${index}`}
+                  className="overflow-hidden rounded-3xl bg-white/90"
+                >
+                  <div className="h-40 animate-pulse bg-slate-200" />
+                  <div className="flex flex-col gap-4 px-6 pt-8 pb-3">
+                    <div className="space-y-2">
+                      <div className="h-6 w-3/4 animate-pulse rounded bg-slate-200" />
+                      <div className="h-4 w-1/2 animate-pulse rounded bg-slate-100" />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="h-4 w-1/3 animate-pulse rounded bg-slate-100" />
+                      <div className="flex items-center -space-x-2">
+                        <div className="h-9 w-9 animate-pulse rounded-full border border-white bg-slate-200" />
+                        <div className="h-9 w-9 animate-pulse rounded-full border border-white bg-slate-200" />
+                        <div className="h-9 w-9 animate-pulse rounded-full border border-white bg-slate-200" />
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
+          ) : null}
+          {error ? <p className="text-sm text-coral">{error}</p> : null}
+          {!tripsLoading && !tripCardsLoading ? (
+            <TripList
+              trips={filteredTrips}
+              selectionMode={selectionMode}
+              onCardClick={handleTripCardClick}
+              starredTripIds={starredTripIds}
+              onToggleStar={toggleTripStar}
+              emptyStateTitle={emptyStateTitle}
+              emptyStateDescription={emptyStateDescription}
+            />
+          ) : null}
           </div>
-        ) : null}
-        {error ? <p className="text-sm text-coral">{error}</p> : null}
-        {!tripsLoading && !tripCardsLoading ? (
-          <TripList
-            trips={tripCards.length ? tripCards : trips}
-            selectionMode={selectionMode}
-            onCardClick={handleTripCardClick}
-          />
-        ) : null}
+        </main>
       </div>
       {flashNotice ? (
         <div className="fixed bottom-4 right-6 z-[80] inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">

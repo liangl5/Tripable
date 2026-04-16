@@ -120,7 +120,7 @@ export default function TripInvitePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-[#ecf5e9]">
         <Header />
         <div className="flex items-center justify-center px-4 py-12">
           <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8">
@@ -133,7 +133,7 @@ export default function TripInvitePage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-[#ecf5e9]">
         <Header />
         <div className="flex items-center justify-center px-4 py-12">
           <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8">
@@ -153,7 +153,7 @@ export default function TripInvitePage() {
 
   if (accepted) {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-[#ecf5e9]">
         <Header />
         <div className="flex items-center justify-center px-4 py-12">
           <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8">
@@ -170,7 +170,7 @@ export default function TripInvitePage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-[#ecf5e9]">
       <Header />
       <div className="flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8">
