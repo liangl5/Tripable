@@ -14,6 +14,7 @@ https://www.tripable.pro/
 - https://github.com/liangl5/Tripable - GitHub
 - https://app.amplitude.com/analytics/tripable/home?sml2400=True&email=ll3945%40columbia.edu&sml1035=True&social=True - Amplitude Analytics
 - https://analytics.google.com/analytics/web/#/a389618169p530925078/reports/intelligenthome?params=_u..nav%3Dmaui - Google Analytics
+- https://tripable-testing.vercel.app/ - testing production
 
 ## Tech stack
 

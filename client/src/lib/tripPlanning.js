@@ -520,24 +520,17 @@ function slugify(value) {
     .replace(/^-+|-+$/g, "");
 }
 
+const MEMORY_STORAGE = new Map();
+
 function readStorage(key, fallback) {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const raw = window.localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch (error) {
-    console.error(`Unable to read ${key}`, error);
+  if (!MEMORY_STORAGE.has(key)) {
     return fallback;
   }
+  return MEMORY_STORAGE.get(key);
 }
 
 function writeStorage(key, value) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch (error) {
-    console.error(`Unable to write ${key}`, error);
-  }
+  MEMORY_STORAGE.set(key, value);
 }
 
 function uniqueStrings(values) {
@@ -1187,24 +1180,16 @@ export function createItineraryDraft(trip, ideas) {
 }
 
 export function saveGeneratedItinerary(tripId, itinerary) {
-  if (!tripId) return itinerary;
-  const allItineraries = readStorage(ITINERARY_STORAGE_KEY, {});
-  allItineraries[tripId] = itinerary;
-  writeStorage(ITINERARY_STORAGE_KEY, allItineraries);
   return itinerary;
 }
 
 export function getGeneratedItinerary(tripId) {
   if (!tripId) return null;
-  const allItineraries = readStorage(ITINERARY_STORAGE_KEY, {});
-  return allItineraries[tripId] || null;
+  return null;
 }
 
 export function clearGeneratedItinerary(tripId) {
   if (!tripId) return;
-  const allItineraries = readStorage(ITINERARY_STORAGE_KEY, {});
-  delete allItineraries[tripId];
-  writeStorage(ITINERARY_STORAGE_KEY, allItineraries);
 }
 
 export function getBudgetSummary(trip) {

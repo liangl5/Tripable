@@ -96,3 +96,11 @@ body {
 .mock-map-pin {
   box-shadow: 0 10px 18px rgba(76, 111, 255, 0.18);
 }
+
+.invite-email-input:-webkit-autofill,
+.invite-email-input:-webkit-autofill:hover,
+.invite-email-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #1f2937;
+  -webkit-box-shadow: 0 0 0 1000px #eaf3ff inset;
+  box-shadow: 0 0 0 1000px #eaf3ff inset;
+}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Header from "../components/Header.jsx";
+import ToastNotification from "../components/ToastNotification.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
 import { parseInvitees } from "../lib/tripPlanning.js";
@@ -167,7 +168,7 @@ export default function CreateTripPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-[#ecf5e9]">
       <Header />
       <div className="mx-auto max-w-5xl px-6 py-12">
       <section className="grid justify-items-center gap-6">
@@ -250,7 +251,9 @@ export default function CreateTripPage() {
               {createTripLoading || inviteSendLoading ? "Creating..." : "Create trip workspace"}
             </button>
             {formError ? <p className="text-sm text-coral">{formError}</p> : null}
-            {inviteStatus ? <p className="text-sm text-slate-600">{inviteStatus}</p> : null}
+            {inviteStatus ? (
+              <ToastNotification message={inviteStatus} onDismiss={() => setInviteStatus("")} />
+            ) : null}
             {error ? <p className="text-sm text-coral">{error}</p> : null}
           </form>
         </div>

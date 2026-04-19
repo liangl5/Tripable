@@ -35,7 +35,7 @@ export default function TripListPage() {
 
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-[#ecf5e9]">
       <Header />
       <div className="mx-auto flex max-w-6xl flex-col px-6 py-12">
         <header className="mb-10 flex flex-wrap items-center justify-between gap-4">
