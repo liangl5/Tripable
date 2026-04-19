@@ -1,10 +1,11 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import TripMapPanel from "../TripMapPanel.jsx";
 import { trackEvent } from "../../lib/analytics.js";
 import ActivityComposerModal from "../ActivityComposerModal.jsx";
 import VoteButtons from "../VoteButtons.jsx";
 import ThreadedComments from "../ThreadedComments.jsx";
+import { useTripStore } from "../../hooks/useTripStore.js";
 
 export default function ListTab({
   tab,
@@ -29,11 +30,14 @@ export default function ListTab({
   const [listCreateLoading, setListCreateLoading] = useState(false);
   const [deleteListConfirm, setDeleteListConfirm] = useState(null);
   const [deleteIdeaConfirm, setDeleteIdeaConfirm] = useState(null);
+  const [deleteListLoadingId, setDeleteListLoadingId] = useState(null);
+  const [deleteIdeaLoadingId, setDeleteIdeaLoadingId] = useState(null);
   const [composerState, setComposerState] = useState(null);
   const [listActionError, setListActionError] = useState("");
   const containerRef = useRef(null);
   const mapDragRef = useRef(null);
   const canManageLists = userRole === "owner" || userRole === "editor";
+  const reloadIdeas = useTripStore((state) => state.loadIdeas);
 
   // Load lists from database
   useEffect(() => {
@@ -115,8 +119,10 @@ export default function ListTab({
 
     try {
       setListActionError("");
+      setDeleteListLoadingId(listId);
       await api.deleteList(listId);
       setLists(lists.filter((l) => l.id !== listId));
+      await reloadIdeas(tripId);
       void trackEvent("list_deleted", {
         trip_id: tripId,
         list_id: listId
@@ -125,6 +131,8 @@ export default function ListTab({
     } catch (error) {
       console.error("Failed to delete list:", error);
       setListActionError(error?.message || "Failed to delete list");
+    } finally {
+      setDeleteListLoadingId(null);
     }
   };
 
@@ -180,6 +188,7 @@ export default function ListTab({
 
     try {
       setListActionError("");
+      setDeleteIdeaLoadingId(ideaId);
       await onDeleteIdea(ideaId);
       void trackEvent("activity_deleted_from_list_tab", {
         trip_id: tripId,
@@ -189,6 +198,8 @@ export default function ListTab({
     } catch (error) {
       console.error("Failed to delete activity:", error);
       setListActionError(error?.message || "Failed to delete activity");
+    } finally {
+      setDeleteIdeaLoadingId(null);
     }
   };
 
@@ -202,6 +213,14 @@ export default function ListTab({
   const getListIdeas = (listId) => {
     return ideas.filter((idea) => idea.listId === listId && (!idea.tabId || idea.tabId === tab.id));
   };
+  const ideasForThisTab = useMemo(() => {
+    return (ideas || []).filter((idea) => idea?.tabId === tab.id);
+  }, [ideas, tab.id]);
+  const listIdsForThisTab = useMemo(() => new Set((lists || []).map((list) => list.id)), [lists]);
+  const mappedIdeasForThisTab = useMemo(() => {
+    if (!listIdsForThisTab.size) return [];
+    return ideasForThisTab.filter((idea) => idea?.listId && listIdsForThisTab.has(idea.listId));
+  }, [ideasForThisTab, listIdsForThisTab]);
 
   const leftWidth = `${100 - mapPanelWidth}%`;
   const rightWidth = `${mapPanelWidth}%`;
@@ -338,9 +357,9 @@ export default function ListTab({
                           <div className="min-w-0 flex-1">
                             <p className="font-semibold text-ink text-sm">{idea.title}</p>
                             {idea.location && <p className="text-xs text-slate-600">{idea.location}</p>}
-                            {Number.isFinite(Number(idea.costEstimate)) && (
+                            {idea.costEstimate !== null && idea.costEstimate !== undefined && idea.costEstimate !== "" && Number.isFinite(Number(idea.costEstimate)) ? (
                               <span className="text-xs text-ocean font-semibold">${Number(idea.costEstimate).toFixed(2)}</span>
-                            )}
+                            ) : null}
                           </div>
                           <VoteButtons
                             score={idea.voteScore || 0}
@@ -350,6 +369,8 @@ export default function ListTab({
                           />
                           {(canManageLists || idea.createdById === userId) && (
                             <button
+                              type="button"
+                              onMouseDown={(event) => event.stopPropagation()}
                               onClick={() => setDeleteIdeaConfirm(idea)}
                               className="text-xs text-coral hover:font-semibold flex-shrink-0"
                             >
@@ -402,13 +423,15 @@ export default function ListTab({
 
       {/* Right Panel: Map */}
       <div className="h-full overflow-hidden" style={{ width: rightWidth }}>
-        <TripMapPanel tripId={tripId} destination={trip?.destination} mappedIdeas={ideas} immersive />
+        <TripMapPanel tripId={tripId} destination={trip?.destination} mappedIdeas={mappedIdeasForThisTab} immersive />
       </div>
 
       {deleteListConfirm ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4"
-          onClick={() => setDeleteListConfirm(null)}
+          onClick={() => {
+            if (!deleteListLoadingId) setDeleteListConfirm(null);
+          }}
         >
           <div
             className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-card"
@@ -422,15 +445,17 @@ export default function ListTab({
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 onClick={() => setDeleteListConfirm(null)}
+                disabled={Boolean(deleteListLoadingId)}
                 className="rounded-xl px-3 py-1.5 text-sm font-semibold text-slate-600"
               >
                 Cancel
               </button>
               <button
                 onClick={() => void handleDeleteList(deleteListConfirm.id)}
+                disabled={Boolean(deleteListLoadingId)}
                 className="rounded-xl bg-coral px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-600"
               >
-                Delete
+                {deleteListLoadingId ? "Deleting..." : "Delete"}
               </button>
             </div>
           </div>
@@ -440,7 +465,9 @@ export default function ListTab({
       {deleteIdeaConfirm ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4"
-          onClick={() => setDeleteIdeaConfirm(null)}
+          onClick={() => {
+            if (!deleteIdeaLoadingId) setDeleteIdeaConfirm(null);
+          }}
         >
           <div
             className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-card"
@@ -453,15 +480,17 @@ export default function ListTab({
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 onClick={() => setDeleteIdeaConfirm(null)}
+                disabled={Boolean(deleteIdeaLoadingId)}
                 className="rounded-xl px-3 py-1.5 text-sm font-semibold text-slate-600"
               >
                 Cancel
               </button>
               <button
                 onClick={() => void handleDeleteIdea(deleteIdeaConfirm.id)}
+                disabled={Boolean(deleteIdeaLoadingId)}
                 className="rounded-xl bg-coral px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-600"
               >
-                Delete
+                {deleteIdeaLoadingId ? "Deleting..." : "Delete"}
               </button>
             </div>
           </div>

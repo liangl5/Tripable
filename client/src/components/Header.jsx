@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { api } from "../lib/api.js";
@@ -157,91 +157,117 @@ export default function Header() {
     };
   }, [isProfileMenuOpen, isNotificationOpen]);
 
+  const loadPendingInvites = useCallback(async () => {
+    if (!session?.user?.email) return;
+    setPendingInvitesLoading(true);
+    try {
+      const normalizedEmail = String(session.user.email || "").trim().toLowerCase();
+      const { data: inviteRows, error: inviteError } = await supabase
+        .from("PendingTripInvite")
+        .select("id, tripId, role, createdAt, createdById")
+        .ilike("email", normalizedEmail)
+        .eq("status", "pending")
+        .order("createdAt", { ascending: false });
+
+      if (inviteError) {
+        if (String(inviteError.message || "").includes("PendingTripInvite")) {
+          setPendingInvites([]);
+          return;
+        }
+        throw inviteError;
+      }
+
+      const rows = inviteRows || [];
+      if (!rows.length) {
+        setPendingInvites([]);
+        return;
+      }
+
+      const tripIds = rows.map((invite) => invite.tripId);
+      const { data: tripRows, error: tripError } = await supabase
+        .from("Trip")
+        .select("id, name, createdById")
+        .in("id", tripIds);
+      if (tripError) throw tripError;
+
+      const ownerIds = Array.from(new Set((tripRows || []).map((trip) => trip.createdById).filter(Boolean)));
+      const inviterIds = Array.from(new Set((rows || []).map((invite) => invite.createdById).filter(Boolean)));
+      let ownerMap = new Map();
+      let inviterMap = new Map();
+      if (ownerIds.length > 0 || inviterIds.length > 0) {
+        const allIds = Array.from(new Set([...ownerIds, ...inviterIds]));
+        const { data: ownerRows, error: ownerError } = await supabase
+          .from("User")
+          .select("id, name, avatarColor")
+          .in("id", allIds);
+        if (ownerError) throw ownerError;
+        ownerMap = new Map((ownerRows || []).map((owner) => [owner.id, owner.name || "Trip owner"]));
+        inviterMap = new Map(
+          (ownerRows || []).map((owner) => [
+            owner.id,
+            {
+              id: owner.id,
+              name: owner.name || "Traveler",
+              avatarColor: owner.avatarColor || ""
+            }
+          ])
+        );
+      }
+
+      const tripMap = new Map((tripRows || []).map((trip) => [trip.id, trip]));
+      const invitesWithTripName = rows.map((invite) => ({
+        ...invite,
+        tripName: tripMap.get(invite.tripId)?.name || "Trip invitation",
+        ownerName: ownerMap.get(tripMap.get(invite.tripId)?.createdById) || "Trip owner",
+        inviter: inviterMap.get(invite.createdById) || {
+          id: invite.createdById,
+          name: ownerMap.get(invite.createdById) || "Traveler",
+          avatarColor: ""
+        }
+      }));
+
+      setPendingInvites(invitesWithTripName);
+    } catch (error) {
+      console.error("Failed to load pending invites:", error);
+      setPendingInvites([]);
+    } finally {
+      setPendingInvitesLoading(false);
+    }
+  }, [session?.user?.email]);
+
   useEffect(() => {
     if (!session?.user?.email) {
       setPendingInvites([]);
       return;
     }
 
-    const loadPendingInvites = async () => {
-      setPendingInvitesLoading(true);
-      try {
-        const normalizedEmail = String(session.user.email || "").trim().toLowerCase();
-        const { data: inviteRows, error: inviteError } = await supabase
-          .from("PendingTripInvite")
-          .select("id, tripId, role, createdAt, createdById")
-          .ilike("email", normalizedEmail)
-          .eq("status", "pending")
-          .order("createdAt", { ascending: false });
-
-        if (inviteError) {
-          if (String(inviteError.message || "").includes("PendingTripInvite")) {
-            setPendingInvites([]);
-            return;
-          }
-          throw inviteError;
-        }
-
-        const rows = inviteRows || [];
-        if (!rows.length) {
-          setPendingInvites([]);
-          return;
-        }
-
-        const tripIds = rows.map((invite) => invite.tripId);
-        const { data: tripRows, error: tripError } = await supabase
-          .from("Trip")
-          .select("id, name, createdById")
-          .in("id", tripIds);
-        if (tripError) throw tripError;
-
-        const ownerIds = Array.from(new Set((tripRows || []).map((trip) => trip.createdById).filter(Boolean)));
-        const inviterIds = Array.from(new Set((rows || []).map((invite) => invite.createdById).filter(Boolean)));
-        let ownerMap = new Map();
-        let inviterMap = new Map();
-        if (ownerIds.length > 0 || inviterIds.length > 0) {
-          const allIds = Array.from(new Set([...ownerIds, ...inviterIds]));
-          const { data: ownerRows, error: ownerError } = await supabase
-            .from("User")
-            .select("id, name, avatarColor")
-            .in("id", allIds);
-          if (ownerError) throw ownerError;
-          ownerMap = new Map((ownerRows || []).map((owner) => [owner.id, owner.name || "Trip owner"]));
-          inviterMap = new Map(
-            (ownerRows || []).map((owner) => [
-              owner.id,
-              {
-                id: owner.id,
-                name: owner.name || "Traveler",
-                avatarColor: owner.avatarColor || ""
-              }
-            ])
-          );
-        }
-
-        const tripMap = new Map((tripRows || []).map((trip) => [trip.id, trip]));
-        const invitesWithTripName = rows.map((invite) => ({
-          ...invite,
-          tripName: tripMap.get(invite.tripId)?.name || "Trip invitation",
-          ownerName: ownerMap.get(tripMap.get(invite.tripId)?.createdById) || "Trip owner",
-          inviter: inviterMap.get(invite.createdById) || {
-            id: invite.createdById,
-            name: ownerMap.get(invite.createdById) || "Traveler",
-            avatarColor: ""
-          }
-        }));
-
-        setPendingInvites(invitesWithTripName);
-      } catch (error) {
-        console.error("Failed to load pending invites:", error);
-        setPendingInvites([]);
-      } finally {
-        setPendingInvitesLoading(false);
-      }
-    };
-
     void loadPendingInvites();
-  }, [session]);
+  }, [loadPendingInvites, session?.user?.email]);
+
+  useEffect(() => {
+    const normalizedEmail = String(session?.user?.email || "").trim().toLowerCase();
+    if (!normalizedEmail) return;
+
+    const channel = supabase
+      .channel(`pending-invites:${normalizedEmail}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "PendingTripInvite",
+          filter: `email=eq.${normalizedEmail}`
+        },
+        () => {
+          void loadPendingInvites();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadPendingInvites, session?.user?.email]);
 
   return (
     <>

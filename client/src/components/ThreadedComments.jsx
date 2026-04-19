@@ -256,18 +256,23 @@ export default function ThreadedComments({
   const renderComments = (parentId = "__root__", depth = 0) => {
     const branch = commentsByParent.get(parentId) || [];
     return branch.map((comment) => {
+      const indentLevel = Math.min(depth, 3);
       const authorName = getAuthorName(comment.userId);
       const createdLabel = new Date(comment.createdAt).toLocaleString();
       const isOwner = comment.userId === userId;
       const children = renderComments(comment.id, depth + 1);
 
       return (
-        <div key={comment.id} className={depth > 0 ? "mt-3 ml-8" : "mt-3"}>
+        <div
+          key={comment.id}
+          className="mt-3 min-w-0"
+          style={{ marginLeft: depth > 0 ? `${indentLevel * 16}px` : 0 }}
+        >
           <div className="flex items-start gap-3">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-300 text-xs font-semibold text-slate-700">
               {authorName.slice(0, 1).toUpperCase()}
             </div>
-            <div className="max-w-full rounded-2xl bg-white px-3 py-2 shadow-sm">
+            <div className="min-w-0 flex-1 rounded-2xl bg-white px-3 py-2 shadow-sm">
               <p className="text-xs font-semibold text-ink">{authorName}</p>
               {editingCommentId === comment.id ? (
                 <div className="mt-1">
@@ -297,10 +302,11 @@ export default function ThreadedComments({
               ) : (
                 <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{comment.body}</p>
               )}
-              <div className="mt-1 flex items-center gap-3 text-[11px]">
-                <span className="text-slate-400">{createdLabel}</span>
+              <div className="mt-1 max-w-full overflow-x-auto">
+                <div className="flex min-w-max items-center gap-3 text-[11px]">
+                  <span className="shrink-0 text-slate-400">{createdLabel}</span>
                 {comment.updatedAt && comment.updatedAt !== comment.createdAt ? (
-                  <span className="text-slate-400">(edited)</span>
+                    <span className="shrink-0 text-slate-400">(edited)</span>
                 ) : null}
                 <button
                   type="button"
@@ -308,7 +314,7 @@ export default function ThreadedComments({
                     setReplyingToId(comment.id);
                     setReplyDraft("");
                   }}
-                  className="font-semibold text-[#1877F2] hover:underline"
+                    className="shrink-0 font-semibold text-[#1877F2] hover:underline"
                 >
                   Reply
                 </button>
@@ -317,25 +323,26 @@ export default function ThreadedComments({
                     <button
                       type="button"
                       onClick={() => handleStartEditComment(comment)}
-                      className="font-semibold text-slate-600 hover:underline"
+                        className="shrink-0 font-semibold text-slate-600 hover:underline"
                     >
                       Edit
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDeleteComment(comment.id)}
-                      className="font-semibold text-coral hover:underline"
+                        className="shrink-0 font-semibold text-coral hover:underline"
                     >
                       Delete
                     </button>
                   </>
                 ) : null}
+                </div>
               </div>
             </div>
           </div>
 
           {replyingToId === comment.id ? (
-            <div className="mt-2 ml-11 rounded-xl bg-white p-3 shadow-sm">
+            <div className="mt-2 ml-11 min-w-0 rounded-xl bg-white p-3 shadow-sm">
               <textarea
                 value={replyDraft}
                 onChange={(event) => setReplyDraft(event.target.value)}
@@ -421,7 +428,7 @@ export default function ThreadedComments({
               ) : comments.length === 0 ? (
                 <p className="text-xs text-slate-500">No comments yet. Start the conversation.</p>
               ) : (
-                <div>{renderComments()}</div>
+                <div className="max-h-[28rem] overflow-y-auto overflow-x-hidden pr-1">{renderComments()}</div>
               )}
             </>
           )}

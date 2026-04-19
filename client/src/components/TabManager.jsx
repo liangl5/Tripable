@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { getTripTabs, reorderTabs, deleteTab, createTab, updateTab } from "../lib/tabManagement.js";
 import { trackEvent } from "../lib/analytics.js";
 import { useTripStore } from "../hooks/useTripStore.js";
@@ -20,6 +21,8 @@ const TAB_TYPE_OPTIONS = [
 ];
 
 export default function TabManager({ trip, tripId, userId, userRole, ideas, tripMembers }) {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [tabs, setTabs] = useState([]);
   const [activeTab, setActiveTab] = useState(null);
   const [hydratedTab, setHydratedTab] = useState(false);
@@ -29,12 +32,46 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
   const [tabDeleteLoading, setTabDeleteLoading] = useState(false);
   const [editingTabId, setEditingTabId] = useState(null);
   const [editingTabName, setEditingTabName] = useState("");
+  const [tabNameError, setTabNameError] = useState("");
   const [tabRenameLoading, setTabRenameLoading] = useState(false);
   const [tabCreateOpen, setTabCreateOpen] = useState(false);
   const [tabCreateType, setTabCreateType] = useState("availability");
   const [tabCreateName, setTabCreateName] = useState("");
   const [tabCreateError, setTabCreateError] = useState("");
   const canManageTabs = userRole === "owner" || userRole === "editor";
+  const localActiveTabKey = `tripable:activeTab:${tripId}:${userId || "anon"}`;
+
+  const normalizeTabName = (value) => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+  const isTabNameTaken = (candidateName, excludeTabId = null) => {
+    const normalized = normalizeTabName(candidateName);
+    if (!normalized) return false;
+    return tabs.some((tab) => tab.id !== excludeTabId && normalizeTabName(tab.name) === normalized);
+  };
+
+  const urlTabId = useMemo(() => {
+    const params = new URLSearchParams(location.search || "");
+    return params.get("tab") || "";
+  }, [location.search]);
+
+  const syncUrlTab = (nextTabId, { replace } = { replace: false }) => {
+    const nextId = String(nextTabId || "").trim();
+    const params = new URLSearchParams(location.search || "");
+    if (nextId) {
+      params.set("tab", nextId);
+    } else {
+      params.delete("tab");
+    }
+    const nextSearch = params.toString();
+    const search = nextSearch ? `?${nextSearch}` : "";
+    if (search === (location.search || "")) return;
+    navigate(
+      {
+        pathname: location.pathname,
+        search
+      },
+      { replace: Boolean(replace) }
+    );
+  };
 
   // Load tabs on mount
   useEffect(() => {
@@ -45,6 +82,10 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
         setTabs(loadedTabs);
         if (loadedTabs.length > 0) {
           let storedTabId = "";
+          const urlPreferred = loadedTabs.some((tab) => tab.id === urlTabId) ? urlTabId : "";
+          if (urlPreferred) {
+            storedTabId = urlPreferred;
+          }
           if (userId) {
             const { data, error } = await supabase
               .from("TripTabPreference")
@@ -57,11 +98,19 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
                 throw error;
               }
             } else {
-              storedTabId = data?.activeTabId || "";
+              storedTabId = storedTabId || data?.activeTabId || "";
+            }
+          }
+          if (!storedTabId) {
+            try {
+              storedTabId = window?.localStorage?.getItem?.(localActiveTabKey) || "";
+            } catch {
+              storedTabId = "";
             }
           }
           const nextActive = loadedTabs.some((tab) => tab.id === storedTabId) ? storedTabId : loadedTabs[0].id;
           setActiveTab(nextActive);
+          syncUrlTab(nextActive, { replace: true });
           setHydratedTab(true);
         }
       } catch (error) {
@@ -72,11 +121,25 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
     };
 
     loadTabs();
-  }, [tripId, userId]);
+  }, [tripId, userId, urlTabId]);
+
+  // Respond to back/forward navigation between tabs.
+  useEffect(() => {
+    if (!hydratedTab || !tabs.length) return;
+    if (!urlTabId) return;
+    if (!tabs.some((tab) => tab.id === urlTabId)) return;
+    if (activeTab === urlTabId) return;
+    setActiveTab(urlTabId);
+  }, [activeTab, hydratedTab, tabs, urlTabId]);
 
   useEffect(() => {
     if (!activeTab || !userId) return;
     const activeTabData = tabs.find((tab) => tab.id === activeTab);
+    try {
+      window?.localStorage?.setItem?.(localActiveTabKey, activeTab);
+    } catch {
+      // ignore
+    }
     void supabase
       .from("TripTabPreference")
       .upsert(
@@ -136,6 +199,7 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
   const openTabCreateModal = () => {
     if (!canManageTabs) return;
     setTabCreateError("");
+    setTabNameError("");
     setTabCreateType("availability");
     setTabCreateName("");
     setTabCreateOpen(true);
@@ -154,12 +218,26 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
     const selectedOption = TAB_TYPE_OPTIONS.find((option) => option.type === tabCreateType) || TAB_TYPE_OPTIONS[0];
     const existingTypeCount = tabs.filter((tab) => tab.tabType === selectedOption.type).length;
     const defaultName = existingTypeCount > 0 ? `${selectedOption.label} ${existingTypeCount + 1}` : selectedOption.label;
-    const nextName = String(tabCreateName || "").trim() || defaultName;
+    const requestedName = String(tabCreateName || "").trim();
+    let nextName = requestedName || defaultName;
+
+    if (requestedName && isTabNameTaken(requestedName)) {
+      setTabCreateError("Tab name already exists. Pick a different name.");
+      return;
+    }
+    if (!requestedName) {
+      let suffix = 2;
+      while (isTabNameTaken(nextName)) {
+        suffix += 1;
+        nextName = `${defaultName} ${suffix}`;
+      }
+    }
 
     try {
       const newTab = await createTab(tripId, nextName, selectedOption.type);
       setTabs([...tabs, newTab]);
       setActiveTab(newTab.id);
+      syncUrlTab(newTab.id, { replace: false });
       void trackEvent("trip_tab_created", {
         trip_id: tripId,
         tab_id: newTab.id,
@@ -176,12 +254,14 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
     if (!canManageTabs || !tab?.id) return;
     setEditingTabId(tab.id);
     setEditingTabName(tab.name || "");
+    setTabNameError("");
   };
 
   const cancelTabRename = () => {
     if (tabRenameLoading) return;
     setEditingTabId(null);
     setEditingTabName("");
+    setTabNameError("");
   };
 
   const submitTabRename = async (tab) => {
@@ -195,6 +275,11 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
 
     if (nextName === tab.name) {
       cancelTabRename();
+      return;
+    }
+
+    if (isTabNameTaken(nextName, tab.id)) {
+      setTabNameError("Tab name already exists. Pick a different name.");
       return;
     }
 
@@ -369,6 +454,7 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
                 type="button"
                 onClick={() => {
                   setActiveTab(tab.id);
+                  syncUrlTab(tab.id, { replace: false });
                   void trackEvent("trip_tab_viewed", {
                     trip_id: tripId,
                     tab_id: tab.id,
@@ -395,7 +481,9 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
                       }
                     }}
                     disabled={tabRenameLoading}
-                    className="rounded border border-ocean px-2 py-1 text-sm font-medium text-ink"
+                    className={`rounded border px-2 py-1 text-sm font-medium text-ink ${
+                      tabNameError ? "border-rose-400" : "border-ocean"
+                    }`}
                     autoFocus
                   />
                 ) : (
@@ -442,6 +530,11 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
           )}
         </div>
       </div>
+      {tabNameError ? (
+        <div className="border-b border-rose-200 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700">
+          {tabNameError}
+        </div>
+      ) : null}
 
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto bg-white">

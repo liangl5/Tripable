@@ -76,7 +76,8 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
           setDateRangeStart(String(trip.startDate).slice(0, 10));
           setDateRangeEnd(String(trip.endDate).slice(0, 10));
         }
-        setIsEditMode(canManageItinerary && nextItems.length === 0);
+        const hasDays = (daysData || []).length > 0;
+        setIsEditMode(canManageItinerary && (!hasDays || nextItems.length === 0));
       } catch (error) {
         console.error("Failed to load itinerary:", error);
       } finally {
@@ -518,6 +519,27 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
       <div className="flex gap-6 flex-1 overflow-hidden">
       {/* Days Columns */}
       <div className="flex-1 overflow-x-auto space-y-4">
+        {days.length === 0 ? (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">
+            <h3 className="text-lg font-semibold text-ink">No itinerary yet</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Set a date range to create days, then drag items from the Activity Bank onto each day.
+            </p>
+            {canManageItinerary ? (
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEditMode(true)}
+                  className="rounded-full bg-ocean px-5 py-2 text-sm font-semibold text-white hover:bg-blue-600"
+                >
+                  Set itinerary dates
+                </button>
+              </div>
+            ) : (
+              <p className="mt-4 text-sm text-slate-500">Ask the trip owner to set itinerary dates.</p>
+            )}
+          </div>
+        ) : null}
         {isEditMode && canManageItinerary && (
           <div className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <div className="flex flex-col">
