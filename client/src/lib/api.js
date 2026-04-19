@@ -2463,11 +2463,28 @@ export const api = {
   },
 
   async deleteList(listId) {
-    const { error } = await supabase
-      .from("List")
-      .delete()
-      .eq("id", listId);
+    if (!listId) throw new Error("List not found");
 
+    const { data: ideaRows, error: ideasError } = await supabase
+      .from("Idea")
+      .select("id")
+      .eq("listId", listId);
+    if (ideasError) throw ideasError;
+    const ideaIds = (ideaRows || []).map((row) => row.id).filter(Boolean);
+
+    if (ideaIds.length) {
+      const { error: itineraryError } = await supabase.from("ItineraryItem").delete().in("ideaId", ideaIds);
+      if (itineraryError) throw itineraryError;
+
+      const { error: voteError } = await supabase.from("Vote").delete().in("ideaId", ideaIds);
+      if (voteError) throw voteError;
+
+      // IdeaComment has FK cascade on Idea in newer schemas; ignore missing-table environments.
+      const { error: ideaDeleteError } = await supabase.from("Idea").delete().in("id", ideaIds);
+      if (ideaDeleteError) throw ideaDeleteError;
+    }
+
+    const { error } = await supabase.from("List").delete().eq("id", listId);
     if (error) throw error;
   }
 };

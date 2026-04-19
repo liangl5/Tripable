@@ -89,10 +89,10 @@ export default function TripMapPanel({
     [destination?.coordinates]
   );
   const mapQuery = activeQuery || fallbackQuery;
-  const mappedMarkerIdeas = useMemo(
-    () => (mappedIdeas || []).filter((idea) => idea?.mapQuery),
-    [mappedIdeas]
-  );
+  const mappedIdeasFingerprint = (mappedIdeas || [])
+    .map((idea) => `${idea?.id || ""}:${idea?.mapQuery || ""}:${idea?.coordinates?.lat ?? ""}:${idea?.coordinates?.lng ?? ""}`)
+    .join("|");
+  const mappedMarkerIdeas = useMemo(() => (mappedIdeas || []).filter((idea) => idea?.mapQuery), [mappedIdeasFingerprint]);
   const visibleIdeas = useMemo(
     () => mappedMarkerIdeas.slice(0, immersive ? 5 : 6),
     [immersive, mappedMarkerIdeas]
@@ -196,7 +196,24 @@ export default function TripMapPanel({
       markersRef.current.forEach(({ cleanup, marker }) => {
         cleanup?.();
         window.google?.maps?.event?.clearInstanceListeners?.(marker);
-        marker.map = null;
+        if (marker && typeof marker.setMap === "function") {
+          marker.setMap(null);
+        } else if (marker && Object.prototype.hasOwnProperty.call(marker, "map")) {
+          try {
+            marker.map = null;
+          } catch {
+            // ignore
+          }
+        } else if (marker) {
+          marker.map = null;
+        }
+        if (marker && marker.content && typeof marker.content.remove === "function") {
+          try {
+            marker.content.remove();
+          } catch {
+            // ignore
+          }
+        }
       });
       markersRef.current = [];
       markerLookupRef.current = new Map();
@@ -358,7 +375,7 @@ export default function TripMapPanel({
       cancelled = true;
       clearMarkers();
     };
-  }, [fallbackPosition, fallbackQuery, immersive, jsMapReady, mappedMarkerIdeas, showAllNames]);
+  }, [fallbackPosition, fallbackQuery, immersive, jsMapReady, mappedIdeasFingerprint, showAllNames]);
 
   useEffect(() => {
     if (!immersive || !jsMapReady || !mapInstanceRef.current || !activeQuery) {

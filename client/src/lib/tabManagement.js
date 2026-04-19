@@ -69,8 +69,15 @@ export async function reorderTabs(tripId, tabIds) {
  * Create a new custom tab
  */
 export async function createTab(tripId, name, tabType) {
-  const { data: existingTabs } = await getTripTabs(tripId);
-  const nextPosition = (existingTabs || []).length;
+  const existingTabs = await getTripTabs(tripId);
+  const normalizedCandidate = String(name || "").trim().replace(/\s+/g, " ").toLowerCase();
+  const nameTaken = existingTabs.some(
+    (tab) => String(tab?.name || "").trim().replace(/\s+/g, " ").toLowerCase() === normalizedCandidate
+  );
+  if (nameTaken) {
+    throw new Error("Tab name already exists. Pick a different name.");
+  }
+  const nextPosition = existingTabs.length;
 
   const { data, error } = await supabase
     .from("TripTabConfiguration")

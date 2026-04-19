@@ -29,7 +29,15 @@ export default function HomePage() {
   const clearFlashNotice = useTripStore((state) => state.clearFlashNotice);
   const [tripCards, setTripCards] = useState([]);
   const [tripCardsLoading, setTripCardsLoading] = useState(false);
-  const [activeTripTab, setActiveTripTab] = useState("all");
+  const [activeTripTab, setActiveTripTab] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem("tripable_home_trip_filter");
+      const normalized = String(stored || "").trim();
+      return normalized || "all";
+    } catch {
+      return "all";
+    }
+  });
   const [starredTripIds, setStarredTripIds] = useState(() => new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(true);
@@ -229,6 +237,14 @@ export default function HomePage() {
     const timer = setTimeout(() => clearFlashNotice(), 5000);
     return () => clearTimeout(timer);
   }, [flashNotice, clearFlashNotice]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("tripable_home_trip_filter", String(activeTripTab || "all"));
+    } catch {
+      // ignore
+    }
+  }, [activeTripTab]);
 
   const filteredTrips = useMemo(() => {
     if (activeTripTab === "mine") {

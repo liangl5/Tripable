@@ -306,12 +306,15 @@ export const useTripStore = create((set, get) => ({
   },
 
   deleteIdea: async (ideaId, tripId) => {
-    set({ deleteIdeaLoading: true, error: null });
+    const previous = get().ideas;
+    set({
+      deleteIdeaLoading: true,
+      error: null,
+      ideas: previous.filter((idea) => idea.id !== ideaId)
+    });
     try {
       await api.deleteIdea(ideaId, tripId);
-      const ideas = await api.getIdeas(tripId);
       set({
-        ideas,
         deleteIdeaLoading: false
       });
       void trackEvent("idea_deleted", {
@@ -319,7 +322,7 @@ export const useTripStore = create((set, get) => ({
         idea_id: ideaId
       });
     } catch (error) {
-      set({ error: error.message, deleteIdeaLoading: false });
+      set({ ideas: previous, error: error.message, deleteIdeaLoading: false });
       throw error;
     }
   },
