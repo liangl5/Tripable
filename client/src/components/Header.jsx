@@ -6,6 +6,7 @@ import { useSession, useUserProfile } from "../App";
 import { getDisplayName } from "../lib/userProfile.js";
 import { trackEvent } from "../lib/analytics.js";
 import { AVATAR_COLOR_CHOICES, getAvatarColor } from "../lib/avatarColors.js";
+import LoadingProgressBar from "./LoadingProgressBar.jsx";
 
 export default function Header() {
   const session = useSession();
@@ -246,30 +247,14 @@ export default function Header() {
     <>
       <header className="relative z-[70] bg-[#1e4840]">
       <div className="flex items-center justify-between gap-4 px-10 py-4">
-        <button
-          type="button"
-          onClick={handleNavigateHome}
-          className="text-2xl font-extrabold tracking-tight text-[#ecf5e9] hover:underline"
-          aria-label="Home"
+        <span
+          className="text-2xl font-extrabold tracking-tight text-[#ecf5e9]"
         >
           Tripable
-        </button>
+        </span>
 
         {session ? (
           <div className="relative flex items-center gap-2" ref={menuRef}>
-            <button
-              type="button"
-              className="text-base font-semibold text-[#ecf5e9] hover:underline"
-              aria-label="All Trips"
-              onClick={() => {
-                handleNavigateHome();
-                setIsProfileMenuOpen(false);
-                setIsNotificationOpen(false);
-              }}
-            >
-              All Trips
-            </button>
-
             <div className="relative">
               <button
                 type="button"
@@ -513,14 +498,7 @@ export default function Header() {
         )}
       </div>
     </header>
-    {navigationLoading ? (
-        <div className="h-1.5 w-full overflow-hidden bg-slate-200">
-          <div
-            className="h-full bg-gradient-to-r from-[#fcae4e] to-[#f7942e] transition-all"
-            style={{ width: `${navigationProgress}%` }}
-          />
-        </div>
-      ) : null}
+      {navigationLoading ? <LoadingProgressBar progress={navigationProgress} /> : null}
     </>
   );
 }

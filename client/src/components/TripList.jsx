@@ -4,7 +4,10 @@ import { useTripStore } from "../hooks/useTripStore.js";
 import { useUserProfile } from "../App";
 import { formatDateRange } from "../lib/timeFormat.js";
 import { getAvatarColor } from "../lib/avatarColors.js";
+import LoadingProgressBar from "./LoadingProgressBar.jsx";
+import ConfirmModal from "./ConfirmModal.jsx";
 import ShareTripModal from "./ShareTripModal.jsx";
+import ToastNotification from "./ToastNotification.jsx";
 import planeImage from "../../imgs/plane.png";
 
 const ROLE_LABELS = {
@@ -93,25 +96,25 @@ export default function TripList({
 
   useEffect(() => {
     if (!inviteStatus) return undefined;
-    const timer = setTimeout(() => setInviteStatus(""), 10000);
+    const timer = setTimeout(() => setInviteStatus(""), 5000);
     return () => clearTimeout(timer);
   }, [inviteStatus]);
 
   useEffect(() => {
     if (!renameNotice) return undefined;
-    const timer = setTimeout(() => setRenameNotice(null), 10000);
+    const timer = setTimeout(() => setRenameNotice(null), 5000);
     return () => clearTimeout(timer);
   }, [renameNotice]);
 
   useEffect(() => {
     if (!deleteNotice) return undefined;
-    const timer = setTimeout(() => setDeleteNotice(null), 10000);
+    const timer = setTimeout(() => setDeleteNotice(null), 5000);
     return () => clearTimeout(timer);
   }, [deleteNotice]);
 
   useEffect(() => {
     if (!copyStatus) return undefined;
-    const timer = setTimeout(() => setCopyStatus(""), 10000);
+    const timer = setTimeout(() => setCopyStatus(""), 5000);
     return () => clearTimeout(timer);
   }, [copyStatus]);
 
@@ -196,33 +199,23 @@ export default function TripList({
             key: "invite",
             ts: inviteStatusAt,
             node: (
-              <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
-                <span>{inviteStatus}</span>
-                {lastShareTrip ? (
-                  <button
-                    type="button"
-                    className="text-base font-semibold text-sky-200 underline hover:text-white"
-                    onClick={() => {
-                      setShareTrip(lastShareTrip);
-                      setInviteStatus("");
-                      setInviteStatusAt(0);
-                    }}
-                  >
-                    Manage access
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="ml-auto text-white/70 hover:text-white"
-                  onClick={() => {
-                    setInviteStatus("");
-                    setInviteStatusAt(0);
-                  }}
-                  aria-label="Dismiss notification"
-                >
-                  ✕
-                </button>
-              </div>
+              <ToastNotification
+                message={inviteStatus}
+                actionLabel={lastShareTrip ? "Manage access" : null}
+                onAction={
+                  lastShareTrip
+                    ? () => {
+                        setShareTrip(lastShareTrip);
+                        setInviteStatus("");
+                        setInviteStatusAt(0);
+                      }
+                    : null
+                }
+                onDismiss={() => {
+                  setInviteStatus("");
+                  setInviteStatusAt(0);
+                }}
+              />
             )
           }
         : null,
@@ -231,19 +224,10 @@ export default function TripList({
             key: "rename",
             ts: renameNoticeAt || 0,
             node: (
-              <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
-                <span>
-                  “{renameNotice.from}” renamed to “{renameNotice.to}”
-                </span>
-                <button
-                  type="button"
-                  className="ml-auto text-white/70 hover:text-white"
-                  onClick={() => setRenameNotice(null)}
-                  aria-label="Dismiss notification"
-                >
-                  ✕
-                </button>
-              </div>
+              <ToastNotification
+                message={`“${renameNotice.from}” renamed to “${renameNotice.to}”`}
+                onDismiss={() => setRenameNotice(null)}
+              />
             )
           }
         : null,
@@ -252,17 +236,10 @@ export default function TripList({
             key: "delete",
             ts: deleteNoticeAt,
             node: (
-              <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
-                <span>{deleteNotice.message || `“${deleteNotice.name}” deleted`}</span>
-                <button
-                  type="button"
-                  className="ml-auto text-white/70 hover:text-white"
-                  onClick={() => setDeleteNotice(null)}
-                  aria-label="Dismiss notification"
-                >
-                  ✕
-                </button>
-              </div>
+              <ToastNotification
+                message={deleteNotice.message || `“${deleteNotice.name}” deleted`}
+                onDismiss={() => setDeleteNotice(null)}
+              />
             )
           }
         : null,
@@ -271,17 +248,7 @@ export default function TripList({
             key: "copy-status",
             ts: copyStatusAt,
             node: (
-              <div className="inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
-                <span>{copyStatus}</span>
-                <button
-                  type="button"
-                  className="ml-auto text-white/70 hover:text-white"
-                  onClick={() => setCopyStatus("")}
-                  aria-label="Dismiss notification"
-                >
-                  ✕
-                </button>
-              </div>
+              <ToastNotification message={copyStatus} onDismiss={() => setCopyStatus("")} />
             )
           }
         : null
@@ -384,7 +351,7 @@ export default function TripList({
             type="button"
             onClick={handleBulkDelete}
             disabled={!selectedTripIds.size}
-            className="rounded-full border border-[#fc4e51] bg-[#fc4e51] px-4 py-2 text-xs font-semibold text-white hover:bg-[#e64548] disabled:opacity-60"
+            className="rounded-full border border-[#baf59c] bg-[#baf59c] px-4 py-2 text-xs font-semibold text-[#1e4840] hover:bg-[#a7ee84] disabled:opacity-60"
           >
             Delete selected
           </button>
@@ -803,87 +770,58 @@ export default function TripList({
       />
 
       {deleteConfirm ? (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/35 px-4"
-          onClick={() => setDeleteConfirm(null)}
-        >
-          <div
-            className="relative w-full max-w-sm overflow-hidden rounded-2xl bg-white p-5 shadow-card"
-            onClick={(event) => event.stopPropagation()}
-          >
-            {deleteLoading ? (
-              <>
-                <div className="absolute inset-0 rounded-2xl bg-white/60" />
-                <div className="absolute left-0 top-0 h-1 w-full bg-slate-200">
-                  <div className="auth-progress-bar" />
-                </div>
-              </>
-            ) : null}
-            <h3 className="text-lg font-semibold text-ink">
-              {deleteConfirm.actionType === "leave"
-                ? "Leave trip?"
-                : deleteConfirm.ids?.length
-                  ? `Delete ${deleteConfirm.ids.length} selected trips?`
-                  : "Delete trip?"}
-            </h3>
-            <p className="mt-2 text-sm text-slate-600">
-              {deleteConfirm.actionType === "leave"
-                ? `Leave \"${deleteConfirm.name || "this trip"}\"? You will need a new invite link to rejoin.`
-                : deleteConfirm.ids?.length
-                  ? `Delete these ${deleteConfirm.ids.length} selected trips? This cannot be undone.`
-                  : `Delete \"${deleteConfirm.name || "this trip"}\"? This cannot be undone.`}
-            </p>
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <button
-                onClick={() => setDeleteConfirm(null)}
-                className="rounded-xl px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-60"
-                disabled={deleteLoading}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  try {
-                    setDeleteLoading(true);
-                    if (deleteConfirm.actionType === "leave") {
-                      await leaveTrip(deleteConfirm.id);
-                      showInviteStatus("Left trip.");
-                    } else {
-                      const idsToDelete = deleteConfirm.ids?.length ? deleteConfirm.ids : [deleteConfirm.id];
-                      const tripsToDelete = idsToDelete
-                        .map((tripId) => trips.find((item) => item.id === tripId))
-                        .filter(Boolean);
-                      await Promise.all(tripsToDelete.map(async (trip) => deleteTrip(trip.id)));
-                      showDeleteNotice(tripsToDelete.length > 1 ? tripsToDelete : tripsToDelete[0]);
-                      if (deleteConfirm.ids?.length) {
-                        setSelectedTripIds(new Set());
-                      }
-                    }
-                    setDeleteConfirm(null);
-                  } catch (error) {
-                    if (deleteConfirm.actionType === "leave") {
-                      console.error("Failed to leave trip", error);
-                      showInviteStatus("Unable to leave trip.");
-                    } else {
-                      console.error("Failed to delete trip", error);
-                      showInviteStatus("Unable to delete trip.");
-                    }
-                  } finally {
-                    setDeleteLoading(false);
-                  }
-                }}
-                className={`rounded-xl px-3 py-1.5 text-sm font-semibold disabled:opacity-60 ${
-                  deleteConfirm.actionType === "leave"
-                    ? "bg-amber-500 text-white hover:bg-amber-600"
-                    : "bg-[#fc4e51] text-white hover:bg-[#e64548]"
-                }`}
-                disabled={deleteLoading}
-              >
-                {deleteConfirm.actionType === "leave" ? "Leave" : "Delete"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmModal
+          open={Boolean(deleteConfirm)}
+          title={
+            deleteConfirm.actionType === "leave"
+              ? "Leave trip?"
+              : deleteConfirm.ids?.length
+                ? `Delete ${deleteConfirm.ids.length} selected trips?`
+                : "Delete trip?"
+          }
+          message={
+            deleteConfirm.actionType === "leave"
+              ? `Leave \"${deleteConfirm.name || "this trip"}\"? You will need a new invite link to rejoin.`
+              : deleteConfirm.ids?.length
+                ? `Delete these ${deleteConfirm.ids.length} selected trips? This cannot be undone.`
+                : `Delete \"${deleteConfirm.name || "this trip"}\"? This cannot be undone.`
+          }
+          confirmText={deleteConfirm.actionType === "leave" ? "Leave" : "Delete"}
+          tone={deleteConfirm.actionType === "leave" ? "warning" : "danger"}
+          loading={deleteLoading}
+          showLoadingBar
+          onCancel={() => setDeleteConfirm(null)}
+          onConfirm={async () => {
+            try {
+              setDeleteLoading(true);
+              if (deleteConfirm.actionType === "leave") {
+                await leaveTrip(deleteConfirm.id);
+                showInviteStatus("Left trip.");
+              } else {
+                const idsToDelete = deleteConfirm.ids?.length ? deleteConfirm.ids : [deleteConfirm.id];
+                const tripsToDelete = idsToDelete
+                  .map((tripId) => trips.find((item) => item.id === tripId))
+                  .filter(Boolean);
+                await Promise.all(tripsToDelete.map(async (trip) => deleteTrip(trip.id)));
+                showDeleteNotice(tripsToDelete.length > 1 ? tripsToDelete : tripsToDelete[0]);
+                if (deleteConfirm.ids?.length) {
+                  setSelectedTripIds(new Set());
+                }
+              }
+              setDeleteConfirm(null);
+            } catch (error) {
+              if (deleteConfirm.actionType === "leave") {
+                console.error("Failed to leave trip", error);
+                showInviteStatus("Unable to leave trip.");
+              } else {
+                console.error("Failed to delete trip", error);
+                showInviteStatus("Unable to delete trip.");
+              }
+            } finally {
+              setDeleteLoading(false);
+            }
+          }}
+        />
       ) : null}
 
       {renderNotifications()}

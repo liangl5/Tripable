@@ -35,7 +35,7 @@ export default function UserProfilePage() {
         length: newDisplayName.trim().length
       });
       setDisplayNameMessage("Display name updated successfully!");
-      setTimeout(() => setDisplayNameMessage(""), 3000);
+      setTimeout(() => setDisplayNameMessage(""), 5000);
     } catch (error) {
       void trackEvent("profile_display_name_update_failed", {
         reason: error?.message || "unknown"

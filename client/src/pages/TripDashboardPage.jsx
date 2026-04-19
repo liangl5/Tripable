@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import Header from "../components/Header.jsx";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import TabManager from "../components/TabManager.jsx";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
@@ -8,6 +7,8 @@ import { supabase } from "../lib/supabase.js";
 import { parseInvitees } from "../lib/tripPlanning.js";
 import ShareTripModal from "../components/ShareTripModal.jsx";
 import { trackEvent } from "../lib/analytics.js";
+import TripSidebarHeader from "../components/TripSidebarHeader.jsx";
+import ConfirmModal from "../components/ConfirmModal.jsx";
 
 const ROLE_LABELS = {
   owner: "Owner",
@@ -177,6 +178,15 @@ export default function TripDashboardPage() {
   };
 
   const canEditTripName = userRole === "owner" || userRole === "editor";
+
+  useEffect(() => {
+    if (!editTripNameOpen) return;
+    setTripNameDraft(trip?.name || "");
+    requestAnimationFrame(() => {
+      tripNameInputRef.current?.focus();
+      tripNameInputRef.current?.select();
+    });
+  }, [editTripNameOpen, trip?.name]);
 
   const handleSaveTripName = async () => {
     if (!canEditTripName || !trip?.id) return;
@@ -516,7 +526,7 @@ export default function TripDashboardPage() {
       setFlashNotice({
         kind: "trip_deleted",
         name: deletedTripName,
-        message: "deleted",
+        message: `“${deletedTripName}” deleted`,
         createdAt: Date.now()
       });
       navigate("/");
@@ -586,7 +596,6 @@ export default function TripDashboardPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#ecf5e9]">
-        <Header />
         <div className="flex min-h-[60vh] items-center justify-center">
           <div className="inline-flex items-center gap-3 rounded-xl bg-white/80 px-4 py-3 text-sm font-semibold text-[#1e4840] shadow-sm">
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#1e4840]/30 border-t-[#1e4840]" />
@@ -600,105 +609,95 @@ export default function TripDashboardPage() {
   if (!trip) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <Header />
         <div className="text-slate-600">Trip not found</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#ecf5e9]">
-      <Header />
+    <div className="min-h-screen bg-white">
+      <TripSidebarHeader />
+      <div className="pl-14">
+        <main className="min-h-screen min-w-0 pb-3 pt-3">
+          <div className="border-b border-slate-200">
+            <div className="flex items-center justify-between px-3 pb-3">
+              <div>
+                <div className="inline-flex items-center gap-2">
+                  <div className="group inline-flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (canEditTripName) {
+                          setEditTripNameOpen(true);
+                        }
+                      }}
+                      className={`inline-flex items-center gap-2 rounded-lg px-2 py-1 text-left ${
+                        canEditTripName ? "cursor-pointer hover:bg-ocean/10" : ""
+                      }`}
+                    >
+                      <h1 className="text-2xl font-semibold text-ink">{trip.name}</h1>
+                      {canEditTripName ? (
+                        <span className="px-1.5 py-0.5 text-slate-400 opacity-0 transition group-hover:opacity-100">
+                          ✎
+                        </span>
+                      ) : null}
+                    </button>
+                  </div>
+                </div>
+                {trip.startDate && trip.endDate && (
+                  <p className="mt-1 text-sm text-slate-600">
+                    {new Date(trip.startDate).toLocaleDateString()} - {new Date(trip.endDate).toLocaleDateString()}
+                  </p>
+                )}
+              </div>
 
-      {/* Trip Header */}
-      <div className="bg-white border-b border-slate-200">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-          <div>
-            <div className="inline-flex items-center gap-3">
-              <Link
-                to="/"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full text-ink hover:bg-ocean/15 hover:text-ocean"
-                aria-label="Back to trips"
-              >
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M19 12H5" />
-                  <path d="M11 6l-6 6 6 6" />
-                </svg>
-              </Link>
-              <div className="group inline-flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (canEditTripName) {
-                      setEditTripNameOpen(true);
-                    }
-                  }}
-                  className={`inline-flex items-center gap-2 rounded-lg px-2 py-1 text-left ${
-                    canEditTripName ? "cursor-pointer hover:bg-ocean/10" : ""
-                  }`}
-                >
-                  <h1 className="text-2xl font-semibold text-ink">{trip.name}</h1>
-                  {canEditTripName ? (
-                    <span className="px-1.5 py-0.5 text-slate-400 opacity-0 transition group-hover:opacity-100">
-                      ✎
-                    </span>
-                  ) : null}
-                </button>
+              <div className="flex items-center gap-3">
+                {userRole === "owner" ? (
+                  <button
+                    onClick={() => {
+                      setShareOpen(true);
+                      void trackEvent("trip_share_opened", { trip_id: tripId });
+                    }}
+                    className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-300"
+                  >
+                    Invite
+                  </button>
+                ) : null}
+
+                {userRole === "owner" ? (
+                  <button
+                    onClick={handleDeleteTrip}
+                    className="rounded-lg bg-[#baf59c] px-4 py-2 text-sm font-semibold text-[#1e4840] hover:bg-[#a7ee84]"
+                  >
+                    Delete Trip
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleLeaveTrip}
+                    disabled={leaveTripLoading}
+                    className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-60"
+                  >
+                    {leaveTripLoading ? "Leaving..." : "Leave Trip"}
+                  </button>
+                )}
               </div>
             </div>
-            {trip.startDate && trip.endDate && (
-              <p className="text-sm text-slate-600 mt-1">
-                {new Date(trip.startDate).toLocaleDateString()} - {new Date(trip.endDate).toLocaleDateString()}
-              </p>
-            )}
+            {actionStatus ? <p className="px-3 pb-3 text-sm text-coral">{actionStatus}</p> : null}
           </div>
 
-          <div className="flex items-center gap-3">
-            {userRole === "owner" ? (
-              <button
-                onClick={() => {
-                  setShareOpen(true);
-                  void trackEvent("trip_share_opened", { trip_id: tripId });
-                }}
-                className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-300"
-              >
-                Invite
-              </button>
-            ) : null}
-
-            {userRole === "owner" ? (
-              <button
-                onClick={handleDeleteTrip}
-                className="rounded-lg bg-[#fc4e51] px-4 py-2 text-sm font-semibold text-white hover:bg-[#e64548]"
-              >
-                Delete Trip
-              </button>
-            ) : (
-              <button
-                onClick={handleLeaveTrip}
-                disabled={leaveTripLoading}
-                className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-60"
-              >
-                {leaveTripLoading ? "Leaving..." : "Leave Trip"}
-              </button>
+          <div className="px-3 pt-4">
+            {trip && (
+              <TabManager
+                trip={trip}
+                tripId={tripId}
+                userId={currentUserId}
+                userRole={userRole}
+                ideas={ideas}
+                tripMembers={tripMembers}
+              />
             )}
           </div>
-        </div>
-        {actionStatus ? <p className="mx-auto max-w-6xl px-6 pb-3 text-sm text-coral">{actionStatus}</p> : null}
-      </div>
-
-      {/* Tab Manager */}
-      <div className="flex-1 mx-auto max-w-6xl w-full">
-        {trip && (
-          <TabManager
-            trip={trip}
-            tripId={tripId}
-            userId={currentUserId}
-            userRole={userRole}
-            ideas={ideas}
-            tripMembers={tripMembers}
-          />
-        )}
+        </main>
       </div>
 
       <ShareTripModal
@@ -707,41 +706,16 @@ export default function TripDashboardPage() {
         onClose={() => setShareOpen(false)}
       />
 
-      {confirmDialog ? (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/35 px-4"
-          onClick={() => {
-            if (actionLoading || shareLoading || leaveTripLoading) return;
-            setConfirmDialog(null);
-          }}
-        >
-          <div
-            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-card"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h3 className="text-lg font-semibold text-ink">{confirmDialog.title}</h3>
-            <p className="mt-2 text-sm text-slate-600">{confirmDialog.message}</p>
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <button
-                onClick={() => setConfirmDialog(null)}
-                disabled={actionLoading || shareLoading || leaveTripLoading}
-                className="rounded-xl px-3 py-1.5 text-sm font-semibold text-slate-600 disabled:opacity-60"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmAction}
-                disabled={actionLoading || shareLoading || leaveTripLoading}
-                className={`rounded-xl px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60 ${
-                  confirmDialog.tone === "danger" ? "bg-coral hover:bg-red-600" : "bg-amber-500 hover:bg-amber-600"
-                }`}
-              >
-                {actionLoading || shareLoading || leaveTripLoading ? "Working..." : confirmDialog.confirmText}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <ConfirmModal
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmText={confirmDialog?.confirmText}
+        tone={confirmDialog?.tone}
+        loading={actionLoading || shareLoading || leaveTripLoading}
+        onCancel={() => setConfirmDialog(null)}
+        onConfirm={handleConfirmAction}
+      />
 
       {editTripNameOpen ? (
         <div

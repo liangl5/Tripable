@@ -3,6 +3,7 @@ import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
 import { getAvatarColor } from "../lib/avatarColors.js";
 import { supabase } from "../lib/supabase.js";
+import ToastNotification from "./ToastNotification.jsx";
 
 const ROLE_LABELS = {
   owner: "Owner",
@@ -51,7 +52,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
 
   useEffect(() => {
     if (!inviteStatus) return undefined;
-    const timer = setTimeout(() => setInviteStatus(""), 10000);
+    const timer = setTimeout(() => setInviteStatus(""), 5000);
     return () => clearTimeout(timer);
   }, [inviteStatus]);
 
@@ -679,13 +680,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
             </div>
           </div>
           {inviteStatus ? (
-            <p
-              className={`text-sm ${
-                inviteStatus === "Enter a valid email for each invitee." ? "text-rose-600" : "text-slate-600"
-              }`}
-            >
-              {inviteStatus}
-            </p>
+            <ToastNotification message={inviteStatus} onDismiss={() => setInviteStatus("")} />
           ) : null}
         </div>
       </div>

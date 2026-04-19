@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useSession, useUserProfile } from "../App";
 import { trackEvent } from "../lib/analytics.js";
 import TripableLogoLink from "./TripableLogoLink.jsx";
+import LoadingProgressBar from "./LoadingProgressBar.jsx";
 
 export function AuthStatus() {
   const session = useSession();
@@ -35,7 +36,7 @@ export function AuthStatus() {
   useEffect(() => {
     if (!session) return;
     setIsRedirecting(true);
-    const timer = setTimeout(() => navigate(returnUrl), 300);
+    const timer = setTimeout(() => navigate(returnUrl), 5000);
     return () => clearTimeout(timer);
   }, [session, navigate, returnUrl]);
 
@@ -76,7 +77,7 @@ export function AuthStatus() {
       setEmail('');
       setPassword('');
       setConfirmPassword('');
-      setTimeout(() => navigate(returnUrl), 3000);
+      setTimeout(() => navigate(returnUrl), 5000);
     }
     setLoading(false);
   };
@@ -125,9 +126,7 @@ export function AuthStatus() {
           {isBusy && (
             <>
               <div className="absolute inset-0 z-10 rounded-lg bg-white/60" />
-              <div className="absolute left-0 top-0 z-20 h-1 w-full overflow-hidden rounded-t-lg bg-slate-200">
-                <div className="auth-progress-bar" />
-              </div>
+              <LoadingProgressBar indeterminate className="absolute left-0 top-0 z-20 rounded-t-lg" />
             </>
           )}
           <div className={isBusy ? "pointer-events-none select-none" : ""}>

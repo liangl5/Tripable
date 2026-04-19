@@ -11,7 +11,9 @@ import Features from "../components/Features.jsx";
 import Demo from "../components/Demo.jsx";
 import CTA from "../components/CTA.jsx";
 import Footer from "../components/Footer.jsx";
+import ToastNotification from "../components/ToastNotification.jsx";
 import PeopleAltIcon from "@mui/icons-material/PeopleAlt";
+import LoadingProgressBar from "../components/LoadingProgressBar.jsx";
 
 export default function HomePage() {
   const session = useSession();
@@ -224,7 +226,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!flashNotice) return undefined;
-    const timer = setTimeout(() => clearFlashNotice(), 10000);
+    const timer = setTimeout(() => clearFlashNotice(), 5000);
     return () => clearTimeout(timer);
   }, [flashNotice, clearFlashNotice]);
 
@@ -407,14 +409,7 @@ export default function HomePage() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#ecf5e9]">
       <Header />
-      {tripNavigationLoading ? (
-        <div className="h-1.5 w-full overflow-hidden bg-slate-200">
-          <div
-            className="h-full bg-gradient-to-r from-[#fcae4e] to-[#f7942e] transition-all"
-            style={{ width: `${navigationProgress}%` }}
-          />
-        </div>
-      ) : null}
+      {tripNavigationLoading ? <LoadingProgressBar progress={navigationProgress} /> : null}
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <aside className="w-full bg-[#f4f7f2] lg:h-full lg:w-72">
           <div className="px-6 pb-6 pt-10">
@@ -540,22 +535,17 @@ export default function HomePage() {
         </main>
       </div>
       {flashNotice ? (
-        <div className="fixed bottom-4 right-6 z-[80] inline-flex items-center gap-4 rounded-xl bg-ink px-5 py-3 text-base font-semibold text-white shadow-lg">
-          <span>
-            {flashNotice.kind === "trip_deleted"
-              ? flashNotice.message || `“${flashNotice.name || "Trip"}” deleted`
-              : flashNotice.kind === "trip_copied"
-                ? `Copy of “${flashNotice.name || "Trip"}” created`
-                : flashNotice.message || "Done"}
-          </span>
-          <button
-            type="button"
-            className="ml-auto text-white/70 hover:text-white"
-            onClick={() => clearFlashNotice()}
-            aria-label="Dismiss notification"
-          >
-            ✕
-          </button>
+        <div className="fixed bottom-4 right-6 z-[80]">
+          <ToastNotification
+            message={
+              flashNotice.kind === "trip_deleted"
+                ? flashNotice.message || `“${flashNotice.name || "Trip"}” deleted`
+                : flashNotice.kind === "trip_copied"
+                  ? `Copy of “${flashNotice.name || "Trip"}” created`
+                  : flashNotice.message || "Done"
+            }
+            onDismiss={() => clearFlashNotice()}
+          />
         </div>
       ) : null}
     </div>
