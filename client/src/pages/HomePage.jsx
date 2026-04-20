@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTripStore } from "../hooks/useTripStore.js";
-import { useSession, useUserProfile } from "../App";
+import { useSession } from "../App";
 import { supabase } from "../lib/supabase.js";
 import Header from "../components/Header.jsx";
 import TripList from "../components/TripList.jsx";
@@ -17,7 +17,6 @@ import LoadingProgressBar from "../components/LoadingProgressBar.jsx";
 
 export default function HomePage() {
   const session = useSession();
-  const { profile } = useUserProfile();
   const navigate = useNavigate();
   const hasLoadedTripsRef = useRef(false);
   const trips = useTripStore((state) => state.trips);
@@ -131,7 +130,7 @@ export default function HomePage() {
   }, [currentUserId]);
 
   useEffect(() => {
-    if (!effectiveSession?.user?.id || !trips.length) {
+    if (!currentUserId || !trips.length) {
       setTripCards([]);
       return;
     }
@@ -198,13 +197,13 @@ export default function HomePage() {
           .from("UserTripRole")
           .select("tripId, role")
           .in("tripId", tripIds)
-          .eq("userId", effectiveSession.user.id);
+          .eq("userId", currentUserId);
         if (roleError) throw roleError;
 
         const roleMap = new Map((roleRows || []).map((row) => [row.tripId, row.role]));
         setTripCards(
           trips.map((trip) => {
-            const isOwner = trip.createdById === effectiveSession.user.id;
+            const isOwner = trip.createdById === currentUserId;
             const rawRole = isOwner ? "owner" : roleMap.get(trip.id) || "suggestor";
             const normalizedRole = rawRole === "owner" || rawRole === "editor" ? rawRole : "suggestor";
             const members = membersByTrip.get(trip.id) || [];
@@ -241,8 +240,8 @@ export default function HomePage() {
           trips.map((trip) => ({
             ...trip,
             ownerDisplayName: "Trip owner",
-            userRole: trip.createdById === effectiveSession.user.id ? "owner" : "suggestor",
-            canDelete: trip.createdById === effectiveSession.user.id
+            userRole: trip.createdById === currentUserId ? "owner" : "suggestor",
+            canDelete: trip.createdById === currentUserId
           }))
         );
       } finally {
@@ -251,7 +250,7 @@ export default function HomePage() {
     };
 
     void loadTripCardMeta();
-  }, [effectiveSession, trips, profile?.avatarColor]);
+  }, [currentUserId, trips]);
 
   useEffect(() => {
     if (!flashNotice) return undefined;

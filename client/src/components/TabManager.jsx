@@ -47,11 +47,9 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
   const [tabDropdownOpen, setTabDropdownOpen] = useState(false);
   const [tabDropdownPosition, setTabDropdownPosition] = useState(null);
   const [buttonTooltip, setButtonTooltip] = useState(null);
-  const [needsScroll, setNeedsScroll] = useState(false);
   const tabStripRef = useRef(null);
   const tabMenuRef = useRef(null);
   const tabDropdownRef = useRef(null);
-  const tabListContainerRef = useRef(null);
   const canManageTabs = userRole === "owner" || userRole === "editor";
 
   const normalizeTabName = (value) => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
@@ -162,18 +160,6 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
   }, [activeTab, tabs, tripId, userId, hydratedTab]);
 
   useEffect(() => {
-    const checkScroll = () => {
-      const container = tabListContainerRef.current;
-      if (container) {
-        setNeedsScroll(container.scrollWidth > container.clientWidth);
-      }
-    };
-    checkScroll();
-    window.addEventListener("resize", checkScroll);
-    return () => window.removeEventListener("resize", checkScroll);
-  }, [tabs]);
-
-  useEffect(() => {
     if (!draggedTab) return undefined;
 
     const handleWindowDragOver = (event) => {
@@ -191,18 +177,6 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
     window.addEventListener("dragover", handleWindowDragOver);
     return () => window.removeEventListener("dragover", handleWindowDragOver);
   }, [draggedTab]);
-
-  useEffect(() => {
-    const checkScroll = () => {
-      const container = tabListContainerRef.current;
-      if (container) {
-        setNeedsScroll(container.scrollWidth > container.clientWidth);
-      }
-    };
-    checkScroll();
-    window.addEventListener("resize", checkScroll);
-    return () => window.removeEventListener("resize", checkScroll);
-  }, [tabs]);
 
   useEffect(() => {
     if (!tabMenu && !tabDropdownOpen) return undefined;
@@ -603,8 +577,8 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
         </div>
       ) : null}
       {/* Tab Navigation */}
-      <div ref={tabStripRef} className={`h-9 border-t border-slate-200 bg-[#baf59c]/50 ${needsScroll ? "overflow-x-auto" : "overflow-x-hidden"} overflow-y-visible pl-0 pr-3`}>
-        <div ref={tabListContainerRef} className="flex h-full min-w-max items-stretch">
+      <div ref={tabStripRef} className="h-10 overflow-x-hidden overflow-y-visible border-t border-slate-200 bg-[#baf59c]/50 pl-0 pr-3">
+        <div className="flex h-full w-full items-stretch">
           {tabs.map((tab, index) => {
             const isActive = activeTab === tab.id;
             const leftNeighborActive = tabs[index - 1]?.id === activeTab;
@@ -613,11 +587,11 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
             const showLeftDivider = index > 0 && !isActive && !leftNeighborActive && !isHovered && !leftNeighborHovered;
 
             return (
-            <div key={tab.id} className="relative flex h-full items-stretch">
+            <div key={tab.id} className="relative flex h-full shrink-0 items-stretch">
               <div
-                className={`relative -mb-px flex h-full items-center gap-2 whitespace-nowrap px-4 py-0 text-sm font-medium leading-none transition-all duration-150 cursor-pointer ${
+                className={`relative -mb-px flex h-full items-center gap-2 whitespace-nowrap px-5 py-0 text-sm font-medium leading-none transition-all duration-150 cursor-pointer ${
                 isActive
-                  ? "relative z-30 rounded-t-lg border border-slate-200 border-b-transparent bg-white text-ink before:absolute before:-bottom-px before:right-full before:h-px before:w-[100vw] before:bg-slate-200 before:content-[''] after:absolute after:-bottom-px after:left-full after:h-px after:w-[100vw] after:bg-slate-200 after:content-['']"
+                  ? "relative z-30 rounded-t-lg border border-slate-200 border-b-transparent bg-white text-ink"
                       : `rounded-none border-y border-y-transparent border-x-0 bg-transparent text-[#1e4840] hover:relative hover:z-20 hover:rounded-t-lg hover:bg-[#9dd67f]/70 hover:text-[#173630] ${showLeftDivider ? "before:absolute before:left-0 before:top-1 before:bottom-1 before:w-px before:bg-slate-300 before:content-['']" : ""}`
               } ${canManageTabs && draggedTab === tab.id ? "cursor-grabbing" : ""} ${draggedTab === tab.id ? "border-slate-300 bg-slate-200/70 text-slate-500" : ""}`}
                 draggable={canManageTabs}
