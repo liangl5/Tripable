@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { buildUserNamesById, fetchUserProfilesByIds } from "../lib/userProfiles.js";
 
 function sortByCreatedAtAscending(items) {
   return [...items].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
@@ -11,6 +12,7 @@ export default function ThreadedComments({
   resourceId,
   userId,
   userNamesById = {},
+  canDeleteAnyComment = false,
   title = "Comments",
   initiallyOpen = false
 }) {
@@ -25,6 +27,7 @@ export default function ThreadedComments({
   const [commentsSaving, setCommentsSaving] = useState(false);
   const [commentsError, setCommentsError] = useState("");
   const [commentsTableReady, setCommentsTableReady] = useState(true);
+  const [resolvedUserNamesById, setResolvedUserNamesById] = useState({});
 
   useEffect(() => {
     if (!isOpen || !resourceId || !tableName || !resourceColumn) return;
@@ -71,6 +74,40 @@ export default function ThreadedComments({
     };
   }, [isOpen, resourceId, tableName, resourceColumn]);
 
+  useEffect(() => {
+    if (!comments.length) return;
+    let isMounted = true;
+
+    const loadMissingAuthors = async () => {
+      const missingUserIds = Array.from(
+        new Set(
+          comments
+            .map((comment) => comment.userId)
+            .filter((uid) => uid && !userNamesById[uid] && !resolvedUserNamesById[uid])
+        )
+      );
+
+      if (!missingUserIds.length) return;
+
+      try {
+        const profiles = await fetchUserProfilesByIds(missingUserIds);
+        if (!isMounted || !profiles.length) return;
+        const nextNames = buildUserNamesById(profiles);
+        setResolvedUserNamesById((current) => ({
+          ...current,
+          ...nextNames
+        }));
+      } catch (error) {
+        console.error(`Failed to load comment author profiles for ${tableName}:`, error);
+      }
+    };
+
+    void loadMissingAuthors();
+    return () => {
+      isMounted = false;
+    };
+  }, [comments, resolvedUserNamesById, tableName, userNamesById]);
+
   const commentsByParent = useMemo(() => {
     const map = new Map();
     for (const comment of comments) {
@@ -97,6 +134,7 @@ export default function ThreadedComments({
   };
 
   const getAuthorName = (uid) => {
+    if (resolvedUserNamesById[uid]) return resolvedUserNamesById[uid];
     if (userNamesById[uid]) return userNamesById[uid];
     if (uid === userId) return "You";
     return "Traveler";
@@ -232,17 +270,22 @@ export default function ThreadedComments({
     }
   };
 
-  const handleDeleteComment = async (commentId) => {
-    if (!commentId || commentsSaving) return;
+  const handleDeleteComment = async (comment) => {
+    if (!comment?.id || commentsSaving) return;
     const previous = comments;
-    const idsToRemove = collectCommentIdsForDelete(comments, commentId);
+    const idsToRemove = collectCommentIdsForDelete(comments, comment.id);
+    const canModerateDelete = canDeleteAnyComment && comment.userId !== userId;
 
     setCommentsSaving(true);
     setCommentsError("");
     setComments((current) => current.filter((comment) => !idsToRemove.has(comment.id)));
 
     try {
-      const { error } = await supabase.from(tableName).delete().eq("id", commentId).eq("userId", userId);
+      let query = supabase.from(tableName).delete().eq("id", comment.id);
+      if (!canModerateDelete) {
+        query = query.eq("userId", userId);
+      }
+      const { error } = await query;
       if (error) throw error;
     } catch (error) {
       console.error(`Failed to delete comment in ${tableName}:`, error);
@@ -259,7 +302,8 @@ export default function ThreadedComments({
       const indentLevel = Math.min(depth, 3);
       const authorName = getAuthorName(comment.userId);
       const createdLabel = new Date(comment.createdAt).toLocaleString();
-      const isOwner = comment.userId === userId;
+      const isAuthor = comment.userId === userId;
+      const canDeleteComment = isAuthor || canDeleteAnyComment;
       const children = renderComments(comment.id, depth + 1);
 
       return (
@@ -318,7 +362,7 @@ export default function ThreadedComments({
                 >
                   Reply
                 </button>
-                {isOwner ? (
+                {isAuthor ? (
                   <>
                     <button
                       type="button"
@@ -327,14 +371,16 @@ export default function ThreadedComments({
                     >
                       Edit
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteComment(comment.id)}
-                        className="shrink-0 font-semibold text-coral hover:underline"
-                    >
-                      Delete
-                    </button>
                   </>
+                ) : null}
+                {canDeleteComment ? (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteComment(comment)}
+                    className="shrink-0 font-semibold text-coral hover:underline"
+                  >
+                    Delete
+                  </button>
                 ) : null}
                 </div>
               </div>

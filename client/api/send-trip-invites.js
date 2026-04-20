@@ -10,12 +10,39 @@ function isValidEmail(email) {
 function normalizeEmails(emails) {
   const unique = new Set();
   for (const value of Array.isArray(emails) ? emails : []) {
-    const email = String(value || "").trim().toLowerCase();
+    const rawEmail = value && typeof value === "object" ? value.email : value;
+    const email = String(rawEmail || "").trim().toLowerCase();
     if (!email || !isValidEmail(email)) continue;
     unique.add(email);
     if (unique.size >= MAX_RECIPIENTS) break;
   }
   return Array.from(unique);
+}
+
+function formatFromAddress(value) {
+  const trimmed = String(value || "").trim();
+  const fallback = "Tripable <onboarding@resend.dev>";
+
+  if (!trimmed) return fallback;
+
+  const bracketedMatch = trimmed.match(/^([^<>]+?)\s*<\s*([^<>\s@]+@[^\s@]+\.[^\s@]+)\s*>$/);
+  if (bracketedMatch) {
+    const displayName = bracketedMatch[1].trim().replace(/\s+/g, " ");
+    const email = bracketedMatch[2].trim().toLowerCase();
+    return `${displayName} <${email}>`;
+  }
+
+  const emailMatch = trimmed.match(/([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i);
+  if (!emailMatch) return fallback;
+
+  const email = emailMatch[1].trim().toLowerCase();
+  const displayName = trimmed
+    .replace(emailMatch[0], "")
+    .replace(/[<>"]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return `${displayName || "Tripable"} <${email}>`;
 }
 
 function escapeHtml(value) {
@@ -115,7 +142,7 @@ export default async function handler(req, res) {
   }
 
   const resend = new Resend(process.env.RESEND_API_KEY);
-  const from = process.env.RESEND_FROM_EMAIL || "Tripable <onboarding@resend.dev>";
+  const from = formatFromAddress(process.env.RESEND_FROM_EMAIL);
 
   const results = [];
 

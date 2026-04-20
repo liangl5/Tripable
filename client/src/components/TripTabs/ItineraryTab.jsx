@@ -822,6 +822,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
                   resourceId={day.id}
                   userId={userId}
                   userNamesById={memberNamesById}
+                  canDeleteAnyComment={userRole === "owner"}
                   title="Day Comments"
                 />
               </div>

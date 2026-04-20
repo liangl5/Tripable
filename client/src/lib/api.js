@@ -2056,15 +2056,6 @@ export const api = {
 
     const membershipIds = membershipRows.map((membership) => membership.id);
 
-    const { data: ideaRows, error: ideaError } = await supabase
-      .from("Idea")
-      .select("id")
-      .eq("tripId", tripId);
-
-    if (ideaError) throw ideaError;
-
-    const ideaIds = (ideaRows || []).map((idea) => idea.id);
-
     const { data: deletedMemberships, error: deleteMembershipError } = await supabase
       .from("TripMember")
       .delete()
@@ -2074,24 +2065,6 @@ export const api = {
     if (deleteMembershipError) throw deleteMembershipError;
     if (!deletedMemberships?.length) {
       throw new Error("Unable to leave this trip right now.");
-    }
-
-    const { error: availabilityDeleteError } = await supabase
-      .from("UserAvailability")
-      .delete()
-      .eq("tripId", tripId)
-      .eq("userId", user.id);
-
-    if (availabilityDeleteError) throw availabilityDeleteError;
-
-    if (ideaIds.length) {
-      const { error: voteDeleteError } = await supabase
-        .from("Vote")
-        .delete()
-        .eq("userId", user.id)
-        .in("ideaId", ideaIds);
-
-      if (voteDeleteError) throw voteDeleteError;
     }
 
     const { error: roleDeleteError } = await supabase

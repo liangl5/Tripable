@@ -806,6 +806,7 @@ export default function ListTab({
                               resourceId={idea.id}
                               userId={userId}
                               userNamesById={memberNamesById}
+                              canDeleteAnyComment={userRole === "owner"}
                               title="Comments"
                             />
                           </div>

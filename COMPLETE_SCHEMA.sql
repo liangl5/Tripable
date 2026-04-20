@@ -222,7 +222,8 @@ CREATE TABLE "PendingTripInvite" (
   "acceptedByUserId" TEXT REFERENCES "User"(id) ON DELETE SET NULL,
   "createdAt" TIMESTAMPTZ DEFAULT NOW(),
   "acceptedAt" TIMESTAMPTZ,
-  "canceledAt" TIMESTAMPTZ
+  "canceledAt" TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 12. AvailabilityTabData (per-tab availability data)
@@ -883,35 +884,67 @@ CREATE POLICY "Users can remove their own non-owner role" ON "UserTripRole" FOR 
 );
 
 -- PendingTripInvite policies
-CREATE POLICY "Owners can view pending invites" ON "PendingTripInvite" FOR SELECT USING (
+CREATE POLICY "Owners and editors can view pending invites" ON "PendingTripInvite" FOR SELECT USING (
   auth.uid()::text IN (
     SELECT "createdById"
     FROM "Trip"
     WHERE id = "PendingTripInvite"."tripId"
+  )
+  OR EXISTS (
+    SELECT 1
+    FROM "UserTripRole"
+    WHERE "tripId" = "PendingTripInvite"."tripId"
+      AND "userId" = auth.uid()::text
+      AND role = 'editor'
   )
 );
 CREATE POLICY "Invitees can view their pending invites" ON "PendingTripInvite" FOR SELECT USING (
   LOWER(email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
 );
-CREATE POLICY "Owners can create pending invites" ON "PendingTripInvite" FOR INSERT WITH CHECK (
-  auth.uid()::text IN (
-    SELECT "createdById"
-    FROM "Trip"
-    WHERE id = "PendingTripInvite"."tripId"
+CREATE POLICY "Owners and editors can create pending invites" ON "PendingTripInvite" FOR INSERT WITH CHECK (
+  (
+    auth.uid()::text IN (
+      SELECT "createdById"
+      FROM "Trip"
+      WHERE id = "PendingTripInvite"."tripId"
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM "UserTripRole"
+      WHERE "tripId" = "PendingTripInvite"."tripId"
+        AND "userId" = auth.uid()::text
+        AND role = 'editor'
+    )
   )
   AND role IN ('editor', 'suggestor')
 );
-CREATE POLICY "Owners can update pending invites" ON "PendingTripInvite" FOR UPDATE USING (
+CREATE POLICY "Owners and editors can update pending invites" ON "PendingTripInvite" FOR UPDATE USING (
   auth.uid()::text IN (
     SELECT "createdById"
     FROM "Trip"
     WHERE id = "PendingTripInvite"."tripId"
   )
+  OR EXISTS (
+    SELECT 1
+    FROM "UserTripRole"
+    WHERE "tripId" = "PendingTripInvite"."tripId"
+      AND "userId" = auth.uid()::text
+      AND role = 'editor'
+  )
 ) WITH CHECK (
-  auth.uid()::text IN (
-    SELECT "createdById"
-    FROM "Trip"
-    WHERE id = "PendingTripInvite"."tripId"
+  (
+    auth.uid()::text IN (
+      SELECT "createdById"
+      FROM "Trip"
+      WHERE id = "PendingTripInvite"."tripId"
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM "UserTripRole"
+      WHERE "tripId" = "PendingTripInvite"."tripId"
+        AND "userId" = auth.uid()::text
+        AND role = 'editor'
+    )
   )
   AND role IN ('editor', 'suggestor')
 );
@@ -994,6 +1027,13 @@ CREATE POLICY "Trip members can post availability comments" ON "AvailabilityTabC
 CREATE POLICY "Users can delete their own availability comments" ON "AvailabilityTabComment" FOR DELETE USING (
   auth.uid()::text = "userId"
 );
+CREATE POLICY "Trip owners can delete any availability comments" ON "AvailabilityTabComment" FOR DELETE USING (
+  auth.uid()::text IN (
+    SELECT "createdById"
+    FROM "Trip"
+    WHERE id = (SELECT "tripId" FROM "TripTabConfiguration" WHERE id = "AvailabilityTabComment"."tabId")
+  )
+);
 CREATE POLICY "Users can edit their own availability comments" ON "AvailabilityTabComment" FOR UPDATE USING (
   auth.uid()::text = "userId"
 ) WITH CHECK (
@@ -1019,6 +1059,13 @@ CREATE POLICY "Trip members can post idea comments" ON "IdeaComment" FOR INSERT 
 );
 CREATE POLICY "Users can delete their own idea comments" ON "IdeaComment" FOR DELETE USING (
   auth.uid()::text = "userId"
+);
+CREATE POLICY "Trip owners can delete any idea comments" ON "IdeaComment" FOR DELETE USING (
+  auth.uid()::text IN (
+    SELECT "createdById"
+    FROM "Trip"
+    WHERE id = (SELECT "tripId" FROM "Idea" WHERE id = "IdeaComment"."ideaId")
+  )
 );
 CREATE POLICY "Users can edit their own idea comments" ON "IdeaComment" FOR UPDATE USING (
   auth.uid()::text = "userId"
@@ -1052,6 +1099,13 @@ CREATE POLICY "Trip members can post transaction comments" ON "TransactionCommen
 CREATE POLICY "Users can delete their own transaction comments" ON "TransactionComment" FOR DELETE USING (
   auth.uid()::text = "userId"
 );
+CREATE POLICY "Trip owners can delete any transaction comments" ON "TransactionComment" FOR DELETE USING (
+  auth.uid()::text IN (
+    SELECT "createdById"
+    FROM "Trip"
+    WHERE id = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionComment"."transactionId")
+  )
+);
 CREATE POLICY "Users can edit their own transaction comments" ON "TransactionComment" FOR UPDATE USING (
   auth.uid()::text = "userId"
 ) WITH CHECK (
@@ -1083,6 +1137,13 @@ CREATE POLICY "Trip members can post itinerary day comments" ON "ItineraryDayCom
 );
 CREATE POLICY "Users can delete their own itinerary day comments" ON "ItineraryDayComment" FOR DELETE USING (
   auth.uid()::text = "userId"
+);
+CREATE POLICY "Trip owners can delete any itinerary day comments" ON "ItineraryDayComment" FOR DELETE USING (
+  auth.uid()::text IN (
+    SELECT "createdById"
+    FROM "Trip"
+    WHERE id = (SELECT "tripId" FROM "ItineraryDay" WHERE id = "ItineraryDayComment"."itineraryDayId")
+  )
 );
 CREATE POLICY "Users can edit their own itinerary day comments" ON "ItineraryDayComment" FOR UPDATE USING (
   auth.uid()::text = "userId"

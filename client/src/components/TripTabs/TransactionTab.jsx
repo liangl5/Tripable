@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import ThreadedComments from "../ThreadedComments.jsx";
+import { buildUserNamesById, fetchUserProfilesByIds } from "../../lib/userProfiles.js";
 
 const DEFAULT_FORM = {
   name: "",
@@ -61,14 +62,14 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [userTotal, setUserTotal] = useState(0);
   const [tripTotal, setTripTotal] = useState(0);
+  const [historicalUserNamesById, setHistoricalUserNamesById] = useState({});
 
   const memberNamesById = useMemo(
-    () =>
-      (tripMembers || []).reduce((acc, member) => {
-        acc[member.id] = member.name || member.email || "Traveler";
-        return acc;
-      }, {}),
-    [tripMembers]
+    () => ({
+      ...historicalUserNamesById,
+      ...buildUserNamesById(tripMembers)
+    }),
+    [historicalUserNamesById, tripMembers]
   );
 
   const validateTransaction = (candidate) => {
@@ -168,6 +169,22 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
         nextTripTotal,
         nextPersonTotals
       } = await getTransactionWithSplits(rows);
+      const referencedUserIds = Array.from(
+        new Set(
+          [
+            ...rows.flatMap((transaction) => [transaction.createdById, transaction.paidByUserId]),
+            ...Object.values(splitMap).flatMap((splits) => (splits || []).map((split) => split.userId))
+          ].filter(Boolean)
+        )
+      );
+      const missingUserIds = referencedUserIds.filter((uid) => !memberNamesById[uid]);
+      if (missingUserIds.length) {
+        const profiles = await fetchUserProfilesByIds(missingUserIds);
+        setHistoricalUserNamesById((current) => ({
+          ...current,
+          ...buildUserNamesById(profiles)
+        }));
+      }
 
       setTransactions(rows);
       setSplitsByTransaction(splitMap);
@@ -179,7 +196,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
     } finally {
       setLoading(false);
     }
-  }, [getTransactionWithSplits, tab.id]);
+  }, [getTransactionWithSplits, memberNamesById, tab.id]);
 
   // Load transactions
   useEffect(() => {
@@ -713,6 +730,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
                 resourceId={transaction.id}
                 userId={userId}
                 userNamesById={memberNamesById}
+                canDeleteAnyComment={userRole === "owner"}
                 title="Comments"
               />
             </div>

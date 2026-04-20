@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { DAY_NAMES, addMonths, formatISO, monthKey, startOfMonth } from "../../lib/calendarHelpers.js";
+import { buildUserNamesById, fetchUserProfilesByIds } from "../../lib/userProfiles.js";
 
 export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
   const [startMonth, setStartMonth] = useState(new Date());
@@ -25,11 +26,13 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
   const [commentsSaving, setCommentsSaving] = useState(false);
   const [commentsError, setCommentsError] = useState("");
   const [commentsTableReady, setCommentsTableReady] = useState(true);
+  const [commentAuthorNamesById, setCommentAuthorNamesById] = useState({});
   const [loading, setLoading] = useState(false);
   const [userSubmittedAt, setUserSubmittedAt] = useState(null);
   const [editStartSelectedDates, setEditStartSelectedDates] = useState(new Set());
   const canEditAvailability = true;
   const canEditCells = canEditAvailability && (!showHeatmap || isEditing);
+  const canDeleteAnyComment = userRole === "owner";
 
   // Load user's current availability for this tab
   useEffect(() => {
@@ -92,20 +95,25 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
           return;
         }
 
-        const { data: userProfiles, error: userError } = await supabase
-          .from("User")
-          .select("id, name")
-          .in("id", memberIds);
-        if (userError) throw userError;
-        setAllUsers(userProfiles || []);
-
         const { data, error: availabilityError } = await supabase
           .from("AvailabilityTabData")
           .select("date, userId")
           .eq("tabId", tab.id)
-          .eq("isSelected", true)
-          .in("userId", memberIds);
+          .eq("isSelected", true);
         if (availabilityError) throw availabilityError;
+
+        const participantIds = Array.from(
+          new Set([
+            ...memberIds,
+            ...(data || []).map((entry) => entry.userId)
+          ].filter(Boolean))
+        );
+        const userProfiles = await fetchUserProfilesByIds(participantIds);
+        const sortedProfiles = [...userProfiles].sort((left, right) =>
+          String(left.name || left.email || "").localeCompare(String(right.name || right.email || ""))
+        );
+        const userNameById = buildUserNamesById(sortedProfiles);
+        setAllUsers(sortedProfiles);
 
         if (data) {
           const counts = {};
@@ -118,11 +126,6 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
           });
           setAvailabilityData(counts);
 
-          const userNameById = {};
-          (userProfiles || []).forEach((user) => {
-            userNameById[user.id] = user.name;
-          });
-
           const byDateNames = {};
           Object.entries(byDateUserIds).forEach(([date, ids]) => {
             byDateNames[date] = ids
@@ -132,19 +135,10 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
           setAvailableUsersByDate(byDateNames);
         }
 
-        const { data: allAvailability } = await supabase
-          .from("AvailabilityTabData")
-          .select("userId, date, isSelected, submittedAt")
-          .eq("tabId", tab.id)
-          .eq("isSelected", true)
-          .in("userId", memberIds);
-
         const byUser = {};
-        (allAvailability || []).forEach(({ userId: uid, date, isSelected }) => {
+        (data || []).forEach(({ userId: uid, date }) => {
           if (!byUser[uid]) byUser[uid] = [];
-          if (isSelected) {
-            byUser[uid].push(date.split("T")[0]);
-          }
+          byUser[uid].push(date.split("T")[0]);
         });
         setUserAvailability(byUser);
       } catch (error) {
@@ -179,6 +173,21 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
 
         setCommentsTableReady(true);
         setComments(data || []);
+
+        const missingAuthorIds = Array.from(
+          new Set(
+            (data || [])
+              .map((comment) => comment.userId)
+              .filter((uid) => uid && !commentAuthorNamesById[uid])
+          )
+        );
+        if (missingAuthorIds.length > 0) {
+          const profiles = await fetchUserProfilesByIds(missingAuthorIds);
+          setCommentAuthorNamesById((current) => ({
+            ...current,
+            ...buildUserNamesById(profiles)
+          }));
+        }
       } catch (error) {
         console.error("Failed to load availability comments:", error);
         setCommentsError("Failed to load comments.");
@@ -188,7 +197,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
     };
 
     loadComments();
-  }, [showHeatmap, tab.id]);
+  }, [commentAuthorNamesById, showHeatmap, tab.id]);
 
   const month1 = startOfMonth(startMonth);
   const month2 = addMonths(startMonth, 1);
@@ -235,12 +244,11 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
     return Object.values(availabilityData).reduce((max, value) => Math.max(max, Number(value) || 0), 0);
   }, [availabilityData]);
   const userNamesById = useMemo(() => {
-    const names = {};
-    for (const user of allUsers) {
-      names[user.id] = user.name;
-    }
-    return names;
-  }, [allUsers]);
+    return {
+      ...buildUserNamesById(allUsers),
+      ...commentAuthorNamesById
+    };
+  }, [allUsers, commentAuthorNamesById]);
 
   useEffect(() => {
     const stopDrag = () => {
@@ -501,17 +509,22 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
     return ids;
   };
 
-  const handleDeleteComment = async (commentId) => {
-    if (!commentId || commentsSaving) return;
+  const handleDeleteComment = async (comment) => {
+    if (!comment?.id || commentsSaving) return;
     const previous = comments;
-    const idsToRemove = collectCommentIdsForDelete(comments, commentId);
+    const idsToRemove = collectCommentIdsForDelete(comments, comment.id);
+    const canModerateDelete = canDeleteAnyComment && comment.userId !== userId;
 
     setCommentsSaving(true);
     setCommentsError("");
     setComments((current) => current.filter((comment) => !idsToRemove.has(comment.id)));
 
     try {
-      const { error } = await supabase.from("AvailabilityTabComment").delete().eq("id", commentId).eq("userId", userId);
+      let query = supabase.from("AvailabilityTabComment").delete().eq("id", comment.id);
+      if (!canModerateDelete) {
+        query = query.eq("userId", userId);
+      }
+      const { error } = await query;
       if (error) throw error;
     } catch (error) {
       console.error("Failed to delete comment:", error);
@@ -537,7 +550,8 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
     return branch.map((comment) => {
       const authorName = userNamesById[comment.userId] || "Traveler";
       const createdLabel = new Date(comment.createdAt).toLocaleString();
-      const isOwner = comment.userId === userId;
+      const isAuthor = comment.userId === userId;
+      const canDeleteComment = isAuthor || canDeleteAnyComment;
       const children = renderComments(comment.id, depth + 1);
 
       return (
@@ -591,7 +605,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
                 >
                   Reply
                 </button>
-                {isOwner ? (
+                {isAuthor ? (
                   <>
                     <button
                       type="button"
@@ -600,14 +614,16 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
                     >
                       Edit
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteComment(comment.id)}
-                      className="font-semibold text-coral hover:underline"
-                    >
-                      Delete
-                    </button>
                   </>
+                ) : null}
+                {canDeleteComment ? (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteComment(comment)}
+                    className="font-semibold text-coral hover:underline"
+                  >
+                    Delete
+                  </button>
                 ) : null}
               </div>
             </div>

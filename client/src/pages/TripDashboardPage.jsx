@@ -27,6 +27,32 @@ function normalizeRole(role) {
   return "suggestor";
 }
 
+function buildAccessDeniedError() {
+  return {
+    title: "Access denied",
+    message: "You do not have access to this trip. Redirecting you back home...",
+    redirectHome: true
+  };
+}
+
+function buildTripUnavailableError() {
+  return {
+    title: "Trip unavailable",
+    message: "This trip does not exist or you do not have access to it. Redirecting you back home...",
+    redirectHome: true
+  };
+}
+
+function isHiddenOrMissingTripError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    error?.code === "PGRST116" ||
+    error?.status === 406 ||
+    message.includes("0 rows") ||
+    message.includes("no rows")
+  );
+}
+
 export default function TripDashboardPage() {
   const { tripId } = useParams();
   const location = useLocation();
@@ -36,6 +62,7 @@ export default function TripDashboardPage() {
   const [tripMembers, setTripMembers] = useState([]);
   const [userRole, setUserRole] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [dashboardError, setDashboardError] = useState(null);
   const [copied, setCopied] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [memberRoles, setMemberRoles] = useState({});
@@ -61,9 +88,26 @@ export default function TripDashboardPage() {
 
   const currentUserId = session?.user?.id;
 
+  const showDashboardError = (nextError) => {
+    setTrip(null);
+    setTripMembers([]);
+    setMemberRoles({});
+    setUserRole(null);
+    setExistingPendingInvites([]);
+    setDashboardError(nextError);
+  };
+
+  useEffect(() => {
+    if (!dashboardError?.redirectHome) return undefined;
+    const timer = window.setTimeout(() => {
+      navigate("/");
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [dashboardError, navigate]);
+
   // Keep ideas in sync across collaborators without polling (Supabase Realtime).
   useEffect(() => {
-    if (!tripId || !currentUserId) return;
+    if (!tripId || !currentUserId || !trip) return;
 
     let timeout = null;
     const scheduleReload = () => {
@@ -92,7 +136,7 @@ export default function TripDashboardPage() {
       if (timeout) window.clearTimeout(timeout);
       supabase.removeChannel(channel);
     };
-  }, [currentUserId, loadIdeas, tripId]);
+  }, [currentUserId, loadIdeas, trip, tripId]);
 
   const loadPendingInvites = async () => {
     const { data, error } = await supabase
@@ -123,10 +167,25 @@ export default function TripDashboardPage() {
 
     const prefetchedTripData = location.state?.prefetchedTripData;
     if (prefetchedTripData?.trip?.id === tripId) {
+      const prefetchedRole = prefetchedTripData.userRole
+        ? normalizeRole(prefetchedTripData.userRole)
+        : null;
+      const prefetchedHasAccess =
+        prefetchedTripData.trip.createdById === currentUserId ||
+        Boolean(prefetchedRole) ||
+        (prefetchedTripData.tripMembers || []).some((member) => member.id === currentUserId);
+
+      if (!prefetchedHasAccess) {
+        showDashboardError(buildAccessDeniedError());
+        setLoading(false);
+        return;
+      }
+
+      setDashboardError(null);
       setTrip(prefetchedTripData.trip);
       setTripMembers(prefetchedTripData.tripMembers || []);
       setMemberRoles(prefetchedTripData.memberRoles || {});
-      setUserRole(prefetchedTripData.userRole || "suggestor");
+      setUserRole(prefetchedRole || "suggestor");
       setExistingPendingInvites(prefetchedTripData.existingPendingInvites || []);
       setLoading(false);
       void trackEvent("trip_dashboard_loaded", {
@@ -139,6 +198,8 @@ export default function TripDashboardPage() {
     const loadTripData = async () => {
       try {
         setLoading(true);
+        setDashboardError(null);
+        setTrip(null);
 
         // Load trip
         const { data: tripData, error: tripError } = await supabase
@@ -148,7 +209,6 @@ export default function TripDashboardPage() {
           .single();
 
         if (tripError) throw tripError;
-        setTrip(tripData);
 
         // Load trip members from TripMember table
         const { data: memberRelations } = await supabase
@@ -156,7 +216,8 @@ export default function TripDashboardPage() {
           .select("userId")
           .eq("tripId", tripId);
 
-        const memberIds = [tripData.createdById, ...(memberRelations?.map((m) => m.userId) || [])];
+        const relationUserIds = (memberRelations || []).map((member) => member.userId).filter(Boolean);
+        const memberIds = [tripData.createdById, ...relationUserIds];
 
         const { data: roleRows } = await supabase
           .from("UserTripRole")
@@ -168,6 +229,18 @@ export default function TripDashboardPage() {
           roleMap[row.userId] = row.userId === tripData.createdById ? "owner" : (row.role === "editor" ? "editor" : "suggestor");
         });
         roleMap[tripData.createdById] = "owner";
+
+        const hasAccess =
+          tripData.createdById === currentUserId ||
+          relationUserIds.includes(currentUserId) ||
+          Boolean(roleMap[currentUserId]);
+
+        if (!hasAccess) {
+          showDashboardError(buildAccessDeniedError());
+          return;
+        }
+
+        setTrip(tripData);
         setMemberRoles(roleMap);
 
         const derivedRole = tripData?.createdById === currentUserId
@@ -191,7 +264,15 @@ export default function TripDashboardPage() {
         await loadPendingInvites();
       } catch (error) {
         console.error("Failed to load trip:", error);
-        navigate("/");
+        showDashboardError(
+          isHiddenOrMissingTripError(error)
+            ? buildTripUnavailableError()
+            : {
+                title: "Trip unavailable",
+                message: "We couldn't open that trip. Redirecting you back home...",
+                redirectHome: true
+              }
+        );
       } finally {
         setLoading(false);
       }
@@ -641,8 +722,25 @@ export default function TripDashboardPage() {
 
   if (!trip) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-slate-600">Trip not found</div>
+      <div className="min-h-screen bg-[#ecf5e9]">
+        <TripSidebarHeader />
+        <div className="flex min-h-[70vh] items-center justify-center px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-card">
+            <h2 className="text-2xl font-semibold text-[#1e4840]">
+              {dashboardError?.title || "Trip unavailable"}
+            </h2>
+            <p className="mt-3 text-sm text-slate-600">
+              {dashboardError?.message || "We couldn't open that trip."}
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate("/")}
+              className="mt-6 rounded-xl bg-[#1e4840] px-5 py-3 text-sm font-semibold text-white hover:bg-[#152f2a]"
+            >
+              Back to home
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
