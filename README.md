@@ -3,8 +3,8 @@
 Collaborative trip planning MVP for groups to collect ideas, vote, and generate a shared itinerary.
 
 ## Deployed Link
-https://www.tripable.pro/
-https://tripable-testing.vercel.app/ - test production
+- https://www.tripable.pro/
+- https://tripable-testing.vercel.app/ - test production
 
 ## Dev Links
 - https://github.com/users/liangl5/projects/1 - backlog
