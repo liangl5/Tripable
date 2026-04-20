@@ -220,6 +220,10 @@ export default function TripMapPanel({
     };
 
     const renderMarkers = async () => {
+      // Always clear any previously-rendered markers first, even if Google Maps is momentarily unavailable.
+      // This prevents "stuck" pins when the list/ideas update before the JS API finishes loading.
+      clearMarkers();
+
       const googleMaps = window.google?.maps;
       if (!googleMaps || cancelled) return;
       const hasMapId = mapHasIdRef.current;
@@ -230,8 +234,6 @@ export default function TripMapPanel({
         if (cancelled) return;
         ({ AdvancedMarkerElement, PinElement } = markerLibrary);
       }
-
-      clearMarkers();
 
       const map = mapInstanceRef.current;
       const bounds = new googleMaps.LatLngBounds();

@@ -160,6 +160,7 @@ export default function ListTab({
     const list = lists.find((candidate) => candidate.id === listId) || lists[0] || null;
     setComposerState({
       defaultListId: list?.id || "",
+      defaultListName: list?.name || "",
       defaultTitle: ""
     });
   };
@@ -340,10 +341,11 @@ export default function ListTab({
                         e.stopPropagation();
                         setDeleteListConfirm(list);
                       }}
-                      className="p-1 text-slate-600 hover:text-coral text-sm"
+                      disabled={deleteListLoadingId === list.id}
+                      className="p-1 text-slate-600 hover:text-coral text-sm disabled:cursor-not-allowed disabled:opacity-50"
                       title="Delete"
                     >
-                      ✕
+                      {deleteListLoadingId === list.id ? "…" : "✕"}
                     </button>
                   </div>
                 )}
@@ -372,9 +374,10 @@ export default function ListTab({
                               type="button"
                               onMouseDown={(event) => event.stopPropagation()}
                               onClick={() => setDeleteIdeaConfirm(idea)}
-                              className="text-xs text-coral hover:font-semibold flex-shrink-0"
+                              disabled={deleteIdeaLoadingId === idea.id}
+                              className="text-xs text-coral hover:font-semibold flex-shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              ✕
+                              {deleteIdeaLoadingId === idea.id ? "Deleting..." : "✕"}
                             </button>
                           )}
                         </div>
@@ -504,6 +507,7 @@ export default function ListTab({
           destination={trip?.destination || null}
           listOptions={lists}
           defaultListId={composerState.defaultListId}
+          defaultListName={composerState.defaultListName}
           defaultTitle={composerState.defaultTitle}
           onClose={() => setComposerState(null)}
           onSave={handleCreateIdea}

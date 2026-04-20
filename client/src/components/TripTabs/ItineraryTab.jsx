@@ -414,10 +414,16 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
       filtered = filtered.filter((idea) => allowedListIds.includes(idea.listId));
     }
 
+    // Hide activities whose list was deleted (prevents orphan "Activity Bank" items after deleting a list).
+    const validListIds = new Set((listOptions || []).map((list) => list.id).filter(Boolean));
+    if (validListIds.size > 0) {
+      filtered = filtered.filter((idea) => idea?.listId && validListIds.has(idea.listId));
+    }
+
     return filtered.filter(
       (idea) =>
         !itineraryItems.some((item) => item.ideaId === idea.id) &&
-        idea.entryType !== "activity"
+        Boolean(idea.listId)
     );
   };
 

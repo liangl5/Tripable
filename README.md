@@ -39,6 +39,14 @@ npm run dev
 
 Client runs on `http://localhost:5173` and API on `http://localhost:3001`.
 
+## Database schema updates
+
+- Use COMPLETE_SCHEMA.sql only for a brand-new empty database.
+- Do not run COMPLETE_SCHEMA.sql on a database that already has data. It contains DROP TABLE statements.
+- For existing databases, run sql/reapply_schema_updates_safe.sql.
+- The safe script is idempotent and non-destructive for normal updates.
+- Note: it includes one intentional cleanup that removes old orphan ideas created by previous list FK behavior.
+
 
 ## API Endpoint
 

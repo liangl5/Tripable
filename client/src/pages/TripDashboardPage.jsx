@@ -61,6 +61,39 @@ export default function TripDashboardPage() {
 
   const currentUserId = session?.user?.id;
 
+  // Keep ideas in sync across collaborators without polling (Supabase Realtime).
+  useEffect(() => {
+    if (!tripId || !currentUserId) return;
+
+    let timeout = null;
+    const scheduleReload = () => {
+      if (timeout) return;
+      timeout = window.setTimeout(() => {
+        timeout = null;
+        void loadIdeas(tripId);
+      }, 120);
+    };
+
+    const channel = supabase
+      .channel(`trip-ideas:${tripId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "Idea",
+          filter: `tripId=eq.${tripId}`
+        },
+        () => scheduleReload()
+      )
+      .subscribe();
+
+    return () => {
+      if (timeout) window.clearTimeout(timeout);
+      supabase.removeChannel(channel);
+    };
+  }, [currentUserId, loadIdeas, tripId]);
+
   const loadPendingInvites = async () => {
     const { data, error } = await supabase
       .from("PendingTripInvite")
