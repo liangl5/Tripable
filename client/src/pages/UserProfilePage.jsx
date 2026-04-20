@@ -64,6 +64,10 @@ export default function UserProfilePage() {
     setDeleteAccountMessage("Account deletion feature coming soon. Our team will implement this.");
   };
 
+  const handleGoToDashboard = () => {
+    navigate("/");
+  };
+
   if (!session) {
     navigate("/");
     return null;
@@ -73,7 +77,21 @@ export default function UserProfilePage() {
     <div className="min-h-screen bg-[#ecf5e9]">
       <Header />
       <div className="mx-auto flex max-w-2xl flex-col px-6 py-12">
-        <h1 className="text-3xl font-semibold text-ink mb-8">Profile Settings</h1>
+        <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-3xl font-semibold text-ink">Profile Settings</h1>
+          <button
+            type="button"
+            onClick={handleGoToDashboard}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-[#1e4840] hover:bg-slate-50"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M3 10.5 12 3l9 7.5" />
+              <path d="M5 9.5V21h14V9.5" />
+              <path d="M10 21v-6h4v6" />
+            </svg>
+            Home
+          </button>
+        </div>
 
         <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6">
           <h2 className="text-lg font-semibold text-ink mb-4">Account Information</h2>
