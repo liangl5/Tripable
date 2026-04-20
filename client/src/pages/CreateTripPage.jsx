@@ -114,7 +114,6 @@ export default function CreateTripPage() {
         invitee_count: nextInvitees.length
       });
 
-      // Create default tabs for the new trip
       if (session?.user?.id) {
         await createDefaultTripsTab(trip.id, session.user.id);
       }
@@ -151,7 +150,9 @@ export default function CreateTripPage() {
           });
 
           if (inviteResult.failed > 0) {
-            setInviteStatus(`Trip created. ${inviteResult.sent} invite(s) sent, ${inviteResult.failed} failed. You can retry from the trip page.`);
+            setInviteStatus(
+              `Trip created. ${inviteResult.sent} invite(s) sent, ${inviteResult.failed} failed. You can retry from the trip page.`
+            );
           } else {
             setInviteStatus(`Trip created and ${inviteResult.sent} invite(s) sent.`);
           }
@@ -170,95 +171,95 @@ export default function CreateTripPage() {
   return (
     <div className="min-h-screen bg-[#ecf5e9]">
       <Header />
-      <div className="mx-auto max-w-5xl px-6 py-12">
-      <section className="grid justify-items-center gap-6">
-        <div className="w-full max-w-2xl">
+      <div className="mx-auto max-w-5xl px-6 py-10">
+        <div className="w-full">
           <Link
             to="/"
-            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-4 py-2.5 text-sm font-semibold text-ink shadow-soft transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
+            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-4 py-2.5 text-sm font-semibold text-[#1e4840] shadow-soft transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
           >
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-mist text-base text-ocean">
-              ←
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#ecf5e9] text-base text-[#1e4840]">
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
             </span>
             Back to trips
           </Link>
         </div>
-        <div className="w-full max-w-2xl rounded-[32px] bg-white/95 p-8 shadow-card">
-          <h1 className="mt-2 text-3xl font-semibold text-ink">Start a collaborative trip plan</h1>
 
-          <form onSubmit={handleSubmit} className="mt-8 grid gap-5">
-            <div>
-              <label className="text-sm font-semibold text-ink">Trip title</label>
-              <input
-                name="name"
-                value={form.name}
-                onChange={handleChange}
-                placeholder="Ex: Spring break with roommates"
-                className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm"
-              />
-            </div>
+        <section className="mt-6 grid justify-items-center gap-6">
+          <div className="w-full max-w-2xl rounded-[32px] bg-white/95 p-8 shadow-card">
+            <h1 className="text-3xl font-semibold text-[#1e4840]">Create a new trip</h1>
 
-            <div>
-              <label className="text-sm font-semibold text-ink">Invite by email (optional)</label>
-              <input
-                value={inviteDraft}
-                onChange={(event) => setInviteDraft(event.target.value)}
-                onKeyDown={handleInviteKeyDown}
-                onBlur={commitInviteDraft}
-                placeholder="Add emails, press Enter or comma"
-                className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm"
-              />
-              {invitees.length > 0 ? (
-                <div className="mt-3 space-y-2">
-                  {invitees.map((invitee) => (
-                    <div
-                      key={invitee.email}
-                      className="flex items-center justify-between gap-3 rounded-2xl bg-mist px-3 py-2"
-                    >
-                      <span className="min-w-0 truncate text-xs font-medium text-ocean">{invitee.email}</span>
-                      <div className="flex items-center gap-2">
-                        <select
-                          value={invitee.role}
-                          onChange={(event) => handleInviteeRoleChange(invitee.email, event.target.value)}
-                          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
-                        >
-                          <option value="suggestor">Suggestor</option>
-                          <option value="editor">Editor</option>
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => removeInvitee(invitee.email)}
-                          className="rounded-full bg-white/80 px-2 leading-none text-slate-600 hover:bg-white"
-                          aria-label={`Remove ${invitee.email}`}
-                        >
-                          ×
-                        </button>
+            <form onSubmit={handleSubmit} className="mt-8 grid gap-6">
+              <div>
+                <label className="text-sm font-semibold text-[#1e4840]">Trip title</label>
+                <input
+                  name="name"
+                  value={form.name}
+                  onChange={handleChange}
+                  placeholder="Ex: Spring break with roommates"
+                  className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-[#1e4840] outline-none transition focus:border-[#1e4840]"
+                />
+              </div>
+
+              <div className="rounded-[28px] bg-[#f4f7f2] p-5">
+                <label className="text-sm font-semibold text-[#1e4840]">Invite by email</label>
+                <input
+                  value={inviteDraft}
+                  onChange={(event) => setInviteDraft(event.target.value)}
+                  onKeyDown={handleInviteKeyDown}
+                  onBlur={commitInviteDraft}
+                  placeholder="Add emails, press Enter or comma"
+                  className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-[#1e4840] outline-none transition focus:border-[#1e4840]"
+                />
+                {invitees.length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    {invitees.map((invitee) => (
+                      <div
+                        key={invitee.email}
+                        className="flex items-center justify-between gap-3 rounded-2xl bg-white px-3 py-2 shadow-soft"
+                      >
+                        <span className="min-w-0 truncate text-xs font-medium text-[#1e4840]">{invitee.email}</span>
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={invitee.role}
+                            onChange={(event) => handleInviteeRoleChange(invitee.email, event.target.value)}
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-[#1e4840]"
+                          >
+                            <option value="suggestor">Suggestor</option>
+                            <option value="editor">Editor</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => removeInvitee(invitee.email)}
+                            className="rounded-full bg-[#f4f7f2] px-2 leading-none text-slate-600 hover:bg-slate-100"
+                            aria-label={`Remove ${invitee.email}`}
+                          >
+                            x
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <button
+                type="submit"
+                disabled={createTripLoading || inviteSendLoading}
+                className="rounded-2xl bg-[#1e4840] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#152f2a] disabled:bg-slate-400"
+              >
+                {createTripLoading || inviteSendLoading ? "Creating..." : "Create trip workspace"}
+              </button>
+
+              {formError ? <p className="text-sm text-coral">{formError}</p> : null}
+              {inviteStatus ? (
+                <ToastNotification message={inviteStatus} onDismiss={() => setInviteStatus("")} />
               ) : null}
-              <p className="mt-2 text-xs text-slate-500">
-                Invite one or more people by email. Separate emails with commas or press Enter after each one. New invitees default to Suggestor, and you can promote specific invites to Editor.
-              </p>
-            </div>
-
-            <button
-              type="submit"
-              disabled={createTripLoading || inviteSendLoading}
-              className="rounded-2xl bg-ocean px-4 py-3 text-sm font-semibold text-white"
-            >
-              {createTripLoading || inviteSendLoading ? "Creating..." : "Create trip workspace"}
-            </button>
-            {formError ? <p className="text-sm text-coral">{formError}</p> : null}
-            {inviteStatus ? (
-              <ToastNotification message={inviteStatus} onDismiss={() => setInviteStatus("")} />
-            ) : null}
-            {error ? <p className="text-sm text-coral">{error}</p> : null}
-          </form>
-        </div>
-
-      </section>
+              {error ? <p className="text-sm text-coral">{error}</p> : null}
+            </form>
+          </div>
+        </section>
       </div>
     </div>
   );

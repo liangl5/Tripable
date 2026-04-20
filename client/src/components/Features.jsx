@@ -94,10 +94,10 @@ const features = [
 
 export default function Features() {
   return (
-    <section id="features" className="px-5 py-16 sm:px-6 lg:px-8 lg:py-24">
+    <section id="features" className="px-5 py-10 sm:px-6 lg:px-8 lg:py-12">
       <div className="mx-auto max-w-7xl">
         <div className="mx-auto max-w-3xl text-center">
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-brand-primary">Features</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#1e4840]/55">Features</p>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-ink sm:text-4xl">
             Everything your group needs to plan the trip
           </h2>
@@ -108,11 +108,11 @@ export default function Features() {
             const Icon = feature.icon;
             return (
               <article key={feature.title} className="rounded-[1.75rem] border border-white bg-white p-6 shadow-soft">
-                <div className={`inline-flex rounded-2xl p-3 ${feature.tone}`}>
+                <div className="inline-flex rounded-2xl bg-[#ecf5e9] p-3 text-[#1e4840]">
                   <Icon />
                 </div>
-                <h3 className="mt-5 text-xl font-bold text-ink">{feature.title}</h3>
-                <p className="mt-3 text-base leading-7 text-ink/68">{feature.description}</p>
+                <h3 className="mt-5 text-xl font-bold text-[#1e4840]">{feature.title}</h3>
+                <p className="mt-3 text-base leading-7 text-[#1e4840]/68">{feature.description}</p>
               </article>
             );
           })}

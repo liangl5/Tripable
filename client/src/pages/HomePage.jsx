@@ -450,9 +450,9 @@ export default function HomePage() {
 
   if (!effectiveSession) {
     return (
-      <div className="min-h-screen">
+      <div className="min-h-screen bg-[#ecf5e9]">
         <Header />
-        <main>
+        <main className="pb-10">
           <Hero />
           <Testimonials />
           <Features />

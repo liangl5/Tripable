@@ -512,13 +512,13 @@ export default function Header() {
           <div className="flex items-center gap-2">
             <Link
               to="/auth?mode=signup"
-              className="rounded-full bg-ocean px-5 py-2 text-sm font-semibold text-white shadow-card hover:bg-blue-600"
+              className="rounded-full bg-[#baf59c] px-5 py-2 text-sm font-semibold text-[#1e4840] shadow-card hover:bg-[#a7ee84]"
             >
               Sign up
             </Link>
             <Link
               to="/auth?mode=signin"
-              className="rounded-full border border-slate-300 bg-white px-5 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+              className="rounded-full border border-[#ecf5e9]/35 bg-[#f4f7f2] px-5 py-2 text-sm font-semibold text-[#1e4840] hover:bg-white"
             >
               Sign in
             </Link>

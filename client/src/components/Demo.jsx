@@ -77,21 +77,21 @@ function DemoMock() {
 
 export default function Demo() {
   return (
-    <section className="px-5 py-16 sm:px-6 lg:px-8 lg:py-24">
-      <div className="mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[1.05fr,0.95fr]">
+    <section className="px-5 py-10 sm:px-6 lg:px-8 lg:py-12">
+      <div className="mx-auto grid max-w-7xl items-center gap-10 rounded-[2rem] bg-[#f4f7f2] px-6 py-8 shadow-card lg:grid-cols-[1.05fr,0.95fr] lg:px-8">
         <DemoMock />
         <div className="max-w-xl">
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-brand-primary">Product demo</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#1e4840]/55">Product demo</p>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-ink sm:text-4xl">
             From scattered ideas to a clear plan.
           </h2>
-          <p className="mt-5 text-lg leading-8 text-ink/70">
+          <p className="mt-5 text-lg leading-8 text-[#1e4840]/70">
             Tripable turns suggestions from group chats, links, and messages into a shared trip plan everyone can see
             and contribute to.
           </p>
           <Link
             to="/trips/new"
-            className="mt-8 inline-flex rounded-full bg-[#4C6FFF] px-7 py-4 text-base font-semibold text-white shadow-card transition hover:bg-[#3F5CE0]"
+            className="mt-8 inline-flex rounded-2xl bg-[#1e4840] px-7 py-4 text-base font-semibold text-white shadow-card transition hover:bg-[#152f2a]"
           >
             Start planning
           </Link>
