@@ -1,16 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.js";
 import { buildFreeformIdeaPayload, buildResolvedIdeaPayload } from "../lib/ideaComposer.js";
+import { isPlaceLikeList, normalizeListName } from "../lib/tripPlanning.js";
 export default function ActivityComposerModal({
   open,
   tabId,
   destination,
   defaultListId = "",
+  defaultListName = "",
   defaultTitle = "",
   onClose,
   onSave
 }) {
+  const normalizedListName = normalizeListName(defaultListName);
+  const defaultMode = isPlaceLikeList(normalizedListName) ? "place" : "activity";
+  const [mode, setMode] = useState(defaultMode); // "activity" | "place"
   const [title, setTitle] = useState(defaultTitle);
+  const [location, setLocation] = useState("");
   const [costEstimate, setCostEstimate] = useState("");
   const [selectedSuggestion, setSelectedSuggestion] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
@@ -24,7 +30,9 @@ export default function ActivityComposerModal({
 
   useEffect(() => {
     if (!open) return;
+    setMode(defaultMode);
     setTitle(defaultTitle || "");
+    setLocation("");
     setCostEstimate("");
     setSelectedSuggestion(null);
     setSuggestions([]);
@@ -37,16 +45,23 @@ export default function ActivityComposerModal({
   useEffect(() => {
     if (!open) return;
 
-    const trimmedTitle = title.trim();
+    const query = mode === "place" ? title.trim() : location.trim();
     setSearchError("");
 
-    if (searchLocked || !canSearchPlaces || trimmedTitle.length < 2) {
+    if (searchLocked || !canSearchPlaces || query.length < 2) {
       setSuggestions([]);
       setHighlightedIndex(-1);
       return;
     }
 
-    if (selectedSuggestion && trimmedTitle === selectedSuggestion.title.trim()) {
+    if (
+      selectedSuggestion &&
+      query === String(
+        mode === "place"
+          ? selectedSuggestion.title
+          : (selectedSuggestion.address || selectedSuggestion.title || "")
+      ).trim()
+    ) {
       setSuggestions([]);
       setHighlightedIndex(-1);
       return;
@@ -56,7 +71,7 @@ export default function ActivityComposerModal({
     const timer = window.setTimeout(async () => {
       setSearching(true);
       try {
-        const results = await api.searchPlaces(trimmedTitle, destination);
+        const results = await api.searchPlaces(query, destination);
         if (!cancelled) {
           setSuggestions(results);
           setHighlightedIndex(results.length ? 0 : -1);
@@ -78,7 +93,7 @@ export default function ActivityComposerModal({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [canSearchPlaces, destination, open, searchLocked, selectedSuggestion, title]);
+  }, [canSearchPlaces, destination, location, mode, open, searchLocked, selectedSuggestion, title]);
 
   useEffect(() => {
     if (!open) return;
@@ -99,7 +114,11 @@ export default function ActivityComposerModal({
 
   const handleSelectSuggestion = (suggestion) => {
     setSelectedSuggestion(suggestion);
-    setTitle(suggestion.title);
+    if (mode === "place") {
+      setTitle(suggestion.title);
+    } else {
+      setLocation(String(suggestion.address || suggestion.title || "").trim());
+    }
     setSuggestions([]);
     setHighlightedIndex(-1);
     setSearchError("");
@@ -107,32 +126,62 @@ export default function ActivityComposerModal({
   };
 
   const handleSave = async () => {
-    if (!title.trim() || !defaultListId || saving) return;
+    const trimmedTitle = title.trim();
+    const trimmedLocation = location.trim();
+    if (!trimmedTitle || !defaultListId || saving) return;
     const costValue = String(costEstimate || "").trim();
     const normalizedCost = costValue ? Number(costValue) : null;
-    const activityMode = "activity";
-    const payloadBase = selectedSuggestion
-      ? buildResolvedIdeaPayload(selectedSuggestion, {
-          mode: activityMode,
-          listId: defaultListId,
-          listName: "",
-          placeGroup: null
-        })
-      : buildFreeformIdeaPayload(title.trim(), {
-          mode: activityMode,
-          listId: defaultListId,
-          listName: "",
-          destination,
-          placeGroup: null
-        });
+    const payloadBase =
+      mode === "place"
+        ? selectedSuggestion
+          ? buildResolvedIdeaPayload(selectedSuggestion, {
+              mode: "activity",
+              listId: defaultListId,
+              listName: normalizedListName,
+              placeGroup: null
+            })
+          : buildFreeformIdeaPayload(trimmedTitle, {
+              mode: "activity",
+              listId: defaultListId,
+              listName: normalizedListName,
+              destination,
+              placeGroup: null
+            })
+        : buildFreeformIdeaPayload(trimmedTitle, {
+            mode: "activity",
+            listId: defaultListId,
+            listName: normalizedListName,
+            destination,
+            placeGroup: null
+          });
+    const mapQuery =
+      mode === "place"
+        ? (selectedSuggestion?.mapQuery || payloadBase.mapQuery || "")
+        : selectedSuggestion?.mapQuery
+          ? selectedSuggestion.mapQuery
+          : trimmedLocation
+            ? [trimmedTitle, trimmedLocation].filter(Boolean).join(", ")
+            : "";
 
     const payload = {
       ...payloadBase,
-      title: selectedSuggestion?.title || title.trim(),
+      title: trimmedTitle,
       tabId,
       costEstimate: Number.isFinite(normalizedCost) ? normalizedCost : null,
       listId: defaultListId,
-      description: ""
+      description: "",
+      entryType: mode === "place" ? (selectedSuggestion ? payloadBase.entryType : "place") : "activity",
+      location:
+        mode === "place"
+          ? (selectedSuggestion ? payloadBase.location : (trimmedTitle || ""))
+          : (selectedSuggestion ? (selectedSuggestion.address || selectedSuggestion.title || trimmedLocation) : (trimmedLocation || "")),
+      mapQuery,
+      coordinates: selectedSuggestion?.coordinates || payloadBase.coordinates || null,
+      photoUrl: selectedSuggestion?.photoUrl || payloadBase.photoUrl || "",
+      photoAttributions: Array.isArray(selectedSuggestion?.photoAttributions)
+        ? selectedSuggestion.photoAttributions
+        : payloadBase.photoAttributions || [],
+      recommendationSource: selectedSuggestion ? "Google Maps" : payloadBase.recommendationSource || null
     };
 
     setSaving(true);
@@ -167,21 +216,77 @@ export default function ActivityComposerModal({
           ×
         </button>
         <div className="grid gap-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Type</p>
+            <div className="inline-flex rounded-full bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("activity");
+                  setSelectedSuggestion(null);
+                  setSuggestions([]);
+                  setSearchLocked(true);
+                  setSearchError("");
+                }}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                  mode === "activity" ? "bg-white text-ink shadow-sm" : "text-slate-600 hover:text-ink"
+                }`}
+              >
+                Activity
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("place");
+                  setSelectedSuggestion(null);
+                  setSuggestions([]);
+                  setSearchLocked(true);
+                  setSearchError("");
+                }}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                  mode === "place" ? "bg-white text-ink shadow-sm" : "text-slate-600 hover:text-ink"
+                }`}
+              >
+                Place
+              </button>
+            </div>
+          </div>
           <div className="relative min-w-0">
-            <label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Activity name or place</label>
+            <label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+              {mode === "place" ? "Place name" : "Activity name"}
+            </label>
             <input
               value={title}
               onChange={(event) => {
-                setSearchLocked(false);
                 setTitle(event.target.value);
-                setSelectedSuggestion(null);
+                if (mode === "place") {
+                  setSearchLocked(false);
+                  setSelectedSuggestion(null);
+                }
               }}
-              placeholder="Search Google Maps or type a custom activity"
+              placeholder={mode === "place" ? "Search Google Maps or type a place" : "Running, museum, dinner reservation..."}
               className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-ocean focus:ring-2 focus:ring-ocean/10"
             />
+          </div>
 
-            {(searching || suggestions.length || searchError) ? (
-              <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card">
+          {mode === "activity" ? (
+            <div className="relative min-w-0">
+            <label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Location (optional)</label>
+            <input
+              value={location}
+              onChange={(event) => {
+                setSearchLocked(false);
+                setLocation(event.target.value);
+                setSelectedSuggestion(null);
+              }}
+              placeholder="Optional — e.g. Central Park"
+              className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-ocean focus:ring-2 focus:ring-ocean/10"
+            />
+            </div>
+          ) : null}
+
+          {(searching || suggestions.length || searchError) ? (
+              <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card">
                 {searching ? <div className="px-4 py-3 text-sm text-slate-500">Searching Google Maps...</div> : null}
                 {!searching && suggestions.length ? (
                   <div className="max-h-72 overflow-y-auto">
@@ -215,40 +320,14 @@ export default function ActivityComposerModal({
                 ) : null}
                 {!searching && !suggestions.length ? (
                   <div className="px-4 py-3 text-sm text-slate-500">
-                    {searchError || (canSearchPlaces ? "No Google Maps match found yet." : "Set VITE_GOOGLE_MAPS_API_KEY to enable Google Maps autocomplete.")}
+                    {searchError ||
+                      (canSearchPlaces
+                        ? "No Google Maps match found yet."
+                        : "Set VITE_GOOGLE_MAPS_API_KEY to enable Google Maps autocomplete.")}
                   </div>
                 ) : null}
               </div>
             ) : null}
-          </div>
-
-          {selectedSuggestion ? (
-            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-slate-50">
-              <div className="grid gap-0 md:grid-cols-[170px_1fr]">
-                {selectedSuggestion.photoUrl ? (
-                  <img
-                    src={selectedSuggestion.photoUrl}
-                    alt={selectedSuggestion.title}
-                    className="h-full min-h-40 w-full object-cover"
-                    loading="lazy"
-                    referrerPolicy="no-referrer-when-downgrade"
-                  />
-                ) : (
-                  <div className="flex min-h-40 items-center justify-center bg-mist text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    No photo
-                  </div>
-                )}
-                <div className="p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Place preview</p>
-                  <h4 className="mt-2 text-lg font-semibold text-ink">{selectedSuggestion.title}</h4>
-                  <p className="mt-2 text-sm text-slate-600">{selectedSuggestion.address}</p>
-                  {selectedSuggestion.primaryTypeLabel ? (
-                    <p className="mt-2 text-xs font-semibold text-ocean">{selectedSuggestion.primaryTypeLabel}</p>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          ) : null}
 
           <div>
             <label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Estimated cost (optional)</label>

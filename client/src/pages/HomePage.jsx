@@ -29,16 +29,9 @@ export default function HomePage() {
   const clearFlashNotice = useTripStore((state) => state.clearFlashNotice);
   const [tripCards, setTripCards] = useState([]);
   const [tripCardsLoading, setTripCardsLoading] = useState(false);
-  const [activeTripTab, setActiveTripTab] = useState(() => {
-    try {
-      const stored = window.localStorage.getItem("tripable_home_trip_filter");
-      const normalized = String(stored || "").trim();
-      return normalized || "all";
-    } catch {
-      return "all";
-    }
-  });
+  const [activeTripTab, setActiveTripTab] = useState("all");
   const [starredTripIds, setStarredTripIds] = useState(() => new Set());
+  const [starsSupported, setStarsSupported] = useState(true);
   const [selectionMode, setSelectionMode] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [localSession, setLocalSession] = useState(null);
@@ -99,14 +92,42 @@ export default function HomePage() {
       return;
     }
 
-    try {
-      const storedIds = window.localStorage.getItem(`tripable_starred_trips_${currentUserId}`);
-      const parsedIds = storedIds ? JSON.parse(storedIds) : [];
-      setStarredTripIds(new Set(Array.isArray(parsedIds) ? parsedIds.filter(Boolean) : []));
-    } catch (error) {
-      console.error("Failed to load starred trips", error);
-      setStarredTripIds(new Set());
-    }
+    let active = true;
+    const loadStars = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("TripStar")
+          .select("tripId")
+          .eq("userId", currentUserId);
+
+        if (error) {
+          // Backwards compatibility for environments where this table is not created yet.
+          if (String(error.message || "").includes("TripStar")) {
+            if (active) {
+              setStarsSupported(false);
+              setStarredTripIds(new Set());
+            }
+            return;
+          }
+          throw error;
+        }
+
+        if (!active) return;
+        setStarsSupported(true);
+        setStarredTripIds(new Set((data || []).map((row) => row.tripId).filter(Boolean)));
+      } catch (error) {
+        console.error("Failed to load starred trips", error);
+        if (active) {
+          setStarredTripIds(new Set());
+        }
+      }
+    };
+
+    void loadStars();
+
+    return () => {
+      active = false;
+    };
   }, [currentUserId]);
 
   useEffect(() => {
@@ -238,14 +259,6 @@ export default function HomePage() {
     return () => clearTimeout(timer);
   }, [flashNotice, clearFlashNotice]);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem("tripable_home_trip_filter", String(activeTripTab || "all"));
-    } catch {
-      // ignore
-    }
-  }, [activeTripTab]);
-
   const filteredTrips = useMemo(() => {
     if (activeTripTab === "mine") {
       return tripCards.filter((trip) => trip.userRole === "owner");
@@ -262,20 +275,51 @@ export default function HomePage() {
     return tripCards;
   }, [activeTripTab, starredTripIds, tripCards]);
 
-  const starredStorageKey = currentUserId ? `tripable_starred_trips_${currentUserId}` : null;
+  useEffect(() => {
+    if (!starsSupported && activeTripTab === "starred") {
+      setActiveTripTab("all");
+    }
+  }, [activeTripTab, starsSupported]);
 
-  const toggleTripStar = (tripId) => {
-    if (!tripId || !starredStorageKey) return;
+  const toggleTripStar = async (tripId) => {
+    if (!tripId || !currentUserId || !starsSupported) return;
+    const wasStarred = starredTripIds.has(tripId);
+
     setStarredTripIds((current) => {
       const next = new Set(current);
-      if (next.has(tripId)) {
-        next.delete(tripId);
-      } else {
-        next.add(tripId);
-      }
-      window.localStorage.setItem(starredStorageKey, JSON.stringify(Array.from(next)));
+      if (next.has(tripId)) next.delete(tripId);
+      else next.add(tripId);
       return next;
     });
+
+    try {
+      if (wasStarred) {
+        const { error } = await supabase
+          .from("TripStar")
+          .delete()
+          .eq("tripId", tripId)
+          .eq("userId", currentUserId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("TripStar").insert([
+          {
+            tripId,
+            userId: currentUserId,
+            createdAt: new Date().toISOString()
+          }
+        ]);
+        if (error) throw error;
+      }
+    } catch (error) {
+      console.error("Failed to toggle starred trip", error);
+      // Revert optimistic update on failure.
+      setStarredTripIds((current) => {
+        const next = new Set(current);
+        if (wasStarred) next.add(tripId);
+        else next.delete(tripId);
+        return next;
+      });
+    }
   };
 
   const emptyStateTitle =
@@ -445,7 +489,7 @@ export default function HomePage() {
               { id: "all", label: "All trips" },
               { id: "mine", label: "My trips" },
               { id: "shared", label: "Shared with me" },
-              { id: "starred", label: "Starred" }
+              ...(starsSupported ? [{ id: "starred", label: "Starred" }] : [])
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -542,7 +586,7 @@ export default function HomePage() {
               selectionMode={selectionMode}
               onCardClick={handleTripCardClick}
               starredTripIds={starredTripIds}
-              onToggleStar={toggleTripStar}
+              onToggleStar={starsSupported ? toggleTripStar : null}
               emptyStateTitle={emptyStateTitle}
               emptyStateDescription={emptyStateDescription}
             />

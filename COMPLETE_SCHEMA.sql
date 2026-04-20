@@ -120,6 +120,14 @@ CREATE TABLE IF NOT EXISTS "TripTabPreference" (
   PRIMARY KEY ("tripId", "userId")
 );
 
+-- 10c. TripStar (per-user starred trips)
+CREATE TABLE IF NOT EXISTS "TripStar" (
+  "tripId" TEXT NOT NULL REFERENCES "Trip"(id) ON DELETE CASCADE,
+  "userId" TEXT NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY ("tripId", "userId")
+);
+
 -- 6. Idea (activities, places, recommendations)
 CREATE TABLE "Idea" (
   id TEXT PRIMARY KEY,
@@ -275,7 +283,7 @@ CREATE TABLE "List" (
 -- Add FK constraint to Idea.listId
 ALTER TABLE "Idea" 
   ADD CONSTRAINT fk_idea_list 
-  FOREIGN KEY ("listId") REFERENCES "List"(id) ON DELETE SET NULL;
+  FOREIGN KEY ("listId") REFERENCES "List"(id) ON DELETE CASCADE;
 
 -- 14. Transaction (expense tracking)
 CREATE TABLE "Transaction" (
@@ -365,6 +373,8 @@ CREATE INDEX idx_itinerary_item_idea ON "ItineraryItem"("ideaId");
 CREATE INDEX idx_trip_tab_trip ON "TripTabConfiguration"("tripId");
 CREATE INDEX idx_trip_tab_preference_trip ON "TripTabPreference"("tripId");
 CREATE INDEX idx_trip_tab_preference_user ON "TripTabPreference"("userId");
+CREATE INDEX idx_trip_star_trip ON "TripStar"("tripId");
+CREATE INDEX idx_trip_star_user ON "TripStar"("userId");
 CREATE INDEX idx_availability_tab_data_tab ON "AvailabilityTabData"("tabId");
 CREATE INDEX idx_availability_tab_data_user ON "AvailabilityTabData"("userId");
 CREATE INDEX idx_availability_tab_composite ON "AvailabilityTabData"("tabId", "userId");
@@ -417,6 +427,7 @@ ALTER TABLE "ItineraryDay" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "ItineraryItem" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "TripTabConfiguration" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "TripTabPreference" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "TripStar" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "UserTripRole" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "PendingTripInvite" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "AvailabilityTabData" ENABLE ROW LEVEL SECURITY;
@@ -780,6 +791,37 @@ CREATE POLICY "Users can delete their tab preferences" ON "TripTabPreference" FO
     SELECT "userId" FROM "TripMember" WHERE "tripId" = "TripTabPreference"."tripId"
     UNION SELECT "userId" FROM "UserTripRole" WHERE "tripId" = "TripTabPreference"."tripId"
     UNION SELECT "createdById" FROM "Trip" WHERE id = "TripTabPreference"."tripId"
+  )
+);
+
+-- TripStar policies: Users manage their own starred trips
+DROP POLICY IF EXISTS "Users can view their starred trips" ON "TripStar";
+CREATE POLICY "Users can view their starred trips" ON "TripStar" FOR SELECT USING (
+  auth.uid()::text = "userId"
+  AND auth.uid()::text IN (
+    SELECT "userId" FROM "TripMember" WHERE "tripId" = "TripStar"."tripId"
+    UNION SELECT "userId" FROM "UserTripRole" WHERE "tripId" = "TripStar"."tripId"
+    UNION SELECT "createdById" FROM "Trip" WHERE id = "TripStar"."tripId"
+  )
+);
+
+DROP POLICY IF EXISTS "Users can star trips" ON "TripStar";
+CREATE POLICY "Users can star trips" ON "TripStar" FOR INSERT WITH CHECK (
+  auth.uid()::text = "userId"
+  AND auth.uid()::text IN (
+    SELECT "userId" FROM "TripMember" WHERE "tripId" = "TripStar"."tripId"
+    UNION SELECT "userId" FROM "UserTripRole" WHERE "tripId" = "TripStar"."tripId"
+    UNION SELECT "createdById" FROM "Trip" WHERE id = "TripStar"."tripId"
+  )
+);
+
+DROP POLICY IF EXISTS "Users can unstar trips" ON "TripStar";
+CREATE POLICY "Users can unstar trips" ON "TripStar" FOR DELETE USING (
+  auth.uid()::text = "userId"
+  AND auth.uid()::text IN (
+    SELECT "userId" FROM "TripMember" WHERE "tripId" = "TripStar"."tripId"
+    UNION SELECT "userId" FROM "UserTripRole" WHERE "tripId" = "TripStar"."tripId"
+    UNION SELECT "createdById" FROM "Trip" WHERE id = "TripStar"."tripId"
   )
 );
 

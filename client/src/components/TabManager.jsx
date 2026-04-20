@@ -39,7 +39,6 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
   const [tabCreateName, setTabCreateName] = useState("");
   const [tabCreateError, setTabCreateError] = useState("");
   const canManageTabs = userRole === "owner" || userRole === "editor";
-  const localActiveTabKey = `tripable:activeTab:${tripId}:${userId || "anon"}`;
 
   const normalizeTabName = (value) => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
   const isTabNameTaken = (candidateName, excludeTabId = null) => {
@@ -101,13 +100,6 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
               storedTabId = storedTabId || data?.activeTabId || "";
             }
           }
-          if (!storedTabId) {
-            try {
-              storedTabId = window?.localStorage?.getItem?.(localActiveTabKey) || "";
-            } catch {
-              storedTabId = "";
-            }
-          }
           const nextActive = loadedTabs.some((tab) => tab.id === storedTabId) ? storedTabId : loadedTabs[0].id;
           setActiveTab(nextActive);
           syncUrlTab(nextActive, { replace: true });
@@ -135,11 +127,6 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
   useEffect(() => {
     if (!activeTab || !userId) return;
     const activeTabData = tabs.find((tab) => tab.id === activeTab);
-    try {
-      window?.localStorage?.setItem?.(localActiveTabKey, activeTab);
-    } catch {
-      // ignore
-    }
     void supabase
       .from("TripTabPreference")
       .upsert(
