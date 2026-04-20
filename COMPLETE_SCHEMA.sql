@@ -140,6 +140,7 @@ CREATE TABLE "Idea" (
   "parentIdeaId" TEXT REFERENCES "Idea"(id) ON DELETE CASCADE,
   "listId" TEXT,
   "tabId" TEXT NOT NULL REFERENCES "TripTabConfiguration"(id) ON DELETE CASCADE,
+  "order" INTEGER DEFAULT 0,
   "costEstimate" NUMERIC(12,2),
   "mapQuery" TEXT,
   coordinates JSONB,

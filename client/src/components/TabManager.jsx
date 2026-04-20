@@ -125,7 +125,7 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
     };
 
     loadTabs();
-  }, [tripId, userId, urlTabId]);
+  }, [tripId, userId]);
 
   // Respond to back/forward navigation between tabs.
   useEffect(() => {
@@ -205,11 +205,21 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
       }
     };
 
+    const handleViewportChange = () => {
+      setTabMenu(null);
+      setTabDropdownOpen(false);
+      setTabDropdownPosition(null);
+    };
+
     document.addEventListener("mousedown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("scroll", handleViewportChange, true);
+    window.addEventListener("resize", handleViewportChange);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("scroll", handleViewportChange, true);
+      window.removeEventListener("resize", handleViewportChange);
     };
   }, [tabMenu, tabDropdownOpen]);
 
@@ -589,10 +599,10 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
             return (
             <div key={tab.id} className="relative flex h-full shrink-0 items-stretch">
               <div
-                className={`relative -mb-px flex h-full items-center gap-2 whitespace-nowrap px-5 py-0 text-sm font-medium leading-none transition-all duration-150 cursor-pointer ${
+                    className={`relative -mb-px flex h-full items-center gap-2 whitespace-nowrap px-5 py-0 text-sm font-medium leading-none transition-[background-color,border-color,color,box-shadow,transform,padding] duration-200 ease-out cursor-pointer ${
                 isActive
-                  ? "relative z-30 rounded-t-lg border border-slate-200 border-b-transparent bg-white text-ink"
-                      : `rounded-none border-y border-y-transparent border-x-0 bg-transparent text-[#1e4840] hover:relative hover:z-20 hover:rounded-t-lg hover:bg-[#9dd67f]/70 hover:text-[#173630] ${showLeftDivider ? "before:absolute before:left-0 before:top-1 before:bottom-1 before:w-px before:bg-slate-300 before:content-['']" : ""}`
+                      ? "relative z-30 rounded-t-lg border border-slate-200 border-b-transparent bg-white pr-8 text-ink"
+                      : `rounded-t-lg border border-transparent bg-transparent text-[#1e4840] hover:relative hover:z-20 hover:bg-[#9dd67f]/70 hover:text-[#173630] ${showLeftDivider ? "before:absolute before:left-0 before:top-1 before:bottom-1 before:w-px before:bg-slate-300 before:content-['']" : ""}`
               } ${canManageTabs && draggedTab === tab.id ? "cursor-grabbing" : ""} ${draggedTab === tab.id ? "border-slate-300 bg-slate-200/70 text-slate-500" : ""}`}
                 draggable={canManageTabs}
                 onClick={() => {
@@ -621,7 +631,7 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
                 }}
               >
                 <div
-                  className={`min-w-0 whitespace-nowrap ${isActive ? "font-bold" : "font-medium"} ${draggedTab === tab.id ? "invisible" : ""}`}
+                  className={`min-w-0 whitespace-nowrap font-medium ${draggedTab === tab.id ? "invisible" : ""}`}
                 >
                   {editingTabId === tab.id ? (
                     <input
@@ -651,12 +661,16 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
                   )}
                 </div>
 
-                {canManageTabs && isActive && draggedTab !== tab.id ? (
+                {canManageTabs ? (
                   <button
                     type="button"
                     data-tab-menu-toggle="true"
                     onClick={(event) => {
                       event.stopPropagation();
+                      if (!isActive) {
+                        setActiveTab(tab.id);
+                        syncUrlTab(tab.id, { replace: false });
+                      }
                       if (tabMenu?.tabId === tab.id) {
                         setTabMenu(null);
                         return;
@@ -664,7 +678,9 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
                       const rect = event.currentTarget.getBoundingClientRect();
                       openTabContextMenuAt(tab.id, rect.left);
                     }}
-                    className="h-5 w-5 shrink-0 rounded p-0 text-slate-500 transition hover:bg-white hover:text-[#1e4840]"
+                    className={`absolute right-2 top-1/2 z-40 h-5 w-5 -translate-y-1/2 rounded p-0 text-slate-500 transition-opacity duration-150 hover:bg-white hover:text-[#1e4840] ${
+                      isActive && draggedTab !== tab.id ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+                    }`}
                     aria-label="Open tab menu"
                     title="Tab options"
                   >
@@ -818,10 +834,10 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
           return (
             <div
               key={tab.id}
-              className={`col-start-1 row-start-1 transition-opacity duration-200 ease-out will-change-opacity motion-reduce:transition-none ${
+              className={`col-start-1 row-start-1 ${
                 isActivePanel
-                  ? "visible pointer-events-auto opacity-100"
-                  : "invisible pointer-events-none opacity-0"
+                  ? "block pointer-events-auto"
+                  : "hidden pointer-events-none"
               }`}
             >
               {renderTabPanel(tab)}

@@ -3,11 +3,54 @@ import { supabase } from "../../lib/supabase";
 import { clearGeneratedItinerary, slugify } from "../../lib/tripPlanning";
 import ThreadedComments from "../ThreadedComments.jsx";
 
+function ThumbUpIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path
+        d="M8.5 10.5V20a2 2 0 0 0 2 2h5.4a2 2 0 0 0 1.9-1.4l1.6-4.8a2 2 0 0 0-1.9-2.6H14V7.8c0-2-1.6-3.6-3.6-3.6-.6 0-1 .4-1 1v2.3c0 1.1-.4 2.1-1.1 3l-.2.2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5 10.5h3.5V22H5a2 2 0 0 1-2-2v-7.5a2 2 0 0 1 2-2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ThumbDownIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path
+        d="M8.5 13.5V4a2 2 0 0 1 2-2h5.4a2 2 0 0 1 1.9 1.4l1.6 4.8a2 2 0 0 1-1.9 2.6H14v5.4c0 2-1.6 3.6-3.6 3.6-.6 0-1-.4-1-1v-2.3c0-1.1-.4-2.1-1.1-3l-.2-.2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5 13.5h3.5V2H5a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export default function ItineraryTab({ tab, tripId, userId, userRole, tripMembers, ideas, trip }) {
   const [days, setDays] = useState([]);
   const [itineraryItems, setItineraryItems] = useState([]);
   const [allowedListIds, setAllowedListIds] = useState(null);
+  const [allowedListIdsConfigId, setAllowedListIdsConfigId] = useState(null);
   const [showActivityBank, setShowActivityBank] = useState(true);
+  const [activityBankFilterOpen, setActivityBankFilterOpen] = useState(false);
+  const [activityBankDraftListIds, setActivityBankDraftListIds] = useState([]);
+  const [activityBankFilterError, setActivityBankFilterError] = useState("");
+  const [activityBankFilterSaving, setActivityBankFilterSaving] = useState(false);
   const [draggedActivity, setDraggedActivity] = useState(null);
   const [draggedItem, setDraggedItem] = useState(null);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -51,10 +94,11 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
         // Load allowed lists for this tab
         const { data: configData } = await supabase
           .from("ItineraryTabConfiguration")
-          .select("allowedListIds")
+          .select("id, allowedListIds")
           .eq("tabId", tab.id)
           .maybeSingle();
 
+        setAllowedListIdsConfigId(configData?.id || null);
         setAllowedListIds(configData?.allowedListIds);
 
         const { data: listData } = await supabase
@@ -463,21 +507,76 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
 
   const remainingActivityCount = getActivityBank().length;
 
+  const openActivityBankFilter = () => {
+    setActivityBankDraftListIds(Array.isArray(allowedListIds) ? allowedListIds : listOptions.map((list) => list.id));
+    setActivityBankFilterError("");
+    setActivityBankFilterOpen(true);
+  };
+
+  const toggleActivityBankDraftListId = (listId) => {
+    setActivityBankDraftListIds((current) => {
+      if (current.includes(listId)) {
+        return current.filter((id) => id !== listId);
+      }
+      return [...current, listId];
+    });
+  };
+
+  const saveActivityBankFilter = async () => {
+    const selectedIds = listOptions.filter((list) => activityBankDraftListIds.includes(list.id)).map((list) => list.id);
+
+    if (!selectedIds.length) {
+      setActivityBankFilterError("Choose at least one list.");
+      return;
+    }
+
+    const allListIds = listOptions.map((list) => list.id);
+    const nextAllowedListIds = selectedIds.length === allListIds.length ? null : selectedIds;
+
+    try {
+      setActivityBankFilterSaving(true);
+      setActivityBankFilterError("");
+
+      if (allowedListIdsConfigId) {
+        const { error } = await supabase
+          .from("ItineraryTabConfiguration")
+          .update({ allowedListIds: nextAllowedListIds })
+          .eq("id", allowedListIdsConfigId);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase
+          .from("ItineraryTabConfiguration")
+          .insert([
+            {
+              id: crypto.randomUUID(),
+              tabId: tab.id,
+              allowedListIds: nextAllowedListIds
+            }
+          ])
+          .select("id")
+          .single();
+        if (error) throw error;
+        setAllowedListIdsConfigId(data?.id || null);
+      }
+
+      setAllowedListIds(nextAllowedListIds);
+      setActivityBankFilterOpen(false);
+    } catch (error) {
+      console.error("Failed to update activity bank filter:", error);
+      setActivityBankFilterError(error?.message || "Failed to update activity bank filter");
+    } finally {
+      setActivityBankFilterSaving(false);
+    }
+  };
+
   const getVoteSummary = (votesInput) => {
     const votes = Array.isArray(votesInput) ? votesInput : [];
     const upvotes = votes.filter((vote) => vote.value === 1);
     const downvotes = votes.filter((vote) => vote.value === -1);
-    const upNames = upvotes.map((vote) => vote.name || "Traveler");
-    const downNames = downvotes.map((vote) => vote.name || "Traveler");
-    const tooltip = [
-      upNames.length > 0 ? `Upvotes: ${upNames.join(", ")}` : "Upvotes: none",
-      downNames.length > 0 ? `Downvotes: ${downNames.join(", ")}` : "Downvotes: none"
-    ].join("\n");
 
     return {
       up: upvotes.length,
-      down: downvotes.length,
-      tooltip
+      down: downvotes.length
     };
   };
 
@@ -610,24 +709,22 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
                       <div className="bg-white rounded-lg border border-slate-200 p-2 text-xs flex items-center justify-between gap-3">
                         <div className="space-y-1">
                         <p className="font-semibold text-ink">{index + 1}. {item.title}</p>
-                        {item.location && <p className="text-slate-600">{item.location}</p>}
+                        {String(item.mapQuery || item.location || "").trim() ? (
+                          <p className="text-slate-600">{String(item.mapQuery || item.location || "").trim()}</p>
+                        ) : null}
                         {(() => {
                           const voteSummary = getVoteSummaryForIdea(item.ideaId);
-                          const tooltipLines = voteSummary.tooltip.split("\n");
                           return (
-                            <div className="relative inline-flex items-center group cursor-pointer">
-                              <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600 transition group-hover:border-ocean group-hover:text-ocean">
-                                <span>👍 {voteSummary.up}</span>
-                                <span>👎 {voteSummary.down}</span>
+                            <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600">
+                              <span className="inline-flex items-center gap-1">
+                                <ThumbUpIcon className="h-3.5 w-3.5" />
+                                {voteSummary.up}
                               </span>
-                              <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden min-w-[200px] rounded-lg border border-slate-200 bg-white p-2 text-[11px] font-semibold text-slate-700 shadow-lg group-hover:block">
-                                {tooltipLines.map((line) => (
-                                  <p key={line} className="leading-snug">
-                                    {line}
-                                  </p>
-                                ))}
-                              </div>
-                            </div>
+                              <span className="inline-flex items-center gap-1">
+                                <ThumbDownIcon className="h-3.5 w-3.5" />
+                                {voteSummary.down}
+                              </span>
+                            </span>
                           );
                         })()}
                         {canManageItinerary && isEditMode && (
@@ -705,23 +802,42 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
           onDrop={handleDropOnActivityBank}
           onDragOver={(event) => event.preventDefault()}
         >
-        <button
-          onClick={() => setShowActivityBank(!showActivityBank)}
-          className="bg-white border-b border-slate-200 px-4 py-3 font-semibold text-ink flex items-center justify-between hover:bg-slate-50"
-        >
-          <span>Activity Bank</span>
-          <svg
-            className={`h-4 w-4 transform transition-transform ${showActivityBank ? "" : "-rotate-90"}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+        <div className="bg-white border-b border-slate-200 px-4 py-3 font-semibold text-ink flex items-center justify-between gap-2 hover:bg-slate-50">
+          <button
+            type="button"
+            onClick={() => setShowActivityBank(!showActivityBank)}
+            className="flex min-w-0 flex-1 items-center justify-between text-left"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-          </svg>
-        </button>
+            <span>Activity Bank</span>
+            <svg
+              className={`h-4 w-4 transform transition-transform ${showActivityBank ? "" : "-rotate-90"}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={openActivityBankFilter}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-ocean hover:text-ocean"
+            aria-label="Choose lists for activity bank"
+            title="Choose lists"
+          >
+            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+              <path d="M2 4a1 1 0 0 1 1-1h14a1 1 0 1 1 0 2H3a1 1 0 0 1-1-1Zm0 6a1 1 0 0 1 1-1h8a1 1 0 1 1 0 2H3a1 1 0 0 1-1-1Zm0 6a1 1 0 0 1 1-1h5a1 1 0 1 1 0 2H3a1 1 0 0 1-1-1Z" />
+            </svg>
+          </button>
+        </div>
 
         {showActivityBank && (
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            {!canManageItinerary && listOptions.length === 0 ? (
+              <div className="rounded-xl border border-slate-200 bg-white px-3 py-4 text-sm text-slate-600">
+                Wait for an editor to add a list.
+              </div>
+            ) : null}
             {groupedActivityBank().map((group) => (
               <div key={group.listId || group.label} className="space-y-2">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -739,24 +855,22 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
                     <div className="flex items-center justify-between gap-3">
                       <div className="space-y-1">
                         <p className="font-semibold text-ink">{activity.title}</p>
-                        {activity.location && <p className="text-slate-600">{activity.location}</p>}
+                        {String(activity.mapQuery || activity.location || "").trim() ? (
+                          <p className="text-slate-600">{String(activity.mapQuery || activity.location || "").trim()}</p>
+                        ) : null}
                         {(() => {
                           const voteSummary = getVoteSummary(activity.votes);
-                          const tooltipLines = voteSummary.tooltip.split("\n");
                           return (
-                            <div className="relative inline-flex items-center group cursor-pointer">
-                              <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600 transition group-hover:border-ocean group-hover:text-ocean">
-                                <span>👍 {voteSummary.up}</span>
-                                <span>👎 {voteSummary.down}</span>
+                            <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600">
+                              <span className="inline-flex items-center gap-1">
+                                <ThumbUpIcon className="h-3.5 w-3.5" />
+                                {voteSummary.up}
                               </span>
-                              <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden min-w-[200px] rounded-lg border border-slate-200 bg-white p-2 text-[11px] font-semibold text-slate-700 shadow-lg group-hover:block">
-                                {tooltipLines.map((line) => (
-                                  <p key={line} className="leading-snug">
-                                    {line}
-                                  </p>
-                                ))}
-                              </div>
-                            </div>
+                              <span className="inline-flex items-center gap-1">
+                                <ThumbDownIcon className="h-3.5 w-3.5" />
+                                {voteSummary.down}
+                              </span>
+                            </span>
                           );
                         })()}
                       </div>
@@ -790,6 +904,71 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
         )}
         </div>
       )}
+
+      {activityBankFilterOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setActivityBankFilterOpen(false);
+              setActivityBankFilterError("");
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-card"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-ink">Choose activity bank lists</h3>
+            <p className="mt-2 text-sm text-slate-600">Select which lists appear in the Activity Bank.</p>
+
+            <div className="mt-4 max-h-72 space-y-2 overflow-y-auto pr-1">
+              {listOptions.length === 0 ? (
+                <p className="text-sm text-slate-500">No lists available yet.</p>
+              ) : (
+                listOptions.map((list) => (
+                  <label
+                    key={list.id}
+                    className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink hover:bg-white"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={activityBankDraftListIds.includes(list.id)}
+                      onChange={() => toggleActivityBankDraftListId(list.id)}
+                      className="h-4 w-4 rounded border-slate-300 text-ocean focus:ring-ocean"
+                    />
+                    <span className="min-w-0 flex-1 truncate font-medium">{list.name}</span>
+                  </label>
+                ))
+              )}
+            </div>
+
+            {activityBankFilterError ? <p className="mt-3 text-sm font-semibold text-coral">{activityBankFilterError}</p> : null}
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setActivityBankFilterOpen(false);
+                  setActivityBankFilterError("");
+                }}
+                disabled={activityBankFilterSaving}
+                className="rounded-xl px-3 py-1.5 text-sm font-semibold text-slate-600 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveActivityBankFilter()}
+                disabled={activityBankFilterSaving}
+                className="rounded-xl bg-ocean px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-60"
+              >
+                {activityBankFilterSaving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Save Button */}
       {unsavedChanges && isEditMode && (

@@ -38,8 +38,8 @@ export default function IdeaCard({
   const canDelete = isOwner || idea.isCreator;
   const canEdit = isOwner || idea.isCreator;
   const showActivityImage = idea.entryType === "activity" && Boolean(idea.photoUrl);
-  const detailLabel = idea.locationLabel || idea.location || "";
-  const metaLabel = ["Submitted by " + idea.submittedBy, formatRelativeTime(idea.createdAt)].filter(Boolean).join(" | ");
+  const detailLabel = idea.mapQuery || idea.locationLabel || idea.location || "";
+  const metaLabel = ["Added by " + idea.submittedBy, formatRelativeTime(idea.createdAt)].filter(Boolean).join(" |");
 
   return (
     <div className="idea-block rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-card">
@@ -84,7 +84,12 @@ export default function IdeaCard({
           </div>
         </div>
 
-        <VoteButtons score={idea.voteScore} userVote={idea.userVote} onVote={onVote} />
+        <VoteButtons
+          upvotes={idea.upvoteCount}
+          downvotes={idea.downvoteCount}
+          userVote={idea.userVote}
+          onVote={onVote}
+        />
       </div>
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">

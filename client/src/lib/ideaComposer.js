@@ -50,7 +50,7 @@ export function buildResolvedIdeaPayload(placeMatch, { mode, listId, listName, p
   return {
     title: placeMatch.title,
     description: "",
-    location: placeMatch.address || placeMatch.title,
+    location: placeMatch.mapQuery || placeMatch.address || placeMatch.title,
     category: normalizedListName || "",
     listId: normalizedListId,
     entryType: isDestinationMode ? "place" : normalizedListName ? (isPlaceLike ? "place" : "activity") : "place",

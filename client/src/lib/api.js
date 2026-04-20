@@ -341,19 +341,19 @@ async function getPlaceDetails(placeId, sessionToken) {
 }
 
 function normalizePlaceMatch(place) {
-  const title = place.displayName?.text || "";
-  const address = place.formattedAddress || "";
-  const shortAddress = place.shortFormattedAddress || "";
+  const title = String(place.displayName?.text || place.shortFormattedAddress || place.formattedAddress || "").trim();
+  const address = String(place.shortFormattedAddress || place.formattedAddress || "").trim();
+  const fullAddress = String(place.formattedAddress || address || "").trim();
   const firstPhoto = Array.isArray(place.photos) ? place.photos[0] : null;
   const latitude = place.location?.latitude;
   const longitude = place.location?.longitude;
 
   return {
-    id: place.id || `${title.toLowerCase()}-${address.toLowerCase()}`,
+    id: place.id || `${title.toLowerCase()}-${fullAddress.toLowerCase()}`,
     title,
     address,
-    shortAddress,
-    mapQuery: [title, address].filter(Boolean).join(", "),
+    shortAddress: String(place.shortFormattedAddress || "").trim(),
+    mapQuery: [title, fullAddress].filter(Boolean).join(", "),
     coordinates:
       typeof latitude === "number" && typeof longitude === "number"
         ? { lat: latitude, lng: longitude }
@@ -845,6 +845,8 @@ async function formatTripDetails(trip, viewerUserId, members, leaders, availabil
 function formatIdea(tripId, idea, userId, votes = []) {
   const voteScore = votes.reduce((sum, vote) => sum + vote.value, 0);
   const userVote = votes.find((vote) => vote.userId === userId)?.value || 0;
+  const upvoteCount = votes.filter((vote) => vote.value === 1).length;
+  const downvoteCount = votes.filter((vote) => vote.value === -1).length;
   const isCreator = idea.createdById === userId;
   const votesDetailed = votes.map((vote) => ({
     userId: vote.userId,
@@ -862,6 +864,7 @@ function formatIdea(tripId, idea, userId, votes = []) {
     parentIdeaId: idea.parentIdeaId || null,
     listId: idea.listId || null,
     tabId: idea.tabId || null,
+    order: Number.isFinite(Number(idea.order)) ? Number(idea.order) : 0,
     costEstimate: idea.costEstimate ?? null,
     mapQuery: idea.mapQuery || null,
     coordinates: idea.coordinates || null,
@@ -873,6 +876,8 @@ function formatIdea(tripId, idea, userId, votes = []) {
     submittedBy: idea.User?.name || "Traveler",
     voteScore,
     voteCount: votes.length,
+    upvoteCount,
+    downvoteCount,
     userVote,
     votes: votesDetailed,
     isCreator
@@ -889,6 +894,7 @@ function formatIdeaWithPersistedDetails(tripId, idea, userId, votes = [], payloa
       parentIdeaId: idea.parentIdeaId ?? payload.parentIdeaId ?? null,
       listId: idea.listId ?? payload.listId ?? null,
       tabId: idea.tabId ?? payload.tabId ?? null,
+      order: idea.order ?? payload.order ?? 0,
       costEstimate: idea.costEstimate ?? payload.costEstimate ?? null,
       mapQuery: idea.mapQuery ?? payload.mapQuery ?? null,
       coordinates: idea.coordinates ?? payload.coordinates ?? null,
@@ -915,6 +921,7 @@ function buildHydratedIdeaPersistencePayload(idea) {
     parentIdeaId: idea.parentIdeaId || null,
     listId: idea.listId || null,
     tabId: idea.tabId || null,
+    order: Number.isFinite(Number(idea.order)) ? Number(idea.order) : 0,
     costEstimate: idea.costEstimate ?? null,
     mapQuery: idea.mapQuery || null,
     coordinates: idea.coordinates || null,
@@ -2105,9 +2112,10 @@ export const api = {
 
     const { data: ideas, error } = await supabase
       .from("Idea")
-      .select("*, votes:Vote(*, User(*)), User(*)")
+      .select("*, votes:Vote(userId, value), User(*)")
       .eq("tripId", tripId)
-      .order("createdAt", { ascending: false });
+      .order("order", { ascending: true })
+      .order("createdAt", { ascending: true });
 
     if (error) throw error;
 
@@ -2132,6 +2140,17 @@ export const api = {
   async createIdea(tripId, payload) {
     const user = await getOrCreateUser();
     const ideaId = crypto.randomUUID();
+    const targetListId = payload.listId || null;
+    let existingIdeasQuery = supabase
+      .from("Idea")
+      .select("id, order, listId, tabId")
+      .eq("tripId", tripId)
+      .eq("tabId", payload.tabId)
+      .order("order", { ascending: false })
+      .limit(1);
+    existingIdeasQuery = targetListId === null ? existingIdeasQuery.is("listId", null) : existingIdeasQuery.eq("listId", targetListId);
+    const { data: existingIdeas } = await existingIdeasQuery;
+    const nextOrder = Number(existingIdeas?.[0]?.order ?? -1) + 1;
     const baseIdeaRecord = {
       id: ideaId,
       tripId,
@@ -2139,7 +2158,10 @@ export const api = {
       title: payload.title,
       description: payload.description,
       location: payload.location,
-      category: payload.category || null
+      category: payload.category || null,
+      listId: targetListId,
+      tabId: payload.tabId,
+      order: Number.isFinite(Number(payload.order)) ? Number(payload.order) : nextOrder
     };
 
     const { data: idea, error, persistedDetails } = await insertIdeaRecord(baseIdeaRecord, payload);
@@ -2163,7 +2185,7 @@ export const api = {
 
     const { data: existingIdea, error: fetchError } = await supabase
       .from("Idea")
-      .select("id, createdById")
+      .select("id, createdById, listId, tabId, order")
       .eq("id", ideaId)
       .single();
 
@@ -2182,7 +2204,10 @@ export const api = {
       title: payload.title,
       description: payload.description,
       location: payload.location,
-      category: payload.category || null
+      category: payload.category || null,
+      listId: payload.listId !== undefined ? payload.listId : existingIdea.listId,
+      tabId: payload.tabId !== undefined ? payload.tabId : existingIdea.tabId,
+      order: Number.isFinite(Number(payload.order)) ? Number(payload.order) : existingIdea.order
     };
 
     const { error, persistedDetails } = await updateIdeaRecord(ideaId, baseIdeaRecord, payload);
@@ -2199,7 +2224,7 @@ export const api = {
 
     const { data: updatedIdea, error: updatedIdeaError } = await supabase
       .from("Idea")
-      .select("*, votes:Vote(*), User(*)")
+      .select("*, votes:Vote(userId, value), User(*)")
       .eq("id", ideaId)
       .single();
 
@@ -2309,11 +2334,15 @@ export const api = {
 
     const voteScore = votes?.reduce((sum, v) => sum + v.value, 0) || 0;
     const userVote = votes?.find(v => v.userId === user.id)?.value || 0;
+    const upvoteCount = votes?.filter((v) => v.value === 1).length || 0;
+    const downvoteCount = votes?.filter((v) => v.value === -1).length || 0;
 
     return {
       id: ideaId,
       voteScore,
       voteCount: votes?.length || 0,
+      upvoteCount,
+      downvoteCount,
       userVote,
       votes: (votes || []).map((vote) => ({
         userId: vote.userId,
@@ -2321,6 +2350,95 @@ export const api = {
         name: vote.User?.name || "Traveler"
       }))
     };
+  },
+
+  async reorderIdeas(tripId, updates, options = {}) {
+    const user = await getOrCreateUser();
+    const movedIdeaId = String(options?.movedIdeaId || "").trim();
+    const normalizedUpdates = Array.isArray(updates)
+      ? updates
+          .map((update) => ({
+            id: update?.id,
+            listId: update?.listId || null,
+            tabId: update?.tabId || null,
+            order: Number(update?.order)
+          }))
+          .filter((update) => update.id && Number.isFinite(update.order))
+      : [];
+
+    if (!normalizedUpdates.length) {
+      return [];
+    }
+
+    const { data: ideas, error: fetchError } = await supabase
+      .from("Idea")
+      .select("id, createdById, tripId, listId, tabId")
+      .eq("tripId", tripId)
+      .in(
+        "id",
+        normalizedUpdates.map((update) => update.id)
+      );
+
+    if (fetchError) throw fetchError;
+
+    const role = await getTripRoleForUser(tripId, user.id);
+    const canManageAll = role === "owner" || role === "editor";
+    const ideaById = new Map((ideas || []).map((idea) => [idea.id, idea]));
+
+    if (!canManageAll) {
+      if (!movedIdeaId) {
+        throw new Error("A moved idea id is required for suggestor reordering");
+      }
+
+      const movedIdea = ideaById.get(movedIdeaId);
+      if (!movedIdea) {
+        throw new Error("Moved idea not found");
+      }
+
+      if (movedIdea.createdById !== user.id) {
+        throw new Error("Suggestors can only drag their own activities");
+      }
+
+      const movedUpdate = normalizedUpdates.find((update) => update.id === movedIdeaId);
+      if (!movedUpdate) {
+        throw new Error("Moved idea update is missing");
+      }
+
+      for (const update of normalizedUpdates) {
+        const idea = ideaById.get(update.id);
+        if (!idea) {
+          throw new Error("Idea not found");
+        }
+
+        if (update.id !== movedIdeaId) {
+          const listChanged = (update.listId || null) !== (idea.listId || null);
+          const tabChanged = (update.tabId || null) !== (idea.tabId || null);
+          if (listChanged || tabChanged) {
+            throw new Error("Suggestors can only move their own activity between lists");
+          }
+        }
+      }
+    }
+
+    const updatedIdeas = [];
+    for (const update of normalizedUpdates) {
+      const { data, error } = await supabase
+        .from("Idea")
+        .update({
+          listId: update.listId,
+          tabId: update.tabId,
+          order: update.order
+        })
+        .eq("id", update.id)
+        .eq("tripId", tripId)
+        .select("*, votes:Vote(userId, value), User(*)")
+        .single();
+
+      if (error) throw error;
+      updatedIdeas.push(data);
+    }
+
+    return updatedIdeas.map((idea) => formatIdea(tripId, idea, user.id, idea.votes || []));
   },
 
   async generateItinerary(tripId) {

@@ -379,18 +379,18 @@ export default function ThreadedComments({
   };
 
   return (
-    <div className="mt-3 rounded-xl border border-slate-200 bg-[#F0F2F5] p-3">
+    <div className={`mt-1.5 rounded-md border border-slate-200 bg-[#F0F2F5] ${isOpen ? "p-2" : "p-1.5"}`}>
       <button
         type="button"
         onClick={() => setIsOpen((current) => !current)}
-        className="flex w-full items-center justify-between text-left"
+        className="flex w-full items-center justify-between gap-2 rounded-md px-1 py-0 text-left"
       >
-        <h4 className="text-sm font-semibold text-ink">{title}</h4>
-        <span className="text-xs font-semibold text-slate-500">{isOpen ? "Hide" : "Show"}</span>
+        <h4 className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">{title}</h4>
+        <span className="text-[10px] font-semibold text-slate-500">{isOpen ? "Hide" : "Show"}</span>
       </button>
 
       {isOpen ? (
-        <div className="mt-3">
+        <div className="mt-2">
           {!commentsTableReady ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               Comments are not enabled in DB yet. Please create table <code>{tableName}</code>.

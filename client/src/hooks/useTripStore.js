@@ -305,6 +305,24 @@ export const useTripStore = create((set, get) => ({
     }
   },
 
+  reorderIdeas: async (tripId, updates, options = {}) => {
+    set({ updateIdeaLoading: true, error: null });
+    try {
+      const updatedIdeas = await api.reorderIdeas(tripId, updates, options);
+      set((state) => ({
+        ideas: state.ideas.map((idea) => {
+          const replacement = updatedIdeas.find((updatedIdea) => updatedIdea.id === idea.id);
+          return replacement ? { ...idea, ...replacement } : idea;
+        }),
+        updateIdeaLoading: false
+      }));
+      return updatedIdeas;
+    } catch (error) {
+      set({ error: error.message, updateIdeaLoading: false });
+      throw error;
+    }
+  },
+
   deleteIdea: async (ideaId, tripId) => {
     const previous = get().ideas;
     set({

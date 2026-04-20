@@ -8,16 +8,22 @@ export default function ActivityComposerModal({
   destination,
   defaultListId = "",
   defaultListName = "",
+  availableLists = [],
   defaultTitle = "",
+  defaultLocation = "",
+  defaultCostEstimate = "",
+  initialIdea = null,
+  submitLabel = "Add",
   onClose,
   onSave
 }) {
   const normalizedListName = normalizeListName(defaultListName);
-  const defaultMode = isPlaceLikeList(normalizedListName) ? "place" : "activity";
+  const defaultMode = initialIdea?.entryType === "place" ? "place" : isPlaceLikeList(normalizedListName) ? "place" : "activity";
   const [mode, setMode] = useState(defaultMode); // "activity" | "place"
+  const [selectedListId, setSelectedListId] = useState(defaultListId);
   const [title, setTitle] = useState(defaultTitle);
-  const [location, setLocation] = useState("");
-  const [costEstimate, setCostEstimate] = useState("");
+  const [location, setLocation] = useState(defaultLocation);
+  const [costEstimate, setCostEstimate] = useState(defaultCostEstimate);
   const [selectedSuggestion, setSelectedSuggestion] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -31,16 +37,17 @@ export default function ActivityComposerModal({
   useEffect(() => {
     if (!open) return;
     setMode(defaultMode);
-    setTitle(defaultTitle || "");
-    setLocation("");
-    setCostEstimate("");
+    setSelectedListId(initialIdea?.listId || defaultListId || "");
+    setTitle(initialIdea?.title || defaultTitle || "");
+    setLocation(initialIdea?.location || defaultLocation || "");
+    setCostEstimate(initialIdea?.costEstimate ?? defaultCostEstimate ?? "");
     setSelectedSuggestion(null);
     setSuggestions([]);
     setHighlightedIndex(-1);
     setSearchLocked(true);
     setSearchError("");
     setSaving(false);
-  }, [defaultListId, defaultTitle, open]);
+  }, [defaultCostEstimate, defaultListId, defaultLocation, defaultTitle, defaultMode, initialIdea?.id, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -117,7 +124,7 @@ export default function ActivityComposerModal({
     if (mode === "place") {
       setTitle(suggestion.title);
     } else {
-      setLocation(String(suggestion.address || suggestion.title || "").trim());
+      setLocation(String(suggestion.mapQuery || suggestion.address || suggestion.title || "").trim());
     }
     setSuggestions([]);
     setHighlightedIndex(-1);
@@ -128,9 +135,13 @@ export default function ActivityComposerModal({
   const handleSave = async () => {
     const trimmedTitle = title.trim();
     const trimmedLocation = location.trim();
-    if (!trimmedTitle || !defaultListId || saving) return;
+    const targetListId = String(selectedListId || defaultListId || "").trim();
+    if (!trimmedTitle || !targetListId || saving) return;
     const costValue = String(costEstimate || "").trim();
     const normalizedCost = costValue ? Number(costValue) : null;
+    const isEditing = Boolean(initialIdea?.id);
+    const isTitleUnchanged = isEditing && trimmedTitle === String(initialIdea.title || "").trim();
+    const isLocationUnchanged = isEditing && trimmedLocation === String(initialIdea.location || "").trim();
     const payloadBase =
       mode === "place"
         ? selectedSuggestion
@@ -168,20 +179,42 @@ export default function ActivityComposerModal({
       title: trimmedTitle,
       tabId,
       costEstimate: Number.isFinite(normalizedCost) ? normalizedCost : null,
-      listId: defaultListId,
-      description: "",
+      listId: targetListId,
+      description: initialIdea?.description || "",
       entryType: mode === "place" ? (selectedSuggestion ? payloadBase.entryType : "place") : "activity",
       location:
-        mode === "place"
-          ? (selectedSuggestion ? payloadBase.location : (trimmedTitle || ""))
-          : (selectedSuggestion ? (selectedSuggestion.address || selectedSuggestion.title || trimmedLocation) : (trimmedLocation || "")),
-      mapQuery,
-      coordinates: selectedSuggestion?.coordinates || payloadBase.coordinates || null,
-      photoUrl: selectedSuggestion?.photoUrl || payloadBase.photoUrl || "",
+        isEditing && !selectedSuggestion && isTitleUnchanged && isLocationUnchanged
+          ? initialIdea.location || ""
+          : mode === "place"
+            ? selectedSuggestion
+              ? payloadBase.location
+              : trimmedTitle || ""
+            : selectedSuggestion
+              ? selectedSuggestion.mapQuery || selectedSuggestion.address || selectedSuggestion.title || trimmedLocation
+              : trimmedLocation || "",
+      mapQuery:
+        isEditing && !selectedSuggestion && isTitleUnchanged && isLocationUnchanged
+          ? initialIdea.mapQuery || ""
+          : mapQuery,
+      coordinates:
+        isEditing && !selectedSuggestion && isTitleUnchanged && isLocationUnchanged
+          ? initialIdea.coordinates || null
+          : selectedSuggestion?.coordinates || payloadBase.coordinates || null,
+      photoUrl:
+        isEditing && !selectedSuggestion && isTitleUnchanged && isLocationUnchanged
+          ? initialIdea.photoUrl || ""
+          : selectedSuggestion?.photoUrl || payloadBase.photoUrl || "",
       photoAttributions: Array.isArray(selectedSuggestion?.photoAttributions)
         ? selectedSuggestion.photoAttributions
+        : isEditing && !selectedSuggestion && isTitleUnchanged && isLocationUnchanged
+          ? initialIdea.photoAttributions || []
         : payloadBase.photoAttributions || [],
-      recommendationSource: selectedSuggestion ? "Google Maps" : payloadBase.recommendationSource || null
+      recommendationSource:
+        isEditing && !selectedSuggestion && isTitleUnchanged && isLocationUnchanged
+          ? initialIdea.recommendationSource || null
+          : selectedSuggestion
+            ? "Google Maps"
+            : payloadBase.recommendationSource || null
     };
 
     setSaving(true);
@@ -207,50 +240,68 @@ export default function ActivityComposerModal({
         onClick={(event) => event.stopPropagation()}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="absolute -right-3 -top-3 inline-flex h-10 w-10 items-center justify-center rounded-full bg-mist text-lg font-semibold text-slate-500 transition hover:bg-slate-200 hover:text-ink"
-        >
-          ×
-        </button>
         <div className="grid gap-4">
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Type</p>
-            <div className="inline-flex rounded-full bg-slate-100 p-1">
+            <div className="flex items-center gap-2">
+              <div className="inline-flex rounded-full bg-slate-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("activity");
+                    setSelectedSuggestion(null);
+                    setSuggestions([]);
+                    setSearchLocked(true);
+                    setSearchError("");
+                  }}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                    mode === "activity" ? "bg-white text-ink shadow-sm" : "text-slate-600 hover:text-ink"
+                  }`}
+                >
+                  Activity
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("place");
+                    setSelectedSuggestion(null);
+                    setSuggestions([]);
+                    setSearchLocked(true);
+                    setSearchError("");
+                  }}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                    mode === "place" ? "bg-white text-ink shadow-sm" : "text-slate-600 hover:text-ink"
+                  }`}
+                >
+                  Place
+                </button>
+              </div>
               <button
                 type="button"
-                onClick={() => {
-                  setMode("activity");
-                  setSelectedSuggestion(null);
-                  setSuggestions([]);
-                  setSearchLocked(true);
-                  setSearchError("");
-                }}
-                className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
-                  mode === "activity" ? "bg-white text-ink shadow-sm" : "text-slate-600 hover:text-ink"
-                }`}
+                onClick={onClose}
+                aria-label="Close"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-lg font-semibold text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-ink"
               >
-                Activity
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMode("place");
-                  setSelectedSuggestion(null);
-                  setSuggestions([]);
-                  setSearchLocked(true);
-                  setSearchError("");
-                }}
-                className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
-                  mode === "place" ? "bg-white text-ink shadow-sm" : "text-slate-600 hover:text-ink"
-                }`}
-              >
-                Place
+                ×
               </button>
             </div>
           </div>
+          {Array.isArray(availableLists) && availableLists.length > 1 ? (
+            <div className="relative min-w-0">
+              <label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">List</label>
+              <select
+                value={selectedListId}
+                onChange={(event) => setSelectedListId(event.target.value)}
+                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-ocean focus:ring-2 focus:ring-ocean/10"
+              >
+                {availableLists.map((list) => (
+                  <option key={list.id} value={list.id}>
+                    {list.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           <div className="relative min-w-0">
             <label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
               {mode === "place" ? "Place name" : "Activity name"}
@@ -354,10 +405,10 @@ export default function ActivityComposerModal({
           <button
             type="button"
             onClick={handleSave}
-            disabled={saving || !title.trim() || !defaultListId}
+            disabled={saving || !title.trim() || !(String(selectedListId || defaultListId || "").trim())}
             className="rounded-full bg-ocean px-5 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-70"
           >
-            {saving ? "Saving..." : "Add"}
+            {saving ? "Saving..." : submitLabel}
           </button>
         </div>
       </div>

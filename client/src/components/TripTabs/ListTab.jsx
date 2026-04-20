@@ -33,11 +33,16 @@ export default function ListTab({
   const [deleteListLoadingId, setDeleteListLoadingId] = useState(null);
   const [deleteIdeaLoadingId, setDeleteIdeaLoadingId] = useState(null);
   const [composerState, setComposerState] = useState(null);
+  const [actionMenu, setActionMenu] = useState(null);
+  const [dragState, setDragState] = useState({ ideaId: null, overListId: null, overIdeaId: null, overSide: null });
   const [listActionError, setListActionError] = useState("");
   const containerRef = useRef(null);
   const mapDragRef = useRef(null);
+  const actionMenuRef = useRef(null);
   const canManageLists = userRole === "owner" || userRole === "editor";
   const reloadIdeas = useTripStore((state) => state.loadIdeas);
+  const updateIdea = useTripStore((state) => state.updateIdea);
+  const reorderIdeas = useTripStore((state) => state.reorderIdeas);
 
   // Load lists from database
   useEffect(() => {
@@ -90,6 +95,41 @@ export default function ListTab({
       document.body.style.userSelect = "";
     };
   }, []);
+
+  const sortIdeas = (left, right) => {
+    const leftOrder = Number.isFinite(Number(left?.order)) ? Number(left.order) : 0;
+    const rightOrder = Number.isFinite(Number(right?.order)) ? Number(right.order) : 0;
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+    return new Date(left?.createdAt || 0).getTime() - new Date(right?.createdAt || 0).getTime();
+  };
+
+  useEffect(() => {
+    if (!actionMenu) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (event.target?.closest?.("[data-action-menu-toggle='true']")) {
+        return;
+      }
+      if (actionMenuRef.current && !actionMenuRef.current.contains(event.target)) {
+        setActionMenu(null);
+      }
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setActionMenu(null);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [actionMenu]);
 
   const handleAddList = async () => {
     if (listCreateLoading || !newListName.trim()) return;
@@ -156,31 +196,222 @@ export default function ListTab({
     }
   };
 
+  const openListMenu = (listId) => {
+    if (!canManageLists) return;
+    setActionMenu({ kind: "list", id: listId });
+  };
+
+  const openIdeaMenu = (ideaId) => {
+    if (!canManageLists && !ideas.some((idea) => idea.id === ideaId && idea.createdById === userId)) {
+      return;
+    }
+    setActionMenu({ kind: "idea", id: ideaId });
+  };
+
   const openComposer = (listId) => {
     const list = lists.find((candidate) => candidate.id === listId) || lists[0] || null;
     setComposerState({
+      mode: "create",
+      idea: null,
       defaultListId: list?.id || "",
       defaultListName: list?.name || "",
-      defaultTitle: ""
+      defaultTitle: "",
+      defaultLocation: "",
+      defaultCostEstimate: ""
     });
   };
 
-  const handleCreateIdea = async (payload) => {
+  const openIdeaEditor = (idea) => {
+    if (!idea) return;
+    const list = lists.find((candidate) => candidate.id === idea.listId) || lists[0] || null;
+    setComposerState({
+      mode: "edit",
+      idea,
+      defaultListId: list?.id || idea.listId || "",
+      defaultListName: list?.name || "",
+      defaultTitle: idea.title || "",
+      defaultLocation: idea.location || "",
+      defaultCostEstimate: idea.costEstimate ?? ""
+    });
+    setActionMenu(null);
+  };
+
+  const getNextOrderForList = (listId, excludeIdeaId = null) => {
+    return ideas.filter((idea) => {
+      if (idea.listId !== listId || idea.tabId !== tab.id) return false;
+      if (excludeIdeaId && idea.id === excludeIdeaId) return false;
+      return true;
+    }).length;
+  };
+
+  const resetDragState = () => {
+    setDragState({ ideaId: null, overListId: null, overIdeaId: null, overSide: null });
+  };
+
+  const canReorderIdea = (idea) => {
+    if (!idea) return false;
+    return canManageLists || idea.createdById === userId;
+  };
+
+  const handleIdeaDragStart = (event, idea) => {
+    if (!canReorderIdea(idea) || !idea?.id) return;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", idea.id);
+    setActionMenu(null);
+    setDragState({ ideaId: idea.id, overListId: idea.listId || null, overIdeaId: null, overSide: null });
+  };
+
+  const handleIdeaDragOver = (event, listId, overIdeaId = null) => {
+    if (!dragState.ideaId) return;
+    const draggedIdea = ideas.find((idea) => idea.id === dragState.ideaId);
+    if (!canReorderIdea(draggedIdea)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    let overSide = null;
+    if (overIdeaId) {
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const midpointY = bounds.top + bounds.height / 2;
+      overSide = event.clientY >= midpointY ? "bottom" : "top";
+    }
+    setDragState((current) => {
+      if (current.overListId === listId && current.overIdeaId === overIdeaId && current.overSide === overSide) {
+        return current;
+      }
+      return {
+        ...current,
+        overListId: listId,
+        overIdeaId,
+        overSide
+      };
+    });
+  };
+
+  const commitIdeaDrop = async (draggedIdeaId, targetListId, targetIdeaId = null, targetSide = null) => {
+    const draggedIdea = ideas.find((idea) => idea.id === draggedIdeaId && (!idea.tabId || idea.tabId === tab.id));
+    if (!draggedIdea || !targetListId) return;
+
+    const sourceListId = draggedIdea.listId;
+    if (!sourceListId) return;
+    if (sourceListId === targetListId && targetIdeaId === draggedIdeaId) return;
+
+    const sourceIdeas = getListIdeas(sourceListId).filter((idea) => idea.id !== draggedIdeaId);
+    const targetIdeasBase =
+      sourceListId === targetListId
+        ? sourceIdeas
+        : getListIdeas(targetListId).filter((idea) => idea.id !== draggedIdeaId);
+
+    let insertIndex = targetIdeasBase.length;
+    if (targetIdeaId) {
+      const targetIndex = targetIdeasBase.findIndex((idea) => idea.id === targetIdeaId);
+      if (targetIndex >= 0) {
+        insertIndex = targetSide === "bottom" ? targetIndex + 1 : targetIndex;
+      }
+    }
+
+    const movedIdea = {
+      ...draggedIdea,
+      listId: targetListId,
+      tabId: tab.id
+    };
+    const targetIdeas = [...targetIdeasBase];
+    targetIdeas.splice(insertIndex, 0, movedIdea);
+
+    const updates =
+      sourceListId === targetListId
+        ? targetIdeas.map((idea, index) => ({
+            id: idea.id,
+            listId: targetListId,
+            tabId: tab.id,
+            order: index
+          }))
+        : [
+            ...sourceIdeas.map((idea, index) => ({
+              id: idea.id,
+              listId: sourceListId,
+              tabId: tab.id,
+              order: index
+            })),
+            ...targetIdeas.map((idea, index) => ({
+              id: idea.id,
+              listId: targetListId,
+              tabId: tab.id,
+              order: index
+            }))
+          ];
+
+    if (!updates.length) return;
+
     try {
       setListActionError("");
-      const createdIdea = await onAddIdea({
-        ...payload,
-        tabId: tab.id
-      });
-      void trackEvent("activity_created_from_list_tab", {
+      await reorderIdeas(tripId, updates, { movedIdeaId: draggedIdeaId });
+      void trackEvent("activity_reordered_in_list_tab", {
         trip_id: tripId,
-        list_id: payload.listId || createdIdea?.listId || "",
-        idea_id: createdIdea?.id || ""
+        idea_id: draggedIdeaId,
+        from_list_id: sourceListId,
+        to_list_id: targetListId
       });
+    } catch (error) {
+      console.error("Failed to reorder activity:", error);
+      setListActionError(error?.message || "Failed to reorder activity");
+    }
+  };
+
+  const handleIdeaDrop = async (event, listId, targetIdeaId = null) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const draggedIdeaId = dragState.ideaId || event.dataTransfer.getData("text/plain");
+    if (!draggedIdeaId) {
+      resetDragState();
+      return;
+    }
+
+    const draggedIdea = ideas.find((idea) => idea.id === draggedIdeaId);
+    if (!canReorderIdea(draggedIdea)) {
+      resetDragState();
+      return;
+    }
+
+    await commitIdeaDrop(draggedIdeaId, listId, targetIdeaId, dragState.overSide);
+    resetDragState();
+  };
+
+  const handleSaveActivity = async (payload) => {
+    try {
+      setListActionError("");
+      const targetListId = payload.listId || composerState?.defaultListId || composerState?.idea?.listId || "";
+      const targetOrder = composerState?.mode === "edit" && composerState?.idea?.listId === targetListId
+        ? composerState.idea.order
+        : getNextOrderForList(targetListId, composerState?.mode === "edit" ? composerState?.idea?.id : null);
+      if (composerState?.mode === "edit" && composerState?.idea?.id) {
+        const updatedIdea = await updateIdea(composerState.idea.id, tripId, {
+          ...payload,
+          tabId: tab.id,
+          listId: targetListId,
+          order: targetOrder
+        });
+        void trackEvent("activity_updated_from_list_tab", {
+          trip_id: tripId,
+          list_id: updatedIdea?.listId || payload.listId || "",
+          idea_id: updatedIdea?.id || composerState.idea.id
+        });
+      } else {
+        const createdIdea = await onAddIdea({
+          ...payload,
+          tabId: tab.id,
+          listId: targetListId,
+          order: targetOrder
+        });
+        void trackEvent("activity_created_from_list_tab", {
+          trip_id: tripId,
+          list_id: payload.listId || createdIdea?.listId || "",
+          idea_id: createdIdea?.id || ""
+        });
+      }
       setComposerState(null);
     } catch (error) {
       console.error("Failed to add activity:", error);
-      setListActionError(error?.message || "Failed to add activity");
+      setListActionError(error?.message || "Failed to save activity");
     }
   };
 
@@ -212,7 +443,16 @@ export default function ListTab({
   };
 
   const getListIdeas = (listId) => {
-    return ideas.filter((idea) => idea.listId === listId && (!idea.tabId || idea.tabId === tab.id));
+    return ideas
+      .filter((idea) => idea.listId === listId && (!idea.tabId || idea.tabId === tab.id))
+      .sort(sortIdeas);
+  };
+  const getIdeaLocationLabel = (idea) => {
+    const primary = String(idea?.mapQuery || idea?.location || "").trim();
+    return {
+      primary,
+      secondary: ""
+    };
   };
   const ideasForThisTab = useMemo(() => {
     return (ideas || []).filter((idea) => idea?.tabId === tab.id);
@@ -289,23 +529,34 @@ export default function ListTab({
             )}
 
           {lists.map((list) => (
-            <div key={list.id} className="rounded-lg border border-slate-200">
-              <div className="flex items-center justify-between bg-slate-50 px-4 py-2 hover:bg-slate-100">
+            <div
+              key={list.id}
+              className={`relative overflow-hidden rounded-2xl border bg-white shadow-sm transition ${
+                dragState.ideaId && dragState.overListId === list.id && !dragState.overIdeaId
+                  ? "border-ocean ring-1 ring-ocean/25"
+                  : "border-slate-200"
+              }`}
+              onDragOver={(event) => handleIdeaDragOver(event, list.id, null)}
+              onDrop={(event) => void handleIdeaDrop(event, list.id, null)}
+            >
+              <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/90 px-3 py-2">
                 <button
                   type="button"
                   onClick={() => toggleCollapse(list.id)}
-                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-white hover:text-ink"
+                  aria-label={collapsedLists[list.id] ? "Expand list" : "Collapse list"}
                 >
                   <svg
-                    className={`h-4 w-4 text-slate-600 transform transition-transform ${
-                      collapsedLists[list.id] ? "-rotate-90" : ""
-                    }`}
+                    className={`h-4 w-4 transform transition-transform ${collapsedLists[list.id] ? "-rotate-90" : ""}`}
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
                   >
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
                   </svg>
+                </button>
+
+                <div className="min-w-0 flex-1">
                   {editingListId === list.id ? (
                     <input
                       type="text"
@@ -313,99 +564,225 @@ export default function ListTab({
                       onChange={(e) => setEditingListName(e.target.value)}
                       onClick={(e) => e.stopPropagation()}
                       onBlur={() => handleRenameList(list.id)}
-                      onKeyPress={(e) => e.key === "Enter" && handleRenameList(list.id)}
-                      className="rounded px-2 py-1 text-sm font-semibold text-ink border border-ocean"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void handleRenameList(list.id);
+                        }
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          setEditingListId(null);
+                          setEditingListName("");
+                        }
+                      }}
+                      className="w-full rounded-xl border border-ocean bg-white px-3 py-2 text-sm font-semibold text-ink outline-none"
                       autoFocus
                     />
                   ) : (
-                    <h3 className="min-w-0 truncate font-semibold text-ink text-sm">{list.name}</h3>
-                  )}
-                </button>
-                {canManageLists && (
-                  <div className="flex gap-1">
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingListId(list.id);
-                        setEditingListName(list.name);
-                      }}
-                      className="p-1 text-slate-600 hover:text-ink text-sm"
-                      title="Edit"
+                      onClick={() => toggleCollapse(list.id)}
+                      className="block w-full min-w-0 text-left"
                     >
-                      ✎
+                      <h3 className="truncate text-sm font-semibold text-ink">{list.name}</h3>
+                    </button>
+                  )}
+                </div>
+
+                {canManageLists ? (
+                  <button
+                    type="button"
+                    data-action-menu-toggle="true"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openListMenu(list.id);
+                    }}
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-white hover:text-ink"
+                    aria-label="List actions"
+                    title="List actions"
+                  >
+                    ⋯
+                  </button>
+                ) : null}
+
+                {actionMenu?.kind === "list" && actionMenu?.id === list.id ? (
+                  <div
+                    ref={actionMenuRef}
+                    className="absolute right-3 top-12 z-30 min-w-[180px] rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      className="block w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-ink transition hover:bg-slate-100"
+                      onClick={() => {
+                        const target = lists.find((candidate) => candidate.id === actionMenu.id);
+                        if (target) {
+                          setEditingListId(target.id);
+                          setEditingListName(target.name || "");
+                          setCollapsedLists((current) => ({ ...current, [target.id]: false }));
+                        }
+                        setActionMenu(null);
+                      }}
+                    >
+                      Edit list
                     </button>
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteListConfirm(list);
+                      className="block w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-coral transition hover:bg-rose-50"
+                      onClick={() => {
+                        const target = lists.find((candidate) => candidate.id === actionMenu.id);
+                        if (target) {
+                          setDeleteListConfirm(target);
+                        }
+                        setActionMenu(null);
                       }}
-                      disabled={deleteListLoadingId === list.id}
-                      className="p-1 text-slate-600 hover:text-coral text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                      title="Delete"
                     >
-                      {deleteListLoadingId === list.id ? "…" : "✕"}
+                      Delete list
                     </button>
                   </div>
-                )}
+                ) : null}
               </div>
 
-                {!collapsedLists[list.id] && (
-                  <div className="p-3 space-y-2">
-                    {getListIdeas(list.id).map((idea) => (
-                      <div key={idea.id} className="border-b border-slate-200 pb-2 last:border-0">
-                        <div className="flex items-start gap-2">
-                          <div className="min-w-0 flex-1">
-                            <p className="font-semibold text-ink text-sm">{idea.title}</p>
-                            {idea.location && <p className="text-xs text-slate-600">{idea.location}</p>}
-                            {idea.costEstimate !== null && idea.costEstimate !== undefined && idea.costEstimate !== "" && Number.isFinite(Number(idea.costEstimate)) ? (
-                              <span className="text-xs text-ocean font-semibold">${Number(idea.costEstimate).toFixed(2)}</span>
+              {!collapsedLists[list.id] ? (
+                <div className="space-y-3 p-3">
+                  {getListIdeas(list.id).map((idea) => {
+                    const locationText = getIdeaLocationLabel(idea);
+                    const canActOnIdea = canManageLists || idea.createdById === userId;
+                    const isDragSource = dragState.ideaId === idea.id;
+                    const isDropTarget =
+                      Boolean(dragState.ideaId) &&
+                      dragState.ideaId !== idea.id &&
+                      dragState.overListId === list.id &&
+                      dragState.overIdeaId === idea.id;
+                    const showInsertionTop = isDropTarget && dragState.overSide === "top";
+                    const showInsertionBottom = isDropTarget && dragState.overSide === "bottom";
+
+                    const canDragIdea = canReorderIdea(idea);
+
+                    return (
+                      <div
+                        key={idea.id}
+                        draggable={canDragIdea}
+                        onDragStart={(event) => handleIdeaDragStart(event, idea)}
+                        onDragEnd={resetDragState}
+                        onDragOver={(event) => handleIdeaDragOver(event, list.id, idea.id)}
+                        onDrop={(event) => void handleIdeaDrop(event, list.id, idea.id)}
+                        className={`relative rounded-xl border bg-slate-50/75 p-3 transition ${
+                          isDropTarget
+                            ? "border-ocean/70 ring-1 ring-ocean/25"
+                            : "border-slate-200"
+                        } ${isDragSource ? "opacity-65" : "opacity-100"} ${canDragIdea ? "cursor-grab active:cursor-grabbing" : ""}`}
+                      >
+                        {showInsertionTop ? (
+                          <div className="pointer-events-none absolute -top-1 left-2 right-2 h-0.5 rounded-full bg-ocean" />
+                        ) : null}
+                        {showInsertionBottom ? (
+                          <div className="pointer-events-none absolute -bottom-1 left-2 right-2 h-0.5 rounded-full bg-ocean" />
+                        ) : null}
+                        <div className="flex items-start gap-3">
+                          <div className="min-w-0 flex-1 space-y-2">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-ink">{idea.title}</p>
+                                {locationText.primary ? <p className="mt-0.5 truncate text-xs text-slate-600">{locationText.primary}</p> : null}
+                                <p className="mt-0.5 text-[11px] text-slate-400">Added by {idea.submittedBy || "Traveler"}</p>
+                                {idea.costEstimate !== null && idea.costEstimate !== undefined && idea.costEstimate !== "" && Number.isFinite(Number(idea.costEstimate)) ? (
+                                  <p className="mt-1 text-[11px] font-semibold text-ocean">${Number(idea.costEstimate).toFixed(2)}</p>
+                                ) : null}
+                              </div>
+
+                              <div className="flex shrink-0 items-start gap-1">
+                                <VoteButtons
+                                  upvotes={idea.upvoteCount}
+                                  downvotes={idea.downvoteCount}
+                                  userVote={idea.userVote || 0}
+                                  onVote={(voteValue) => void onVoteIdea(idea.id, voteValue)}
+                                  compact
+                                  layout="stack"
+                                />
+                                {canActOnIdea ? (
+                                  <button
+                                    type="button"
+                                    data-action-menu-toggle="true"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      openIdeaMenu(idea.id);
+                                    }}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-white hover:text-ink"
+                                    aria-label="Activity actions"
+                                    title="Activity actions"
+                                  >
+                                    ⋯
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            {actionMenu?.kind === "idea" && actionMenu?.id === idea.id ? (
+                              <div
+                                ref={actionMenuRef}
+                                className="absolute right-3 top-12 z-30 min-w-[180px] rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <button
+                                  type="button"
+                                  className="block w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-ink transition hover:bg-slate-100"
+                                  onClick={() => {
+                                    const target = ideas.find((candidate) => candidate.id === actionMenu.id);
+                                    if (target) {
+                                      openIdeaEditor(target);
+                                    }
+                                    setActionMenu(null);
+                                  }}
+                                >
+                                  Edit activity
+                                </button>
+                                <button
+                                  type="button"
+                                  className="block w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-coral transition hover:bg-rose-50"
+                                  onClick={() => {
+                                    const target = ideas.find((candidate) => candidate.id === actionMenu.id);
+                                    if (target) {
+                                      setDeleteIdeaConfirm(target);
+                                    }
+                                    setActionMenu(null);
+                                  }}
+                                >
+                                  Delete activity
+                                </button>
+                              </div>
                             ) : null}
+
+                            <ThreadedComments
+                              tableName="IdeaComment"
+                              resourceColumn="ideaId"
+                              resourceId={idea.id}
+                              userId={userId}
+                              userNamesById={memberNamesById}
+                              title="Comments"
+                            />
                           </div>
-                          <VoteButtons
-                            score={idea.voteScore || 0}
-                            userVote={idea.userVote || 0}
-                            onVote={(voteValue) => void onVoteIdea(idea.id, voteValue)}
-                            layout="stack"
-                          />
-                          {(canManageLists || idea.createdById === userId) && (
-                            <button
-                              type="button"
-                              onMouseDown={(event) => event.stopPropagation()}
-                              onClick={() => setDeleteIdeaConfirm(idea)}
-                              disabled={deleteIdeaLoadingId === idea.id}
-                              className="text-xs text-coral hover:font-semibold flex-shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {deleteIdeaLoadingId === idea.id ? "Deleting..." : "✕"}
-                            </button>
-                          )}
                         </div>
-                        <ThreadedComments
-                          tableName="IdeaComment"
-                          resourceColumn="ideaId"
-                          resourceId={idea.id}
-                          userId={userId}
-                          userNamesById={memberNamesById}
-                          title="Comments"
-                        />
                       </div>
-                    ))}
-                    <button
-                      onClick={() => openComposer(list.id)}
-                      className="w-full rounded-lg border-2 border-dashed border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 hover:text-ink hover:border-ocean"
-                    >
-                      + Add Activity
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+                    );
+                  })}
+
+                  <button
+                    onClick={() => openComposer(list.id)}
+                    className="w-full rounded-xl border border-dashed border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-ocean hover:text-ink"
+                  >
+                    + Add Activity
+                  </button>
+
+                </div>
+              ) : null}
+            </div>
+          ))}
 
           {canManageLists && lists.length > 0 && !isAddingList && (
             <button
               onClick={() => setIsAddingList(true)}
-              className="w-full rounded-lg border-2 border-dashed border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:border-ocean hover:text-ink"
+              className="w-full rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm font-semibold text-slate-600 transition hover:border-ocean hover:text-ink"
             >
               + New List
             </button>
@@ -505,12 +882,16 @@ export default function ListTab({
           open={Boolean(composerState)}
           tabId={tab.id}
           destination={trip?.destination || null}
-          listOptions={lists}
           defaultListId={composerState.defaultListId}
           defaultListName={composerState.defaultListName}
+          availableLists={lists}
           defaultTitle={composerState.defaultTitle}
+          defaultLocation={composerState.defaultLocation}
+          defaultCostEstimate={composerState.defaultCostEstimate}
+          initialIdea={composerState.idea}
+          submitLabel={composerState.mode === "edit" ? "Save changes" : "Add"}
           onClose={() => setComposerState(null)}
-          onSave={handleCreateIdea}
+          onSave={handleSaveActivity}
         />
       ) : null}
     </div>
