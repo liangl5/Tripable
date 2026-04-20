@@ -718,7 +718,7 @@ export default function TripDashboardPage() {
             {actionStatus ? <p className="px-3 pb-3 text-sm text-coral">{actionStatus}</p> : null}
           </div>
 
-          <div className="px-3 pt-4">
+          <div className="-mt-px">
             {trip && (
               <TabManager
                 trip={trip}

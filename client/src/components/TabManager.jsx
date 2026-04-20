@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getTripTabs, reorderTabs, deleteTab, createTab, updateTab } from "../lib/tabManagement.js";
 import { trackEvent } from "../lib/analytics.js";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { supabase } from "../lib/supabase.js";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import AddIcon from "@mui/icons-material/Add";
 import AvailabilityTab from "./TripTabs/AvailabilityTab.jsx";
 import ListTab from "./TripTabs/ListTab.jsx";
 import ItineraryTab from "./TripTabs/ItineraryTab.jsx";
@@ -28,6 +31,7 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
   const [hydratedTab, setHydratedTab] = useState(false);
   const [loading, setLoading] = useState(false);
   const [draggedTab, setDraggedTab] = useState(null);
+  const [dropIndicator, setDropIndicator] = useState(null);
   const [tabDeleteConfirm, setTabDeleteConfirm] = useState(null);
   const [tabDeleteLoading, setTabDeleteLoading] = useState(false);
   const [editingTabId, setEditingTabId] = useState(null);
@@ -38,6 +42,16 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
   const [tabCreateType, setTabCreateType] = useState("availability");
   const [tabCreateName, setTabCreateName] = useState("");
   const [tabCreateError, setTabCreateError] = useState("");
+  const [tabMenu, setTabMenu] = useState(null);
+  const [hoveredTabId, setHoveredTabId] = useState(null);
+  const [tabDropdownOpen, setTabDropdownOpen] = useState(false);
+  const [tabDropdownPosition, setTabDropdownPosition] = useState(null);
+  const [buttonTooltip, setButtonTooltip] = useState(null);
+  const [needsScroll, setNeedsScroll] = useState(false);
+  const tabStripRef = useRef(null);
+  const tabMenuRef = useRef(null);
+  const tabDropdownRef = useRef(null);
+  const tabListContainerRef = useRef(null);
   const canManageTabs = userRole === "owner" || userRole === "editor";
 
   const normalizeTabName = (value) => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
@@ -146,6 +160,84 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
       });
     }
   }, [activeTab, tabs, tripId, userId, hydratedTab]);
+
+  useEffect(() => {
+    const checkScroll = () => {
+      const container = tabListContainerRef.current;
+      if (container) {
+        setNeedsScroll(container.scrollWidth > container.clientWidth);
+      }
+    };
+    checkScroll();
+    window.addEventListener("resize", checkScroll);
+    return () => window.removeEventListener("resize", checkScroll);
+  }, [tabs]);
+
+  useEffect(() => {
+    if (!draggedTab) return undefined;
+
+    const handleWindowDragOver = (event) => {
+      const strip = tabStripRef.current;
+      if (!strip) return;
+      const rect = strip.getBoundingClientRect();
+      const margin = 12;
+      const outsideX = event.clientX < rect.left - margin || event.clientX > rect.right + margin;
+      const outsideY = event.clientY < rect.top - margin || event.clientY > rect.bottom + margin;
+      if (outsideX || outsideY) {
+        setDropIndicator(null);
+      }
+    };
+
+    window.addEventListener("dragover", handleWindowDragOver);
+    return () => window.removeEventListener("dragover", handleWindowDragOver);
+  }, [draggedTab]);
+
+  useEffect(() => {
+    const checkScroll = () => {
+      const container = tabListContainerRef.current;
+      if (container) {
+        setNeedsScroll(container.scrollWidth > container.clientWidth);
+      }
+    };
+    checkScroll();
+    window.addEventListener("resize", checkScroll);
+    return () => window.removeEventListener("resize", checkScroll);
+  }, [tabs]);
+
+  useEffect(() => {
+    if (!tabMenu && !tabDropdownOpen) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (event.target?.closest?.("[data-tab-menu-toggle='true']")) {
+        return;
+      }
+      if (event.target?.closest?.("[data-tab-dropdown-toggle='true']")) {
+        return;
+      }
+      if (tabMenuRef.current && !tabMenuRef.current.contains(event.target)) {
+        setTabMenu(null);
+      }
+      if (tabDropdownRef.current && !tabDropdownRef.current.contains(event.target)) {
+        setTabDropdownOpen(false);
+        setTabDropdownPosition(null);
+      }
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setTabMenu(null);
+        setTabDropdownOpen(false);
+        setTabDropdownPosition(null);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [tabMenu, tabDropdownOpen]);
 
   const executeTabDelete = async (tabId) => {
     if (!canManageTabs) return;
@@ -288,26 +380,81 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
     }
   };
 
-  const handleDragStart = (tabId) => {
-    setDraggedTab(tabId);
+  const handleDragStart = (event, tab) => {
+    const dataTransfer = event?.dataTransfer;
+    if (dataTransfer) {
+      dataTransfer.effectAllowed = "move";
+      const preview = document.createElement("div");
+      preview.textContent = tab.name || "Tab";
+      preview.style.position = "fixed";
+      preview.style.top = "-1000px";
+      preview.style.left = "-1000px";
+      preview.style.display = "inline-flex";
+      preview.style.alignItems = "center";
+      preview.style.justifyContent = "center";
+      preview.style.padding = "6px 10px";
+      preview.style.borderRadius = "10px";
+      preview.style.background = "rgba(226, 232, 240, 0.85)";
+      preview.style.border = "1px solid rgba(148, 163, 184, 0.95)";
+      preview.style.color = "#1e293b";
+      preview.style.fontSize = "12px";
+      preview.style.fontWeight = "600";
+      preview.style.boxShadow = "0 10px 24px rgba(15, 23, 42, 0.18)";
+      document.body.appendChild(preview);
+      dataTransfer.setDragImage(preview, 20, 16);
+      window.requestAnimationFrame(() => {
+        document.body.removeChild(preview);
+      });
+    }
+
+    setDraggedTab(tab.id);
+    document.body.style.cursor = "grabbing";
+  };
+
+  const handleDragEnd = () => {
+    setDraggedTab(null);
+    setDropIndicator(null);
+    document.body.style.cursor = "";
   };
 
   const handleDragOver = (e) => {
     e.preventDefault();
   };
 
+  const handleTabDragOver = (event, tabId) => {
+    event.preventDefault();
+    if (event?.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
+    if (!draggedTab) return;
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const midpoint = bounds.left + bounds.width / 2;
+    const side = event.clientX > midpoint ? "right" : "left";
+
+    setDropIndicator((prev) => {
+      if (prev?.tabId === tabId && prev?.side === side) return prev;
+      return { tabId, side };
+    });
+  };
+
   const handleDropOnTab = async (targetId) => {
-    if (!draggedTab || draggedTab === targetId) {
+    if (!draggedTab) {
       setDraggedTab(null);
+      setDropIndicator(null);
+      document.body.style.cursor = "";
       return;
     }
 
     const fromIndex = tabs.findIndex((t) => t.id === draggedTab);
-    const toIndex = tabs.findIndex((t) => t.id === targetId);
+    const targetIndex = tabs.findIndex((t) => t.id === targetId);
+    const insertAfterTarget = dropIndicator?.tabId === targetId && dropIndicator?.side === "right";
+    const baseInsertIndex = insertAfterTarget ? targetIndex + 1 : targetIndex;
+    const adjustedInsertIndex = fromIndex < baseInsertIndex ? baseInsertIndex - 1 : baseInsertIndex;
 
     const newTabs = Array.from(tabs);
     const [moved] = newTabs.splice(fromIndex, 1);
-    newTabs.splice(toIndex, 0, moved);
+    newTabs.splice(adjustedInsertIndex, 0, moved);
 
     setTabs(newTabs);
 
@@ -323,6 +470,32 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
     }
 
     setDraggedTab(null);
+    setDropIndicator(null);
+    document.body.style.cursor = "";
+  };
+
+  const openTabContextMenuAt = (tabId, x) => {
+    if (!canManageTabs) return;
+    const strip = tabStripRef.current;
+    const stripRect = strip?.getBoundingClientRect();
+    setTabMenu({
+      tabId,
+      x,
+      y: (stripRect?.bottom || 0) + 6
+    });
+  };
+
+  const showButtonTooltip = (event, text) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setButtonTooltip({
+      text,
+      x: rect.left + rect.width / 2,
+      y: rect.bottom + 8
+    });
+  };
+
+  const hideButtonTooltip = () => {
+    setButtonTooltip(null);
   };
 
   // List tab callbacks
@@ -421,25 +594,36 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
 
   return (
     <div className="h-full flex flex-col">
+      {buttonTooltip ? (
+        <div
+          className="pointer-events-none fixed z-[95] -translate-x-1/2 rounded-md bg-slate-800 px-2 py-1 text-xs font-medium text-white shadow-lg"
+          style={{ left: buttonTooltip.x, top: buttonTooltip.y }}
+        >
+          {buttonTooltip.text}
+        </div>
+      ) : null}
       {/* Tab Navigation */}
-      <div className="border-b border-slate-200 bg-white overflow-x-auto px-3">
-        <div className="flex min-w-max items-end gap-1">
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              draggable={canManageTabs}
-              onDragStart={() => handleDragStart(tab.id)}
-              onDragOver={handleDragOver}
-              onDrop={() => handleDropOnTab(tab.id)}
-              className={`-mb-px flex items-center gap-2 rounded-t-lg border border-b-0 px-4 py-2 text-sm font-medium leading-none transition-all duration-150 ${
-                activeTab === tab.id
-                  ? "border-slate-200 bg-white text-ink shadow-[0_-1px_0_rgba(0,0,0,0.02)]"
-                  : "border-transparent bg-slate-50 text-slate-500 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-700"
-              } ${canManageTabs ? "cursor-move" : ""}`}
-            >
-              <button
-                type="button"
+      <div ref={tabStripRef} className={`h-9 border-t border-slate-200 bg-[#baf59c]/50 ${needsScroll ? "overflow-x-auto" : "overflow-x-hidden"} overflow-y-visible pl-0 pr-3`}>
+        <div ref={tabListContainerRef} className="flex h-full min-w-max items-stretch">
+          {tabs.map((tab, index) => {
+            const isActive = activeTab === tab.id;
+            const leftNeighborActive = tabs[index - 1]?.id === activeTab;
+            const leftNeighborHovered = tabs[index - 1]?.id === hoveredTabId;
+            const isHovered = hoveredTabId === tab.id;
+            const showLeftDivider = index > 0 && !isActive && !leftNeighborActive && !isHovered && !leftNeighborHovered;
+
+            return (
+            <div key={tab.id} className="relative flex h-full items-stretch">
+              <div
+                className={`relative -mb-px flex h-full items-center gap-2 whitespace-nowrap px-4 py-0 text-sm font-medium leading-none transition-all duration-150 cursor-pointer ${
+                isActive
+                  ? "relative z-30 rounded-t-lg border border-slate-200 border-b-transparent bg-white text-ink before:absolute before:-bottom-px before:right-full before:h-px before:w-[100vw] before:bg-slate-200 before:content-[''] after:absolute after:-bottom-px after:left-full after:h-px after:w-[100vw] after:bg-slate-200 after:content-['']"
+                      : `rounded-none border-y border-y-transparent border-x-0 bg-transparent text-[#1e4840] hover:relative hover:z-20 hover:rounded-t-lg hover:bg-[#9dd67f]/70 hover:text-[#173630] ${showLeftDivider ? "before:absolute before:left-0 before:top-1 before:bottom-1 before:w-px before:bg-slate-300 before:content-['']" : ""}`
+              } ${canManageTabs && draggedTab === tab.id ? "cursor-grabbing" : ""} ${draggedTab === tab.id ? "border-slate-300 bg-slate-200/70 text-slate-500" : ""}`}
+                draggable={canManageTabs}
                 onClick={() => {
+                  if (draggedTab) return;
+                  setTabMenu(null);
                   setActiveTab(tab.id);
                   syncUrlTab(tab.id, { replace: false });
                   void trackEvent("trip_tab_viewed", {
@@ -448,72 +632,167 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
                     tab_type: tab.tabType || "custom"
                   });
                 }}
-                className="min-w-0"
+                  onMouseEnter={() => setHoveredTabId(tab.id)}
+                  onMouseLeave={() => setHoveredTabId((current) => (current === tab.id ? null : current))}
+                onDragStart={(event) => handleDragStart(event, tab)}
+                onDragEnd={handleDragEnd}
+                onDragOver={(event) => handleTabDragOver(event, tab.id)}
+                onDrop={() => handleDropOnTab(tab.id)}
+                onContextMenu={(event) => {
+                  if (!canManageTabs) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  openTabContextMenuAt(tab.id, rect.left);
+                }}
               >
-                {editingTabId === tab.id ? (
-                  <input
-                    type="text"
-                    value={editingTabName}
-                    onChange={(event) => setEditingTabName(event.target.value)}
-                    onClick={(event) => event.stopPropagation()}
-                    onBlur={() => void submitTabRename(tab)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void submitTabRename(tab);
-                      }
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        cancelTabRename();
-                      }
-                    }}
-                    disabled={tabRenameLoading}
-                    className={`rounded border px-2 py-1 text-sm font-medium text-ink ${
-                      tabNameError ? "border-rose-400" : "border-ocean"
-                    }`}
-                    autoFocus
-                  />
-                ) : (
-                  <span>{tab.name}</span>
-                )}
-              </button>
-
-              {canManageTabs && (
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      beginTabRename(tab);
-                    }}
-                    className="rounded p-0.5 text-slate-400 transition hover:bg-white hover:text-ocean"
-                    title="Rename tab"
-                  >
-                    ✎
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      handleTabDelete(tab);
-                    }}
-                    className="rounded p-0.5 text-slate-400 transition hover:bg-white hover:text-coral"
-                    title="Delete tab"
-                  >
-                    ✕
-                  </button>
+                <div
+                  className={`min-w-0 whitespace-nowrap ${isActive ? "font-bold" : "font-medium"} ${draggedTab === tab.id ? "invisible" : ""}`}
+                >
+                  {editingTabId === tab.id ? (
+                    <input
+                      type="text"
+                      value={editingTabName}
+                      onChange={(event) => setEditingTabName(event.target.value)}
+                      onClick={(event) => event.stopPropagation()}
+                      onBlur={() => void submitTabRename(tab)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void submitTabRename(tab);
+                        }
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          cancelTabRename();
+                        }
+                      }}
+                      disabled={tabRenameLoading}
+                      className={`rounded border px-2 py-1 text-sm font-medium text-ink ${
+                        tabNameError ? "border-rose-400" : "border-ocean"
+                      }`}
+                      autoFocus
+                    />
+                  ) : (
+                    <span>{tab.name}</span>
+                  )}
                 </div>
-              )}
+
+                {canManageTabs && isActive && draggedTab !== tab.id ? (
+                  <button
+                    type="button"
+                    data-tab-menu-toggle="true"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (tabMenu?.tabId === tab.id) {
+                        setTabMenu(null);
+                        return;
+                      }
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      openTabContextMenuAt(tab.id, rect.left);
+                    }}
+                    className="h-5 w-5 shrink-0 rounded p-0 text-slate-500 transition hover:bg-white hover:text-[#1e4840]"
+                    aria-label="Open tab menu"
+                    title="Tab options"
+                  >
+                    <ExpandMoreIcon fontSize="small" />
+                  </button>
+                ) : null}
+              </div>
+
+              {dropIndicator?.tabId === tab.id ? (
+                <div
+                  className={`pointer-events-none absolute bottom-0 top-2 w-0.5 rounded-full bg-slate-500/80 ${
+                    dropIndicator.side === "right" ? "-right-0.5" : "-left-0.5"
+                  }`}
+                />
+              ) : null}
             </div>
-          ))}
+            );
+          })}
 
           {canManageTabs && (
-            <button
-              onClick={openTabCreateModal}
-              className="-mb-px rounded-t-lg border border-transparent border-b-0 bg-slate-50 px-4 py-2 text-sm font-medium leading-none text-slate-600 transition-all duration-150 hover:border-slate-200 hover:bg-slate-100 hover:text-ink"
-            >
-              + New Tab
-            </button>
+            <>
+              <div
+                className={`relative -mb-px flex h-full items-stretch border-y border-y-transparent ${
+                  tabs.length > 0 && (activeTab === tabs[tabs.length - 1]?.id || hoveredTabId === tabs[tabs.length - 1]?.id)
+                    ? "before:opacity-0"
+                    : "before:opacity-100"
+                } before:absolute before:left-0 before:top-1 before:bottom-1 before:w-px before:bg-slate-300 before:content-['']`}
+              >
+                <button
+                  type="button"
+                  data-tab-dropdown-toggle="true"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setButtonTooltip(null);
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setTabDropdownOpen((current) => {
+                      const next = !current;
+                      if (next) {
+                        setTabDropdownPosition({ x: rect.right, y: rect.bottom + 6 });
+                      } else {
+                        setTabDropdownPosition(null);
+                      }
+                      return next;
+                    });
+                  }}
+                  onMouseEnter={(event) => showButtonTooltip(event, "All tabs")}
+                  onMouseLeave={hideButtonTooltip}
+                  className="flex h-full items-center justify-center rounded-t-lg border border-x-transparent border-t-transparent border-b-transparent bg-transparent px-2 py-0 text-[#1e4840] transition-all duration-150"
+                  aria-label="All tabs"
+                >
+                  <KeyboardArrowDownIcon fontSize="small" />
+                </button>
+                {tabDropdownOpen ? (
+                  <div
+                    ref={tabDropdownRef}
+                    className="fixed z-[90] min-w-[180px] rounded-lg border border-slate-200 bg-white p-1 shadow-lg"
+                    style={{ left: `${tabDropdownPosition?.x || 0}px`, top: `${tabDropdownPosition?.y || 0}px`, transform: "translateX(-100%)" }}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      All tabs
+                    </div>
+                    {tabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveTab(tab.id);
+                          syncUrlTab(tab.id, { replace: false });
+                          setTabDropdownOpen(false);
+                          setTabDropdownPosition(null);
+                          void trackEvent("trip_tab_viewed_from_dropdown", {
+                            trip_id: tripId,
+                            tab_id: tab.id,
+                            tab_type: tab.tabType || "custom"
+                          });
+                        }}
+                        className={`block w-full rounded-md px-3 py-2 text-left text-sm font-semibold transition ${
+                          activeTab === tab.id
+                            ? "bg-[#baf59c] text-[#1e4840]"
+                            : "text-[#1e4840] hover:bg-slate-100"
+                        }`}
+                      >
+                        {tab.name}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              <button
+                onClick={() => {
+                  setButtonTooltip(null);
+                  openTabCreateModal();
+                }}
+                onMouseEnter={(event) => showButtonTooltip(event, "Add new tab")}
+                onMouseLeave={hideButtonTooltip}
+                className="-mb-px flex h-full items-center justify-center rounded-t-lg border border-x-transparent border-t-transparent border-b-transparent bg-transparent px-2 py-0 text-[#1e4840] transition-all duration-150"
+                aria-label="Add new tab"
+              >
+                <AddIcon fontSize="small" />
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -523,13 +802,58 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
         </div>
       ) : null}
 
+      {tabMenu && canManageTabs ? (
+        <div
+          ref={tabMenuRef}
+          className="fixed z-[80] min-w-[150px] rounded-lg border border-slate-200 bg-white p-1 shadow-xl"
+          style={{ left: `${tabMenu.x}px`, top: `${tabMenu.y}px` }}
+        >
+          <button
+            type="button"
+            className="block w-full rounded-md px-3 py-2 text-left text-sm font-medium text-ink hover:bg-slate-100"
+            onClick={() => {
+              const targetTab = tabs.find((tab) => tab.id === tabMenu.tabId);
+              if (targetTab) {
+                beginTabRename(targetTab);
+              }
+              setTabMenu(null);
+            }}
+          >
+            Rename tab
+          </button>
+          <button
+            type="button"
+            className="block w-full rounded-md px-3 py-2 text-left text-sm font-medium text-coral hover:bg-rose-50"
+            onClick={() => {
+              const targetTab = tabs.find((tab) => tab.id === tabMenu.tabId);
+              if (targetTab) {
+                handleTabDelete(targetTab);
+              }
+              setTabMenu(null);
+            }}
+          >
+            Delete tab
+          </button>
+        </div>
+      ) : null}
+
       {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto bg-white">
-        {tabs.map((tab) => (
-          <div key={tab.id} className={activeTab === tab.id ? "block" : "hidden"}>
-            {renderTabPanel(tab)}
-          </div>
-        ))}
+      <div className="grid flex-1 overflow-y-auto bg-white">
+        {tabs.map((tab) => {
+          const isActivePanel = activeTab === tab.id;
+          return (
+            <div
+              key={tab.id}
+              className={`col-start-1 row-start-1 transition-opacity duration-200 ease-out will-change-opacity motion-reduce:transition-none ${
+                isActivePanel
+                  ? "visible pointer-events-auto opacity-100"
+                  : "invisible pointer-events-none opacity-0"
+              }`}
+            >
+              {renderTabPanel(tab)}
+            </div>
+          );
+        })}
       </div>
 
       {tabDeleteConfirm ? (
