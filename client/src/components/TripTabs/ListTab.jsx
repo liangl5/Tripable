@@ -35,6 +35,7 @@ export default function ListTab({
   const [composerState, setComposerState] = useState(null);
   const [actionMenu, setActionMenu] = useState(null);
   const [dragState, setDragState] = useState({ ideaId: null, overListId: null, overIdeaId: null, overSide: null });
+  const [expandedDescriptions, setExpandedDescriptions] = useState({});
   const [listActionError, setListActionError] = useState("");
   const containerRef = useRef(null);
   const mapDragRef = useRef(null);
@@ -43,6 +44,23 @@ export default function ListTab({
   const reloadIdeas = useTripStore((state) => state.loadIdeas);
   const updateIdea = useTripStore((state) => state.updateIdea);
   const reorderIdeas = useTripStore((state) => state.reorderIdeas);
+
+  const DisclosureChevron = ({ open }) => (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      aria-hidden="true"
+      className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${open ? "rotate-90" : "rotate-0"}`}
+    >
+      <path
+        d="M7.5 4.5L12.5 10L7.5 15.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 
   // Load lists from database
   useEffect(() => {
@@ -217,6 +235,7 @@ export default function ListTab({
       defaultListName: list?.name || "",
       defaultTitle: "",
       defaultLocation: "",
+      defaultDescription: "",
       defaultCostEstimate: ""
     });
   };
@@ -231,6 +250,7 @@ export default function ListTab({
       defaultListName: list?.name || "",
       defaultTitle: idea.title || "",
       defaultLocation: idea.location || "",
+      defaultDescription: idea.description || "",
       defaultCostEstimate: idea.costEstimate ?? ""
     });
     setActionMenu(null);
@@ -440,6 +460,13 @@ export default function ListTab({
       ...collapsedLists,
       [listId]: !collapsedLists[listId]
     });
+  };
+
+  const toggleDescription = (ideaId) => {
+    setExpandedDescriptions((current) => ({
+      ...current,
+      [ideaId]: !current[ideaId]
+    }));
   };
 
   const getListIdeas = (listId) => {
@@ -685,6 +712,26 @@ export default function ListTab({
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-semibold text-ink">{idea.title}</p>
                                 {locationText.primary ? <p className="mt-0.5 truncate text-xs text-slate-600">{locationText.primary}</p> : null}
+                                {idea.description ? (
+                                  <div className="mt-1">
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        toggleDescription(idea.id);
+                                      }}
+                                      className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500 shadow-sm transition hover:border-ocean hover:text-ocean"
+                                    >
+                                      <span>Description</span>
+                                      <DisclosureChevron open={Boolean(expandedDescriptions[idea.id])} />
+                                    </button>
+                                    {expandedDescriptions[idea.id] ? (
+                                      <p className="mt-1 max-w-prose whitespace-pre-wrap text-xs leading-5 text-slate-600">
+                                        {idea.description}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                ) : null}
                                 <p className="mt-0.5 text-[11px] text-slate-400">Added by {idea.submittedBy || "Traveler"}</p>
                                 {idea.costEstimate !== null && idea.costEstimate !== undefined && idea.costEstimate !== "" && Number.isFinite(Number(idea.costEstimate)) ? (
                                   <p className="mt-1 text-[11px] font-semibold text-ocean">${Number(idea.costEstimate).toFixed(2)}</p>
@@ -887,6 +934,7 @@ export default function ListTab({
           availableLists={lists}
           defaultTitle={composerState.defaultTitle}
           defaultLocation={composerState.defaultLocation}
+          defaultDescription={composerState.defaultDescription}
           defaultCostEstimate={composerState.defaultCostEstimate}
           initialIdea={composerState.idea}
           submitLabel={composerState.mode === "edit" ? "Save changes" : "Add"}

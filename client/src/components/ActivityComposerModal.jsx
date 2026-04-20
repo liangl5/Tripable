@@ -11,6 +11,7 @@ export default function ActivityComposerModal({
   availableLists = [],
   defaultTitle = "",
   defaultLocation = "",
+  defaultDescription = "",
   defaultCostEstimate = "",
   initialIdea = null,
   submitLabel = "Add",
@@ -23,6 +24,7 @@ export default function ActivityComposerModal({
   const [selectedListId, setSelectedListId] = useState(defaultListId);
   const [title, setTitle] = useState(defaultTitle);
   const [location, setLocation] = useState(defaultLocation);
+  const [description, setDescription] = useState(defaultDescription);
   const [costEstimate, setCostEstimate] = useState(defaultCostEstimate);
   const [selectedSuggestion, setSelectedSuggestion] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
@@ -40,6 +42,7 @@ export default function ActivityComposerModal({
     setSelectedListId(initialIdea?.listId || defaultListId || "");
     setTitle(initialIdea?.title || defaultTitle || "");
     setLocation(initialIdea?.location || defaultLocation || "");
+    setDescription(initialIdea?.description || defaultDescription || "");
     setCostEstimate(initialIdea?.costEstimate ?? defaultCostEstimate ?? "");
     setSelectedSuggestion(null);
     setSuggestions([]);
@@ -47,7 +50,7 @@ export default function ActivityComposerModal({
     setSearchLocked(true);
     setSearchError("");
     setSaving(false);
-  }, [defaultCostEstimate, defaultListId, defaultLocation, defaultTitle, defaultMode, initialIdea?.id, open]);
+  }, [defaultCostEstimate, defaultDescription, defaultListId, defaultLocation, defaultTitle, defaultMode, initialIdea?.description, initialIdea?.id, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -180,7 +183,7 @@ export default function ActivityComposerModal({
       tabId,
       costEstimate: Number.isFinite(normalizedCost) ? normalizedCost : null,
       listId: targetListId,
-      description: initialIdea?.description || "",
+      description: String(description || "").trim() || null,
       entryType: mode === "place" ? (selectedSuggestion ? payloadBase.entryType : "place") : "activity",
       location:
         isEditing && !selectedSuggestion && isTitleUnchanged && isLocationUnchanged
@@ -317,6 +320,17 @@ export default function ActivityComposerModal({
               }}
               placeholder={mode === "place" ? "Search Google Maps or type a place" : "Running, museum, dinner reservation..."}
               className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-ocean focus:ring-2 focus:ring-ocean/10"
+            />
+          </div>
+
+          <div className="relative min-w-0">
+            <label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Description (optional)</label>
+            <textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Add a short note or detail"
+              rows={3}
+              className="mt-2 w-full resize-y rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-ocean focus:ring-2 focus:ring-ocean/10"
             />
           </div>
 

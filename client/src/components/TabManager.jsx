@@ -828,16 +828,15 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
       ) : null}
 
       {/* Tab Content */}
-      <div className="grid flex-1 overflow-y-auto bg-white">
+      <div className="grid flex-1 min-h-0 bg-white">
         {tabs.map((tab) => {
           const isActivePanel = activeTab === tab.id;
           return (
             <div
               key={tab.id}
-              className={`col-start-1 row-start-1 ${
-                isActivePanel
-                  ? "block pointer-events-auto"
-                  : "hidden pointer-events-none"
+              aria-hidden={!isActivePanel}
+              className={`col-start-1 row-start-1 overflow-y-auto transition-opacity duration-200 ease-out ${
+                isActivePanel ? "z-10 opacity-100 pointer-events-auto" : "z-0 opacity-0 pointer-events-none"
               }`}
             >
               {renderTabPanel(tab)}

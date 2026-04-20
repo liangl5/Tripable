@@ -60,7 +60,25 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
   const [listOptions, setListOptions] = useState([]);
   const [unsavedChanges, setUnsavedChanges] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [expandedDescriptions, setExpandedDescriptions] = useState({});
   const canManageItinerary = userRole === "owner" || userRole === "editor";
+
+  const DisclosureChevron = ({ open }) => (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      aria-hidden="true"
+      className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${open ? "rotate-90" : "rotate-0"}`}
+    >
+      <path
+        d="M7.5 4.5L12.5 10L7.5 15.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 
   // Load itinerary configuration and days
   useEffect(() => {
@@ -341,6 +359,15 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
     setItineraryItems(itineraryItems.filter((i) => i.id !== itemId));
     setUnsavedChanges(true);
   };
+
+  const toggleDescription = (itemId) => {
+    setExpandedDescriptions((current) => ({
+      ...current,
+      [itemId]: !current[itemId]
+    }));
+  };
+
+  const getIdeaDescription = (ideaId) => ideas.find((idea) => idea.id === ideaId)?.description || "";
 
   const handleSaveItinerary = async () => {
     if (!unsavedChanges) return;
@@ -711,6 +738,23 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
                         <p className="font-semibold text-ink">{index + 1}. {item.title}</p>
                         {String(item.mapQuery || item.location || "").trim() ? (
                           <p className="text-slate-600">{String(item.mapQuery || item.location || "").trim()}</p>
+                        ) : null}
+                        {getIdeaDescription(item.ideaId) ? (
+                          <div className="pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => toggleDescription(item.id)}
+                              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500 shadow-sm transition hover:border-ocean hover:text-ocean"
+                            >
+                              <span>Description</span>
+                              <DisclosureChevron open={Boolean(expandedDescriptions[item.id])} />
+                            </button>
+                            {expandedDescriptions[item.id] ? (
+                              <p className="mt-1 max-w-prose whitespace-pre-wrap text-xs leading-5 text-slate-600">
+                                {getIdeaDescription(item.ideaId)}
+                              </p>
+                            ) : null}
+                          </div>
                         ) : null}
                         {(() => {
                           const voteSummary = getVoteSummaryForIdea(item.ideaId);
