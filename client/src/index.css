@@ -86,25 +86,6 @@ body {
     radial-gradient(circle at 90% 20%, rgba(255, 184, 107, 0.1), transparent 16%);
 }
 
-@keyframes auth-progress {
-  0% {
-    transform: translateX(-100%);
-  }
-  50% {
-    transform: translateX(30%);
-  }
-  100% {
-    transform: translateX(200%);
-  }
-}
-
-.auth-progress-bar {
-  height: 100%;
-  width: 40%;
-  background: #38bdf8;
-  animation: auth-progress 1.2s ease-in-out infinite;
-}
-
 .tripable-grid {
   background-image:
     linear-gradient(rgba(76, 111, 255, 0.05) 1px, transparent 1px),

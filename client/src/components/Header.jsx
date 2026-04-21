@@ -1,16 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { api } from "../lib/api.js";
 import { useSession, useUserProfile } from "../App";
 import { getDisplayName } from "../lib/userProfile.js";
 import { trackEvent } from "../lib/analytics.js";
-import TripableLogoLink from "./TripableLogoLink.jsx";
 import { AVATAR_COLOR_CHOICES, getAvatarColor } from "../lib/avatarColors.js";
+import LoadingProgressBar from "./LoadingProgressBar.jsx";
+import duckIcon from "../../imgs/duck.png";
 
 export default function Header() {
   const session = useSession();
-  const { profile, refreshProfile } = useUserProfile();
+  const { profile, profileLoading, refreshProfile } = useUserProfile();
   const navigate = useNavigate();
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
@@ -20,11 +21,16 @@ export default function Header() {
   const [joinStatus, setJoinStatus] = useState("");
   const [avatarColorOverride, setAvatarColorOverride] = useState("");
   const [draftColor, setDraftColor] = useState("");
+  const [navigationLoading, setNavigationLoading] = useState(false);
+  const [navigationProgress, setNavigationProgress] = useState(0);
   const menuRef = useRef(null);
 
   const displayName = getDisplayName(profile, session);
   const userId = profile?.id || session?.user?.id;
-  const avatarColor = avatarColorOverride || profile?.avatarColor || getAvatarColor(userId);
+  const avatarColor =
+    avatarColorOverride ||
+    profile?.avatarColor ||
+    (profileLoading ? "bg-slate-200 text-slate-700" : getAvatarColor(userId));
   const pendingInviteCount = pendingInvites.length;
 
   const resetAvatarDraft = () => {
@@ -106,6 +112,28 @@ export default function Header() {
     }
   };
 
+  const handleNavigateHome = async () => {
+    setNavigationLoading(true);
+    setNavigationProgress(30);
+    
+    try {
+      await new Promise(resolve => setTimeout(resolve, 150));
+      setNavigationProgress(60);
+      
+      await new Promise(resolve => setTimeout(resolve, 150));
+      setNavigationProgress(90);
+      
+      await new Promise(resolve => setTimeout(resolve, 200));
+      setNavigationProgress(100);
+      
+      await new Promise(resolve => setTimeout(resolve, 200));
+      navigate("/");
+    } catch (error) {
+      console.error("Failed to navigate", error);
+      setNavigationLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!isProfileMenuOpen && !isNotificationOpen) return undefined;
     const handleOutside = (event) => {
@@ -130,103 +158,135 @@ export default function Header() {
     };
   }, [isProfileMenuOpen, isNotificationOpen]);
 
+  const loadPendingInvites = useCallback(async () => {
+    if (!session?.user?.email) return;
+    setPendingInvitesLoading(true);
+    try {
+      const normalizedEmail = String(session.user.email || "").trim().toLowerCase();
+      const { data: inviteRows, error: inviteError } = await supabase
+        .from("PendingTripInvite")
+        .select("id, tripId, role, createdAt, createdById")
+        .ilike("email", normalizedEmail)
+        .eq("status", "pending")
+        .order("createdAt", { ascending: false });
+
+      if (inviteError) {
+        if (String(inviteError.message || "").includes("PendingTripInvite")) {
+          setPendingInvites([]);
+          return;
+        }
+        throw inviteError;
+      }
+
+      const rows = inviteRows || [];
+      if (!rows.length) {
+        setPendingInvites([]);
+        return;
+      }
+
+      const tripIds = rows.map((invite) => invite.tripId);
+      const { data: tripRows, error: tripError } = await supabase
+        .from("Trip")
+        .select("id, name, createdById")
+        .in("id", tripIds);
+      if (tripError) throw tripError;
+
+      const ownerIds = Array.from(new Set((tripRows || []).map((trip) => trip.createdById).filter(Boolean)));
+      const inviterIds = Array.from(new Set((rows || []).map((invite) => invite.createdById).filter(Boolean)));
+      let ownerMap = new Map();
+      let inviterMap = new Map();
+      if (ownerIds.length > 0 || inviterIds.length > 0) {
+        const allIds = Array.from(new Set([...ownerIds, ...inviterIds]));
+        const { data: ownerRows, error: ownerError } = await supabase
+          .from("User")
+          .select("id, name, avatarColor")
+          .in("id", allIds);
+        if (ownerError) throw ownerError;
+        ownerMap = new Map((ownerRows || []).map((owner) => [owner.id, owner.name || "Trip owner"]));
+        inviterMap = new Map(
+          (ownerRows || []).map((owner) => [
+            owner.id,
+            {
+              id: owner.id,
+              name: owner.name || "Traveler",
+              avatarColor: owner.avatarColor || ""
+            }
+          ])
+        );
+      }
+
+      const tripMap = new Map((tripRows || []).map((trip) => [trip.id, trip]));
+      const invitesWithTripName = rows.map((invite) => ({
+        ...invite,
+        tripName: tripMap.get(invite.tripId)?.name || "Trip invitation",
+        ownerName: ownerMap.get(tripMap.get(invite.tripId)?.createdById) || "Trip owner",
+        inviter: inviterMap.get(invite.createdById) || {
+          id: invite.createdById,
+          name: ownerMap.get(invite.createdById) || "Traveler",
+          avatarColor: ""
+        }
+      }));
+
+      setPendingInvites(invitesWithTripName);
+    } catch (error) {
+      console.error("Failed to load pending invites:", error);
+      setPendingInvites([]);
+    } finally {
+      setPendingInvitesLoading(false);
+    }
+  }, [session?.user?.email]);
+
   useEffect(() => {
     if (!session?.user?.email) {
       setPendingInvites([]);
       return;
     }
 
-    const loadPendingInvites = async () => {
-      setPendingInvitesLoading(true);
-      try {
-        const normalizedEmail = String(session.user.email || "").trim().toLowerCase();
-        const { data: inviteRows, error: inviteError } = await supabase
-          .from("PendingTripInvite")
-          .select("id, tripId, role, createdAt, createdById")
-          .ilike("email", normalizedEmail)
-          .eq("status", "pending")
-          .order("createdAt", { ascending: false });
-
-        if (inviteError) {
-          if (String(inviteError.message || "").includes("PendingTripInvite")) {
-            setPendingInvites([]);
-            return;
-          }
-          throw inviteError;
-        }
-
-        const rows = inviteRows || [];
-        if (!rows.length) {
-          setPendingInvites([]);
-          return;
-        }
-
-        const tripIds = rows.map((invite) => invite.tripId);
-        const { data: tripRows, error: tripError } = await supabase
-          .from("Trip")
-          .select("id, name, createdById")
-          .in("id", tripIds);
-        if (tripError) throw tripError;
-
-        const ownerIds = Array.from(new Set((tripRows || []).map((trip) => trip.createdById).filter(Boolean)));
-        const inviterIds = Array.from(new Set((rows || []).map((invite) => invite.createdById).filter(Boolean)));
-        let ownerMap = new Map();
-        let inviterMap = new Map();
-        if (ownerIds.length > 0 || inviterIds.length > 0) {
-          const allIds = Array.from(new Set([...ownerIds, ...inviterIds]));
-          const { data: ownerRows, error: ownerError } = await supabase
-            .from("User")
-            .select("id, name, avatarColor")
-            .in("id", allIds);
-          if (ownerError) throw ownerError;
-          ownerMap = new Map((ownerRows || []).map((owner) => [owner.id, owner.name || "Trip owner"]));
-          inviterMap = new Map(
-            (ownerRows || []).map((owner) => [
-              owner.id,
-              {
-                id: owner.id,
-                name: owner.name || "Traveler",
-                avatarColor: owner.avatarColor || ""
-              }
-            ])
-          );
-        }
-
-        const tripMap = new Map((tripRows || []).map((trip) => [trip.id, trip]));
-        const invitesWithTripName = rows.map((invite) => ({
-          ...invite,
-          tripName: tripMap.get(invite.tripId)?.name || "Trip invitation",
-          ownerName: ownerMap.get(tripMap.get(invite.tripId)?.createdById) || "Trip owner",
-          inviter: inviterMap.get(invite.createdById) || {
-            id: invite.createdById,
-            name: ownerMap.get(invite.createdById) || "Traveler",
-            avatarColor: ""
-          }
-        }));
-
-        setPendingInvites(invitesWithTripName);
-      } catch (error) {
-        console.error("Failed to load pending invites:", error);
-        setPendingInvites([]);
-      } finally {
-        setPendingInvitesLoading(false);
-      }
-    };
-
     void loadPendingInvites();
-  }, [session]);
+  }, [loadPendingInvites, session?.user?.email]);
+
+  useEffect(() => {
+    const normalizedEmail = String(session?.user?.email || "").trim().toLowerCase();
+    if (!normalizedEmail) return;
+
+    const channel = supabase
+      .channel(`pending-invites:${normalizedEmail}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "PendingTripInvite",
+          filter: `email=eq.${normalizedEmail}`
+        },
+        () => {
+          void loadPendingInvites();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadPendingInvites, session?.user?.email]);
 
   return (
-    <header className="relative z-[70] border-b border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
-        <TripableLogoLink className="w-fit" compact />
+    <>
+      <header className="relative z-[70] bg-[#1e4840]">
+      <div className="flex items-center justify-between gap-4 px-10 py-4">
+        <span
+          className="inline-flex h-12 items-center gap-2 text-2xl font-extrabold tracking-tight text-[#ecf5e9]"
+        >
+          <img src={duckIcon} alt="" aria-hidden="true" className="h-full w-auto object-contain" />
+          <span>Tripable</span>
+        </span>
 
         {session ? (
           <div className="relative flex items-center gap-2" ref={menuRef}>
             <div className="relative">
               <button
                 type="button"
-                className="relative flex h-10 w-10 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-ink"
+                className="relative flex h-10 w-10 items-center justify-center rounded-full text-[#ecf5e9] hover:bg-[#ecf5e9]/20 hover:text-[#ecf5e9]"
                 aria-label="Notifications"
                 onClick={() => {
                   setIsNotificationOpen((current) => !current);
@@ -283,7 +343,7 @@ export default function Header() {
                               Decline
                             </button>
                             <button
-                              className="flex-1 rounded-lg bg-ocean px-3 py-2 text-center text-xs font-semibold text-white hover:bg-blue-600"
+                              className="flex-1 rounded-lg bg-ocean px-3 py-2 text-center text-xs font-semibold text-white hover:bg-[#152f2a]"
                               onClick={() => handleJoinInvite(invite.tripId, invite.id)}
                             >
                               Join trip
@@ -433,7 +493,7 @@ export default function Header() {
                   <div className="p-3">
                     <button
                       onClick={handleProfileClick}
-                      className="w-full rounded-lg bg-ocean px-3 py-2 text-sm font-semibold text-white hover:bg-blue-600"
+                      className="w-full rounded-lg bg-ocean px-3 py-2 text-sm font-semibold text-white hover:bg-[#152f2a]"
                     >
                       Manage Your Account
                     </button>
@@ -452,13 +512,13 @@ export default function Header() {
           <div className="flex items-center gap-2">
             <Link
               to="/auth?mode=signup"
-              className="rounded-full bg-ocean px-5 py-2 text-sm font-semibold text-white shadow-card hover:bg-blue-600"
+              className="rounded-full bg-[#baf59c] px-5 py-2 text-sm font-semibold text-[#1e4840] shadow-card hover:bg-[#a7ee84]"
             >
               Sign up
             </Link>
             <Link
               to="/auth?mode=signin"
-              className="rounded-full border border-slate-300 bg-white px-5 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+              className="rounded-full border border-[#ecf5e9]/35 bg-[#f4f7f2] px-5 py-2 text-sm font-semibold text-[#1e4840] hover:bg-white"
             >
               Sign in
             </Link>
@@ -466,5 +526,7 @@ export default function Header() {
         )}
       </div>
     </header>
+      {navigationLoading ? <LoadingProgressBar progress={navigationProgress} /> : null}
+    </>
   );
 }

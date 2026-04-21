@@ -352,7 +352,7 @@ export default function AvailabilityCalendar({
     <div className="relative rounded-3xl bg-white/95 p-6 shadow-card">
       {isSavingAvailability ? (
         <div className="absolute inset-0 z-20 flex items-center justify-center rounded-3xl bg-white/60 backdrop-blur-[1px]">
-          <div className="rounded-full bg-[#4C6FFF] px-4 py-2 text-xs font-semibold text-white shadow-card">
+          <div className="rounded-full bg-[#1e4840] px-4 py-2 text-xs font-semibold text-white shadow-card">
             Autosaving availability...
           </div>
         </div>
@@ -370,7 +370,7 @@ export default function AvailabilityCalendar({
             }}
             className={classNames(
               "rounded-full px-4 py-2 text-xs font-semibold transition",
-              mode === "edit" && !editSurveyDates ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
+              mode === "edit" && !editSurveyDates ? "bg-[#1e4840] text-white" : "bg-mist text-ink"
             )}
           >
             Select/Edit your availability
@@ -384,7 +384,7 @@ export default function AvailabilityCalendar({
             }}
             className={classNames(
               "rounded-full px-4 py-2 text-xs font-semibold transition",
-              mode === "group" && !showDetailedView ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
+              mode === "group" && !showDetailedView ? "bg-[#1e4840] text-white" : "bg-mist text-ink"
             )}
           >
             See group availability
@@ -398,7 +398,7 @@ export default function AvailabilityCalendar({
             }}
             className={classNames(
               "rounded-full px-4 py-2 text-xs font-semibold transition",
-              showDetailedView ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
+              showDetailedView ? "bg-[#1e4840] text-white" : "bg-mist text-ink"
             )}
           >
             View member breakdown
@@ -457,7 +457,7 @@ export default function AvailabilityCalendar({
           >
             ←
           </button>
-          <div className="rounded-full bg-[#EEF2FF] px-4 py-2 text-sm font-semibold text-[#4C6FFF]">
+          <div className="rounded-full bg-[#ecf5e9] px-4 py-2 text-sm font-semibold text-[#1e4840]">
             {formatMonthLabel(displayedMonth)}
           </div>
           <button
@@ -495,7 +495,7 @@ export default function AvailabilityCalendar({
                 disabled={isSavingAvailability}
                 className={classNames(
                   "rounded-full px-3 py-1.5 text-xs font-semibold transition",
-                  activeRangeHandle === "start" ? "bg-[#4C6FFF] text-white" : "bg-white text-ink shadow-soft",
+                  activeRangeHandle === "start" ? "bg-[#1e4840] text-white" : "bg-white text-ink shadow-soft",
                   isSavingAvailability ? "opacity-60 cursor-not-allowed" : ""
                 )}
               >
@@ -507,7 +507,7 @@ export default function AvailabilityCalendar({
                 disabled={isSavingAvailability}
                 className={classNames(
                   "rounded-full px-3 py-1.5 text-xs font-semibold transition",
-                  activeRangeHandle === "end" ? "bg-[#4C6FFF] text-white" : "bg-white text-ink shadow-soft",
+                  activeRangeHandle === "end" ? "bg-[#1e4840] text-white" : "bg-white text-ink shadow-soft",
                   isSavingAvailability ? "opacity-60 cursor-not-allowed" : ""
                 )}
               >
@@ -566,14 +566,14 @@ export default function AvailabilityCalendar({
               if (editSurveyDates && inSurvey) {
                 cellStyle = "border-[#6BCB77] bg-[#E8F7EB] text-ink";
               } else if (mode === "edit" && isSelected) {
-                cellStyle = "border-[#4C6FFF] bg-[#4C6FFF] text-white shadow-soft";
+                cellStyle = "border-[#1e4840] bg-[#1e4840] text-white shadow-soft";
               } else if (mode === "group" && inSurvey && overlap > 0) {
                 cellStyle = "border-[#6BCB77]/40 text-ink";
                 inlineStyle = {
                   backgroundColor: `rgba(107, 203, 119, ${0.15 + overlapStrength * 0.45})`
                 };
               } else if (inSurvey) {
-                cellStyle = "border-[#4C6FFF]/25 bg-[#EEF2FF] text-ink";
+                cellStyle = "border-[#1e4840]/20 bg-[#ecf5e9] text-ink";
               }
 
               return (
@@ -587,7 +587,7 @@ export default function AvailabilityCalendar({
                     cellStyle,
                     disabled || mode === "group" ? "cursor-default" : "cursor-pointer",
                     disabled ? "opacity-35" : "",
-                    isPendingStart ? "ring-2 ring-[#4C6FFF]/70 ring-offset-2 ring-offset-[#FBFCFF]" : "",
+                    isPendingStart ? "ring-2 ring-[#1e4840]/35 ring-offset-2 ring-offset-[#FBFCFF]" : "",
                     isRangeStart ? "rounded-l-[1.2rem]" : "",
                     isRangeEnd ? "rounded-r-[1.2rem]" : ""
                   )}
@@ -610,7 +610,7 @@ export default function AvailabilityCalendar({
 
                   {!editSurveyDates && mode === "edit" && isRangeStart ? (
                     <span
-                      className="absolute left-1 top-1 rounded-full bg-white/85 px-1.5 py-0.5 text-[10px] font-semibold text-[#4C6FFF]"
+                      className="absolute left-1 top-1 rounded-full bg-white/85 px-1.5 py-0.5 text-[10px] font-semibold text-[#1e4840]"
                       aria-label="Start"
                     >
                       S
@@ -618,7 +618,7 @@ export default function AvailabilityCalendar({
                   ) : null}
                   {!editSurveyDates && mode === "edit" && isRangeEnd ? (
                     <span
-                      className="absolute right-1 top-1 rounded-full bg-white/85 px-1.5 py-0.5 text-[10px] font-semibold text-[#4C6FFF]"
+                      className="absolute right-1 top-1 rounded-full bg-white/85 px-1.5 py-0.5 text-[10px] font-semibold text-[#1e4840]"
                       aria-label="End"
                     >
                       E
@@ -666,7 +666,7 @@ export default function AvailabilityCalendar({
               type="button"
               onClick={handleSaveSurveyDates}
               disabled={!surveyRangeDirty || Boolean(surveyRangeError) || isSavingSurveyDates || loading}
-              className="rounded-full bg-[#4C6FFF] px-5 py-2.5 text-sm font-semibold text-white shadow-card disabled:opacity-60"
+              className="rounded-full bg-[#1e4840] px-5 py-2.5 text-sm font-semibold text-white shadow-card disabled:opacity-60"
             >
               {isSavingSurveyDates ? "Saving..." : "Save changes"}
             </button>
@@ -684,7 +684,7 @@ export default function AvailabilityCalendar({
               type="button"
               onClick={handleSaveAvailability}
               disabled={!dirtyAvailability || isSavingAvailability || loading}
-              className="rounded-full bg-[#4C6FFF] px-5 py-2.5 text-sm font-semibold text-white shadow-card disabled:opacity-60"
+              className="rounded-full bg-[#1e4840] px-5 py-2.5 text-sm font-semibold text-white shadow-card disabled:opacity-60"
             >
               {isSavingAvailability ? "Saving..." : "Save availability"}
             </button>
@@ -720,7 +720,7 @@ export default function AvailabilityCalendar({
                   onClick={() => setMemberViewMode("table")}
                   className={classNames(
                     "rounded-full px-3 py-2 text-xs font-semibold transition",
-                    memberViewMode === "table" ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
+                    memberViewMode === "table" ? "bg-[#1e4840] text-white" : "bg-mist text-ink"
                   )}
                 >
                   Date columns
@@ -730,7 +730,7 @@ export default function AvailabilityCalendar({
                   onClick={() => setMemberViewMode("list")}
                   className={classNames(
                     "rounded-full px-3 py-2 text-xs font-semibold transition",
-                    memberViewMode === "list" ? "bg-[#4C6FFF] text-white" : "bg-mist text-ink"
+                    memberViewMode === "list" ? "bg-[#1e4840] text-white" : "bg-mist text-ink"
                   )}
                 >
                   Member list
@@ -753,7 +753,7 @@ export default function AvailabilityCalendar({
                       <div className="flex items-center gap-2 mb-2">
                         <span className="font-semibold text-ink">{member.isViewer ? "You" : member.name}</span>
                         {member.isLeader && (
-                          <span className="rounded-full bg-[#EEF2FF] px-2 py-0.5 text-xs font-semibold text-[#4C6FFF]">
+                          <span className="rounded-full bg-[#ecf5e9] px-2 py-0.5 text-xs font-semibold text-[#1e4840]">
                             Leader
                           </span>
                         )}

@@ -38,8 +38,8 @@ export default function IdeaCard({
   const canDelete = isOwner || idea.isCreator;
   const canEdit = isOwner || idea.isCreator;
   const showActivityImage = idea.entryType === "activity" && Boolean(idea.photoUrl);
-  const detailLabel = idea.locationLabel || idea.location || "";
-  const metaLabel = ["Submitted by " + idea.submittedBy, formatRelativeTime(idea.createdAt)].filter(Boolean).join(" | ");
+  const detailLabel = idea.mapQuery || idea.locationLabel || idea.location || "";
+  const metaLabel = ["Added by " + idea.submittedBy, formatRelativeTime(idea.createdAt)].filter(Boolean).join(" |");
 
   return (
     <div className="idea-block rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-card">
@@ -60,7 +60,7 @@ export default function IdeaCard({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               {idea.listName ? (
-                <span className="rounded-full bg-[#EEF2FF] px-3 py-1 text-[11px] font-semibold text-ocean">
+                <span className="rounded-full bg-[#ecf5e9] px-3 py-1 text-[11px] font-semibold text-ocean">
                   {idea.listName}
                 </span>
               ) : null}
@@ -76,13 +76,20 @@ export default function IdeaCard({
               <p className="mt-1 text-sm text-slate-500">{detailLabel}</p>
             ) : null}
             {idea.description ? <p className="mt-1 text-sm text-slate-500">{idea.description}</p> : null}
-            {Number.isFinite(Number(idea.costEstimate)) ? (
-              <p className="mt-2 text-xs font-semibold text-ocean">Estimated cost: ${Number(idea.costEstimate).toFixed(2)}</p>
+            {idea.costEstimate !== null && idea.costEstimate !== undefined && idea.costEstimate !== "" && Number.isFinite(Number(idea.costEstimate)) ? (
+              <p className="mt-2 text-xs font-semibold text-ocean">
+                Estimated cost: ${Number(idea.costEstimate).toFixed(2)}
+              </p>
             ) : null}
           </div>
         </div>
 
-        <VoteButtons score={idea.voteScore} userVote={idea.userVote} onVote={onVote} />
+        <VoteButtons
+          upvotes={idea.upvoteCount}
+          downvotes={idea.downvoteCount}
+          userVote={idea.userVote}
+          onVote={onVote}
+        />
       </div>
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">

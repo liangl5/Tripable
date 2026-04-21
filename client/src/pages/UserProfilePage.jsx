@@ -35,7 +35,7 @@ export default function UserProfilePage() {
         length: newDisplayName.trim().length
       });
       setDisplayNameMessage("Display name updated successfully!");
-      setTimeout(() => setDisplayNameMessage(""), 3000);
+      setTimeout(() => setDisplayNameMessage(""), 5000);
     } catch (error) {
       void trackEvent("profile_display_name_update_failed", {
         reason: error?.message || "unknown"
@@ -64,16 +64,34 @@ export default function UserProfilePage() {
     setDeleteAccountMessage("Account deletion feature coming soon. Our team will implement this.");
   };
 
+  const handleGoToDashboard = () => {
+    navigate("/");
+  };
+
   if (!session) {
     navigate("/");
     return null;
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-[#ecf5e9]">
       <Header />
       <div className="mx-auto flex max-w-2xl flex-col px-6 py-12">
-        <h1 className="text-3xl font-semibold text-ink mb-8">Profile Settings</h1>
+        <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-3xl font-semibold text-ink">Profile Settings</h1>
+          <button
+            type="button"
+            onClick={handleGoToDashboard}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-[#1e4840] hover:bg-slate-50"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M3 10.5 12 3l9 7.5" />
+              <path d="M5 9.5V21h14V9.5" />
+              <path d="M10 21v-6h4v6" />
+            </svg>
+            Home
+          </button>
+        </div>
 
         <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6">
           <h2 className="text-lg font-semibold text-ink mb-4">Account Information</h2>
@@ -110,7 +128,7 @@ export default function UserProfilePage() {
             <button
               type="submit"
               disabled={isUpdatingDisplayName || newDisplayName === (profile?.name || "")}
-              className="rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-[#152f2a] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isUpdatingDisplayName ? "Updating..." : "Update Display Name"}
             </button>
@@ -131,7 +149,7 @@ export default function UserProfilePage() {
           </p>
           <button
             onClick={handleResetPassword}
-            className="rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600"
+            className="rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-[#152f2a]"
           >
             Reset Password
           </button>

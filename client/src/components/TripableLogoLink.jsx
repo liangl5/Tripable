@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import tripableLogo from "../../imgs/icon.png";
+import tripableLogo from "../../imgs/duck.png";
 
 function joinClasses(...classes) {
   return classes.filter(Boolean).join(" ");

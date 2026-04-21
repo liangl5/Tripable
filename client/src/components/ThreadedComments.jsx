@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { buildUserNamesById, fetchUserProfilesByIds } from "../lib/userProfiles.js";
 
 function sortByCreatedAtAscending(items) {
   return [...items].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
@@ -11,6 +12,7 @@ export default function ThreadedComments({
   resourceId,
   userId,
   userNamesById = {},
+  canDeleteAnyComment = false,
   title = "Comments",
   initiallyOpen = false
 }) {
@@ -25,6 +27,7 @@ export default function ThreadedComments({
   const [commentsSaving, setCommentsSaving] = useState(false);
   const [commentsError, setCommentsError] = useState("");
   const [commentsTableReady, setCommentsTableReady] = useState(true);
+  const [resolvedUserNamesById, setResolvedUserNamesById] = useState({});
 
   useEffect(() => {
     if (!isOpen || !resourceId || !tableName || !resourceColumn) return;
@@ -71,6 +74,40 @@ export default function ThreadedComments({
     };
   }, [isOpen, resourceId, tableName, resourceColumn]);
 
+  useEffect(() => {
+    if (!comments.length) return;
+    let isMounted = true;
+
+    const loadMissingAuthors = async () => {
+      const missingUserIds = Array.from(
+        new Set(
+          comments
+            .map((comment) => comment.userId)
+            .filter((uid) => uid && !userNamesById[uid] && !resolvedUserNamesById[uid])
+        )
+      );
+
+      if (!missingUserIds.length) return;
+
+      try {
+        const profiles = await fetchUserProfilesByIds(missingUserIds);
+        if (!isMounted || !profiles.length) return;
+        const nextNames = buildUserNamesById(profiles);
+        setResolvedUserNamesById((current) => ({
+          ...current,
+          ...nextNames
+        }));
+      } catch (error) {
+        console.error(`Failed to load comment author profiles for ${tableName}:`, error);
+      }
+    };
+
+    void loadMissingAuthors();
+    return () => {
+      isMounted = false;
+    };
+  }, [comments, resolvedUserNamesById, tableName, userNamesById]);
+
   const commentsByParent = useMemo(() => {
     const map = new Map();
     for (const comment of comments) {
@@ -97,6 +134,7 @@ export default function ThreadedComments({
   };
 
   const getAuthorName = (uid) => {
+    if (resolvedUserNamesById[uid]) return resolvedUserNamesById[uid];
     if (userNamesById[uid]) return userNamesById[uid];
     if (uid === userId) return "You";
     return "Traveler";
@@ -232,17 +270,22 @@ export default function ThreadedComments({
     }
   };
 
-  const handleDeleteComment = async (commentId) => {
-    if (!commentId || commentsSaving) return;
+  const handleDeleteComment = async (comment) => {
+    if (!comment?.id || commentsSaving) return;
     const previous = comments;
-    const idsToRemove = collectCommentIdsForDelete(comments, commentId);
+    const idsToRemove = collectCommentIdsForDelete(comments, comment.id);
+    const canModerateDelete = canDeleteAnyComment && comment.userId !== userId;
 
     setCommentsSaving(true);
     setCommentsError("");
     setComments((current) => current.filter((comment) => !idsToRemove.has(comment.id)));
 
     try {
-      const { error } = await supabase.from(tableName).delete().eq("id", commentId).eq("userId", userId);
+      let query = supabase.from(tableName).delete().eq("id", comment.id);
+      if (!canModerateDelete) {
+        query = query.eq("userId", userId);
+      }
+      const { error } = await query;
       if (error) throw error;
     } catch (error) {
       console.error(`Failed to delete comment in ${tableName}:`, error);
@@ -256,25 +299,31 @@ export default function ThreadedComments({
   const renderComments = (parentId = "__root__", depth = 0) => {
     const branch = commentsByParent.get(parentId) || [];
     return branch.map((comment) => {
+      const indentLevel = Math.min(depth, 3);
       const authorName = getAuthorName(comment.userId);
       const createdLabel = new Date(comment.createdAt).toLocaleString();
-      const isOwner = comment.userId === userId;
+      const isAuthor = comment.userId === userId;
+      const canDeleteComment = isAuthor || canDeleteAnyComment;
       const children = renderComments(comment.id, depth + 1);
 
       return (
-        <div key={comment.id} className={depth > 0 ? "mt-3 ml-8" : "mt-3"}>
+        <div
+          key={comment.id}
+          className="mt-3 min-w-0"
+          style={{ marginLeft: depth > 0 ? `${indentLevel * 16}px` : 0 }}
+        >
           <div className="flex items-start gap-3">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-300 text-xs font-semibold text-slate-700">
               {authorName.slice(0, 1).toUpperCase()}
             </div>
-            <div className="max-w-full rounded-2xl bg-white px-3 py-2 shadow-sm">
+            <div className="min-w-0 flex-1 rounded-2xl bg-white px-3 py-2 shadow-sm">
               <p className="text-xs font-semibold text-ink">{authorName}</p>
               {editingCommentId === comment.id ? (
                 <div className="mt-1">
                   <textarea
                     value={editDraft}
                     onChange={(event) => setEditDraft(event.target.value)}
-                    className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#4C6FFF]"
+                    className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
                   />
                   <div className="mt-2 flex gap-2">
                     <button
@@ -297,10 +346,11 @@ export default function ThreadedComments({
               ) : (
                 <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{comment.body}</p>
               )}
-              <div className="mt-1 flex items-center gap-3 text-[11px]">
-                <span className="text-slate-400">{createdLabel}</span>
+              <div className="mt-1 max-w-full overflow-x-auto">
+                <div className="flex min-w-max items-center gap-3 text-[11px]">
+                  <span className="shrink-0 text-slate-400">{createdLabel}</span>
                 {comment.updatedAt && comment.updatedAt !== comment.createdAt ? (
-                  <span className="text-slate-400">(edited)</span>
+                    <span className="shrink-0 text-slate-400">(edited)</span>
                 ) : null}
                 <button
                   type="button"
@@ -308,39 +358,42 @@ export default function ThreadedComments({
                     setReplyingToId(comment.id);
                     setReplyDraft("");
                   }}
-                  className="font-semibold text-[#1877F2] hover:underline"
+                    className="shrink-0 font-semibold text-[#1877F2] hover:underline"
                 >
                   Reply
                 </button>
-                {isOwner ? (
+                {isAuthor ? (
                   <>
                     <button
                       type="button"
                       onClick={() => handleStartEditComment(comment)}
-                      className="font-semibold text-slate-600 hover:underline"
+                        className="shrink-0 font-semibold text-slate-600 hover:underline"
                     >
                       Edit
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteComment(comment.id)}
-                      className="font-semibold text-coral hover:underline"
-                    >
-                      Delete
-                    </button>
                   </>
                 ) : null}
+                {canDeleteComment ? (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteComment(comment)}
+                    className="shrink-0 font-semibold text-coral hover:underline"
+                  >
+                    Delete
+                  </button>
+                ) : null}
+                </div>
               </div>
             </div>
           </div>
 
           {replyingToId === comment.id ? (
-            <div className="mt-2 ml-11 rounded-xl bg-white p-3 shadow-sm">
+            <div className="mt-2 ml-11 min-w-0 rounded-xl bg-white p-3 shadow-sm">
               <textarea
                 value={replyDraft}
                 onChange={(event) => setReplyDraft(event.target.value)}
                 placeholder="Write a reply..."
-                className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#4C6FFF]"
+                className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
               />
               <div className="mt-2 flex justify-end gap-2">
                 <button
@@ -372,18 +425,18 @@ export default function ThreadedComments({
   };
 
   return (
-    <div className="mt-3 rounded-xl border border-slate-200 bg-[#F0F2F5] p-3">
+    <div className={`mt-1.5 rounded-md border border-slate-200 bg-[#F0F2F5] ${isOpen ? "p-2" : "p-1.5"}`}>
       <button
         type="button"
         onClick={() => setIsOpen((current) => !current)}
-        className="flex w-full items-center justify-between text-left"
+        className="flex w-full items-center justify-between gap-2 rounded-md px-1 py-0 text-left"
       >
-        <h4 className="text-sm font-semibold text-ink">{title}</h4>
-        <span className="text-xs font-semibold text-slate-500">{isOpen ? "Hide" : "Show"}</span>
+        <h4 className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">{title}</h4>
+        <span className="text-[10px] font-semibold text-slate-500">{isOpen ? "Hide" : "Show"}</span>
       </button>
 
       {isOpen ? (
-        <div className="mt-3">
+        <div className="mt-2">
           {!commentsTableReady ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               Comments are not enabled in DB yet. Please create table <code>{tableName}</code>.
@@ -391,7 +444,7 @@ export default function ThreadedComments({
           ) : (
             <>
               <div className="mb-3 flex items-start gap-3 rounded-xl bg-white p-3 shadow-sm">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#4C6FFF] text-xs font-semibold text-white">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#1e4840] text-xs font-semibold text-white">
                   {getAuthorName(userId).slice(0, 1).toUpperCase()}
                 </div>
                 <div className="flex-1">
@@ -399,7 +452,7 @@ export default function ThreadedComments({
                     value={commentDraft}
                     onChange={(event) => setCommentDraft(event.target.value)}
                     placeholder="Write a comment..."
-                    className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#4C6FFF]"
+                    className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
                   />
                   <div className="mt-2 flex justify-end">
                     <button
@@ -421,7 +474,7 @@ export default function ThreadedComments({
               ) : comments.length === 0 ? (
                 <p className="text-xs text-slate-500">No comments yet. Start the conversation.</p>
               ) : (
-                <div>{renderComments()}</div>
+                <div className="max-h-[28rem] overflow-y-auto overflow-x-hidden pr-1">{renderComments()}</div>
               )}
             </>
           )}

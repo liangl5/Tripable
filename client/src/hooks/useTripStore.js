@@ -22,6 +22,7 @@ export const useTripStore = create((set, get) => ({
   surveyDatesSaving: false,
   leadersSaving: false,
   itineraryLoading: false,
+  flashNotice: null,
   error: null,
 
   loadTrips: async () => {
@@ -64,6 +65,14 @@ export const useTripStore = create((set, get) => ({
       set({ error: error.message, createTripLoading: false });
       throw error;
     }
+  },
+
+  setFlashNotice: (flashNotice) => {
+    set({ flashNotice });
+  },
+
+  clearFlashNotice: () => {
+    set({ flashNotice: null });
   },
 
   sendTripInvites: async (payload) => {
@@ -296,13 +305,34 @@ export const useTripStore = create((set, get) => ({
     }
   },
 
+  reorderIdeas: async (tripId, updates, options = {}) => {
+    set({ updateIdeaLoading: true, error: null });
+    try {
+      const updatedIdeas = await api.reorderIdeas(tripId, updates, options);
+      set((state) => ({
+        ideas: state.ideas.map((idea) => {
+          const replacement = updatedIdeas.find((updatedIdea) => updatedIdea.id === idea.id);
+          return replacement ? { ...idea, ...replacement } : idea;
+        }),
+        updateIdeaLoading: false
+      }));
+      return updatedIdeas;
+    } catch (error) {
+      set({ error: error.message, updateIdeaLoading: false });
+      throw error;
+    }
+  },
+
   deleteIdea: async (ideaId, tripId) => {
-    set({ deleteIdeaLoading: true, error: null });
+    const previous = get().ideas;
+    set({
+      deleteIdeaLoading: true,
+      error: null,
+      ideas: previous.filter((idea) => idea.id !== ideaId)
+    });
     try {
       await api.deleteIdea(ideaId, tripId);
-      const ideas = await api.getIdeas(tripId);
       set({
-        ideas,
         deleteIdeaLoading: false
       });
       void trackEvent("idea_deleted", {
@@ -310,7 +340,7 @@ export const useTripStore = create((set, get) => ({
         idea_id: ideaId
       });
     } catch (error) {
-      set({ error: error.message, deleteIdeaLoading: false });
+      set({ ideas: previous, error: error.message, deleteIdeaLoading: false });
       throw error;
     }
   },

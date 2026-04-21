@@ -3,6 +3,7 @@ import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
 import { getAvatarColor } from "../lib/avatarColors.js";
 import { supabase } from "../lib/supabase.js";
+import ToastNotification from "./ToastNotification.jsx";
 
 const ROLE_LABELS = {
   owner: "Owner",
@@ -17,18 +18,33 @@ const getInitials = (name) => {
   return parts[0][0].toUpperCase();
 };
 
+const formatPendingInviteName = (email) => {
+  const localPart = String(email || "").split("@")[0] || "";
+  const normalized = localPart.replace(/[._-]+/g, " ").trim();
+  if (!normalized) return "Pending invite";
+  return normalized
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
+
 export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
   const session = useSession();
   const sendTripInvites = useTripStore((state) => state.sendTripInvites);
   const [inviteStatus, setInviteStatus] = useState("");
   const [inviteLoading, setInviteLoading] = useState(false);
   const [accessMembers, setAccessMembers] = useState([]);
+  const [pendingInviteEntries, setPendingInviteEntries] = useState([]);
   const [roleUpdateLoadingId, setRoleUpdateLoadingId] = useState(null);
   const [roleMenuOpenId, setRoleMenuOpenId] = useState(null);
+  const [pendingInviteActionLoadingId, setPendingInviteActionLoadingId] = useState(null);
+  const [pendingInviteMenuOpenId, setPendingInviteMenuOpenId] = useState(null);
   const [pendingRoleChanges, setPendingRoleChanges] = useState({});
   const [savingRoleChanges, setSavingRoleChanges] = useState(false);
   const [originalRoles, setOriginalRoles] = useState({});
   const roleMenuRef = useRef(null);
+  const pendingInviteMenuRef = useRef(null);
   const [inviteRoleMenuOpenIndex, setInviteRoleMenuOpenIndex] = useState(null);
   const inviteRoleMenuRef = useRef(null);
   const [inviteRows, setInviteRows] = useState([{ email: "", role: "editor" }]);
@@ -41,6 +57,8 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
     setInviteLoading(false);
     setRoleMenuOpenId(null);
     setRoleUpdateLoadingId(null);
+    setPendingInviteActionLoadingId(null);
+    setPendingInviteMenuOpenId(null);
     setPendingRoleChanges({});
     setSavingRoleChanges(false);
     setInviteRoleMenuOpenIndex(null);
@@ -49,15 +67,21 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
     setNotifyInvites(true);
   };
 
+  const handleRequestClose = () => {
+    setLatchedOpen(false);
+    onClose?.();
+  };
+
   useEffect(() => {
     if (!inviteStatus) return undefined;
-    const timer = setTimeout(() => setInviteStatus(""), 10000);
+    const timer = setTimeout(() => setInviteStatus(""), 5000);
     return () => clearTimeout(timer);
   }, [inviteStatus]);
 
   const loadAccessMembers = async () => {
     if (!trip?.id) {
       setAccessMembers([]);
+      setPendingInviteEntries([]);
       return;
     }
 
@@ -69,25 +93,28 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
       if (memberError) throw memberError;
 
       const userIds = Array.from(new Set((memberRows || []).map((row) => row.userId).filter(Boolean)));
-      if (!userIds.length) {
-        setAccessMembers([]);
-        return;
+      let users = [];
+      if (userIds.length) {
+        const { data: userRows, error: userError } = await supabase
+          .from("User")
+          .select("id, name, email, avatarColor")
+          .in("id", userIds);
+        if (userError) throw userError;
+        users = userRows || [];
       }
 
-      const { data: users, error: userError } = await supabase
-        .from("User")
-        .select("id, name, email, avatarColor")
-        .in("id", userIds);
-      if (userError) throw userError;
+      let roleRows = [];
+      if (userIds.length) {
+        const { data: roleData, error: roleError } = await supabase
+          .from("UserTripRole")
+          .select("userId, role")
+          .eq("tripId", trip.id)
+          .in("userId", userIds);
+        if (roleError) throw roleError;
+        roleRows = roleData || [];
+      }
 
-      const { data: roleRows, error: roleError } = await supabase
-        .from("UserTripRole")
-        .select("userId, role")
-        .eq("tripId", trip.id)
-        .in("userId", userIds);
-      if (roleError) throw roleError;
-
-      const roleMap = new Map((roleRows || []).map((row) => [row.userId, row.role]));
+      const roleMap = new Map(roleRows.map((row) => [row.userId, row.role]));
       const members = (users || []).map((user) => ({
         id: user.id,
         name: user.name || "Traveler",
@@ -102,7 +129,60 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
         return a.name.localeCompare(b.name);
       });
 
+      const { data: pendingRows, error: pendingError } = await supabase
+        .from("PendingTripInvite")
+        .select("id, email, role, status, createdAt")
+        .eq("tripId", trip.id)
+        .eq("status", "pending")
+        .order("createdAt", { ascending: true });
+
+      if (pendingError && !String(pendingError.message || "").includes("PendingTripInvite")) {
+        throw pendingError;
+      }
+
+      const memberEmailSet = new Set(
+        members
+          .map((member) => String(member.email || "").trim().toLowerCase())
+          .filter(Boolean)
+      );
+      const pendingEmails = Array.from(
+        new Set(
+          (pendingRows || [])
+            .map((row) => String(row.email || "").trim().toLowerCase())
+            .filter((email) => email && !memberEmailSet.has(email))
+        )
+      );
+
+      let pendingUsersByEmail = new Map();
+      if (pendingEmails.length) {
+        const { data: pendingUsers, error: pendingUsersError } = await supabase
+          .from("User")
+          .select("id, name, email, avatarColor")
+          .in("email", pendingEmails);
+        if (pendingUsersError) throw pendingUsersError;
+        pendingUsersByEmail = new Map(
+          (pendingUsers || []).map((user) => [String(user.email || "").trim().toLowerCase(), user])
+        );
+      }
+
+      const pendingEntries = (pendingRows || [])
+        .map((row) => {
+          const email = String(row.email || "").trim().toLowerCase();
+          if (!email || memberEmailSet.has(email)) return null;
+          const matchedUser = pendingUsersByEmail.get(email);
+          return {
+            id: row.id,
+            name: matchedUser?.name || formatPendingInviteName(email),
+            email,
+            role: row.role === "editor" ? "editor" : "suggestor",
+            avatarColor: matchedUser?.avatarColor || "",
+            avatarKey: matchedUser?.id || `pending:${row.id}`
+          };
+        })
+        .filter(Boolean);
+
       setAccessMembers(members);
+      setPendingInviteEntries(pendingEntries);
       setPendingRoleChanges({});
       setOriginalRoles(
         members.reduce((acc, member) => {
@@ -113,6 +193,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
     } catch (error) {
       console.error("Failed to load trip members", error);
       setAccessMembers([]);
+      setPendingInviteEntries([]);
     }
   };
 
@@ -147,6 +228,19 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
   }, [roleMenuOpenId]);
 
   useEffect(() => {
+    if (!pendingInviteMenuOpenId) return undefined;
+    const handleClickOutside = (event) => {
+      if (pendingInviteMenuRef.current && !pendingInviteMenuRef.current.contains(event.target)) {
+        setPendingInviteMenuOpenId(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [pendingInviteMenuOpenId]);
+
+  useEffect(() => {
     if (inviteRoleMenuOpenIndex === null) return undefined;
     const handleClickOutside = (event) => {
       if (inviteRoleMenuRef.current && !inviteRoleMenuRef.current.contains(event.target)) {
@@ -161,6 +255,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
 
   const currentUserRole = accessMembers.find((member) => member.id === session?.user?.id)?.role || "suggestor";
   const canManageRoles = currentUserRole === "owner" || currentUserRole === "editor";
+  const canManagePendingInvites = currentUserRole === "owner";
 
   const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
 
@@ -184,6 +279,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
 
   const pendingChangeCount = Object.keys(pendingRoleChanges).length;
   const hasInviteDrafts = inviteRows.some((row) => String(row.email || "").trim());
+  const hasPeopleWithAccess = accessMembers.length > 0 || pendingInviteEntries.length > 0;
 
   const removeInviteRow = (index) => {
     setInviteRoleMenuOpenIndex((current) => {
@@ -240,7 +336,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
       }
       await loadAccessMembers();
       setInviteStatus("Permissions updated");
-      onClose?.();
+      handleRequestClose();
     } catch (error) {
       console.error("Failed to update member role", error);
       setInviteStatus(error?.message || "Unable to update permissions.");
@@ -250,16 +346,61 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
     }
   };
 
+  const handlePendingInviteRoleUpdate = async (inviteId, nextRole) => {
+    if (!trip?.id || !inviteId || !canManagePendingInvites) return;
+    setPendingInviteActionLoadingId(inviteId);
+    try {
+      const normalizedRole = nextRole === "editor" ? "editor" : "suggestor";
+      const { error } = await supabase
+        .from("PendingTripInvite")
+        .update({ role: normalizedRole })
+        .eq("id", inviteId)
+        .eq("tripId", trip.id)
+        .eq("status", "pending");
+      if (error) throw error;
+      setInviteStatus("Pending invite updated.");
+      await loadAccessMembers();
+    } catch (error) {
+      console.error("Failed to update pending invite role", error);
+      setInviteStatus(error?.message || "Unable to update pending invite.");
+    } finally {
+      setPendingInviteActionLoadingId(null);
+      setPendingInviteMenuOpenId(null);
+    }
+  };
+
+  const handlePendingInviteRemove = async (inviteId) => {
+    if (!trip?.id || !inviteId || !canManagePendingInvites) return;
+    setPendingInviteActionLoadingId(inviteId);
+    try {
+      const { error } = await supabase
+        .from("PendingTripInvite")
+        .update({
+          status: "canceled",
+          canceledAt: new Date().toISOString()
+        })
+        .eq("id", inviteId)
+        .eq("tripId", trip.id)
+        .eq("status", "pending");
+      if (error) throw error;
+      setInviteStatus("Pending invite removed.");
+      await loadAccessMembers();
+    } catch (error) {
+      console.error("Failed to remove pending invite", error);
+      setInviteStatus(error?.message || "Unable to remove pending invite.");
+    } finally {
+      setPendingInviteActionLoadingId(null);
+      setPendingInviteMenuOpenId(null);
+    }
+  };
+
   const isVisible = (open || latchedOpen) && trip;
   if (!isVisible) return null;
 
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/35 px-4"
-      onClick={() => {
-        setLatchedOpen(false);
-        onClose?.();
-      }}
+      onClick={handleRequestClose}
     >
       <div
         className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-card"
@@ -393,7 +534,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
             ))}
             <button
               type="button"
-              className="text-xs font-semibold text-ocean hover:text-blue-700"
+              className="text-xs font-semibold text-ocean hover:text-[#152f2a]"
               onClick={() =>
                 setInviteRows((current) => [...current, { email: "", role: "editor" }])
               }
@@ -415,8 +556,9 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">People with access</p>
             <div className="mt-2 space-y-2">
-              {accessMembers.length ? (
-                accessMembers.map((member) => (
+              {hasPeopleWithAccess ? (
+                <>
+                {accessMembers.map((member) => (
                   <div
                     key={member.id}
                     className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2"
@@ -509,7 +651,95 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
                       </span>
                     )}
                   </div>
-                ))
+                ))}
+                {pendingInviteEntries.map((invite) => (
+                  <div
+                    key={`pending-${invite.id}`}
+                    className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white text-xs font-semibold ${
+                          invite.avatarColor || getAvatarColor(invite.avatarKey)
+                        }`}
+                      >
+                        <span>{getInitials(invite.name)}</span>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="flex items-center gap-2 text-sm font-semibold text-ink">
+                          <span className="truncate">{invite.name || "Pending invite"}</span>
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                            Pending
+                          </span>
+                        </p>
+                        <p className="text-xs text-slate-500 truncate">{invite.email || "No email"}</p>
+                      </div>
+                    </div>
+                    {canManagePendingInvites ? (
+                      <div
+                        className="relative"
+                        ref={pendingInviteMenuOpenId === invite.id ? pendingInviteMenuRef : null}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setPendingInviteMenuOpenId(pendingInviteMenuOpenId === invite.id ? null : invite.id)}
+                          className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm hover:border-ocean hover:text-ocean"
+                          disabled={pendingInviteActionLoadingId === invite.id}
+                        >
+                          {ROLE_LABELS[invite.role] || "Suggestor"}
+                          <svg className="h-3 w-3 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M5 7l5 5 5-5" />
+                          </svg>
+                        </button>
+                        {pendingInviteMenuOpenId === invite.id ? (
+                          <div className="absolute right-0 mt-2 w-40 rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-lg">
+                            <button
+                              type="button"
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-slate-100"
+                              onClick={() => handlePendingInviteRoleUpdate(invite.id, "editor")}
+                            >
+                              {invite.role === "editor" ? (
+                                <svg className="h-4 w-4 text-emerald-500" viewBox="0 0 20 20" fill="currentColor">
+                                  <path d="M7.667 13.2L4.4 9.933l-1.4 1.4 4.667 4.667 9-9-1.4-1.4-7.6 7.6z" />
+                                </svg>
+                              ) : (
+                                <span className="h-4 w-4" />
+                              )}
+                              Editor
+                            </button>
+                            <button
+                              type="button"
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-slate-100"
+                              onClick={() => handlePendingInviteRoleUpdate(invite.id, "suggestor")}
+                            >
+                              {invite.role === "suggestor" ? (
+                                <svg className="h-4 w-4 text-emerald-500" viewBox="0 0 20 20" fill="currentColor">
+                                  <path d="M7.667 13.2L4.4 9.933l-1.4 1.4 4.667 4.667 9-9-1.4-1.4-7.6 7.6z" />
+                                </svg>
+                              ) : (
+                                <span className="h-4 w-4" />
+                              )}
+                              Suggestor
+                            </button>
+                            <button
+                              type="button"
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-coral hover:bg-rose-50"
+                              onClick={() => handlePendingInviteRemove(invite.id)}
+                            >
+                              <span className="h-4 w-4" />
+                              Remove invite
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <span className="mr-3 text-xs font-semibold tracking-wide text-slate-500">
+                        {ROLE_LABELS[invite.role] || "Suggestor"}
+                      </span>
+                    )}
+                  </div>
+                ))}
+                </>
               ) : (
                 <p className="text-sm text-slate-500">No members yet.</p>
               )}
@@ -547,7 +777,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
                     onClick={() => {
                       setInviteRows([{ email: "", role: "editor" }]);
                       setInviteErrors({});
-                      onClose?.();
+                      handleRequestClose();
                     }}
                     className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-600 hover:border-slate-400 hover:text-ink"
                   >
@@ -581,23 +811,104 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
                       setInviteLoading(true);
                       setInviteStatus("");
                       try {
-                        await sendTripInvites({
+                        const memberEmailSet = new Set(
+                          accessMembers
+                            .map((member) => String(member.email || "").trim().toLowerCase())
+                            .filter(Boolean)
+                        );
+
+                        const candidateRows = normalizedRows.filter((row) => !memberEmailSet.has(row.email));
+                        if (!candidateRows.length) {
+                          setInviteStatus("All invitees are already members.");
+                          return;
+                        }
+
+                        const candidateEmails = candidateRows.map((row) => row.email);
+                        let existingPendingSet = new Set();
+                        const { data: existingPendingRows, error: existingPendingError } = await supabase
+                          .from("PendingTripInvite")
+                          .select("email")
+                          .eq("tripId", trip.id)
+                          .in("email", candidateEmails)
+                          .eq("status", "pending");
+
+                        if (existingPendingError && !String(existingPendingError.message || "").includes("PendingTripInvite")) {
+                          throw existingPendingError;
+                        }
+
+                        if (!existingPendingError) {
+                          existingPendingSet = new Set(
+                            (existingPendingRows || [])
+                              .map((row) => String(row.email || "").trim().toLowerCase())
+                              .filter(Boolean)
+                          );
+                        }
+
+                        const rowsToCreate = candidateRows.filter((row) => !existingPendingSet.has(row.email));
+                        if (!rowsToCreate.length) {
+                          setInviteStatus("All invitees already have pending invites.");
+                          return;
+                        }
+
+                        const pendingRows = rowsToCreate.map((invitee) => ({
+                          id: crypto.randomUUID(),
                           tripId: trip.id,
-                          tripName: trip.name || "Trip",
-                          invitees: normalizedRows.map(({ email, role }) => ({ email, role })),
-                          inviteUrl: `${window.location.origin}/trips/${trip.id}/invite`,
-                          notify: notifyInvites
-                        });
-                        setInviteStatus("Invites sent.");
+                          email: invitee.email,
+                          role: invitee.role === "editor" ? "editor" : "suggestor",
+                          status: "pending",
+                          createdById: session?.user?.id || null
+                        }));
+
+                        const { error: pendingInsertError } = await supabase
+                          .from("PendingTripInvite")
+                          .insert(pendingRows);
+
+                        const missingPendingInviteTable =
+                          pendingInsertError && String(pendingInsertError.message || "").includes("PendingTripInvite");
+                        if (pendingInsertError && !missingPendingInviteTable) {
+                          throw pendingInsertError;
+                        }
+
+                        let inviteSendResult = null;
+                        let inviteSendError = null;
+                        try {
+                          inviteSendResult = await sendTripInvites({
+                            tripId: trip.id,
+                            tripName: trip.name || "Trip",
+                            invitees: rowsToCreate.map(({ email, role }) => ({ email, role })),
+                            inviteUrl: `${window.location.origin}/trips/${trip.id}/invite`,
+                            notify: notifyInvites
+                          });
+                        } catch (error) {
+                          inviteSendError = error;
+                          console.error("Invite email send failed", error);
+                        }
+
+                        if (missingPendingInviteTable) {
+                          setInviteStatus("Invites sent, but pending invite tracking is unavailable in this environment.");
+                        } else if (!notifyInvites) {
+                          setInviteStatus(rowsToCreate.length === 1 ? "Invite created." : "Invites created.");
+                        } else if (inviteSendResult?.sent > 0 && (inviteSendResult?.failed || 0) === 0) {
+                          setInviteStatus(rowsToCreate.length === 1 ? "Invite sent." : "Invites sent.");
+                        } else if (inviteSendResult?.sent > 0) {
+                          setInviteStatus(
+                            `${inviteSendResult.sent} invite${inviteSendResult.sent === 1 ? "" : "s"} sent.`
+                          );
+                        } else if (inviteSendError) {
+                          setInviteStatus("Invite created. Email notification couldn't be delivered right now.");
+                        } else {
+                          setInviteStatus(rowsToCreate.length === 1 ? "Invite created." : "Invites created.");
+                        }
                         setInviteRows([{ email: "", role: "editor" }]);
                         setInviteErrors({});
+                        await loadAccessMembers();
                       } catch (error) {
                         setInviteStatus(error?.message || "Unable to send invites.");
                       } finally {
                         setInviteLoading(false);
                       }
                     }}
-                    className="rounded-lg bg-ocean px-3 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-60"
+                    className="rounded-lg bg-ocean px-3 py-2 text-sm font-semibold text-white hover:bg-[#152f2a] disabled:opacity-60"
                     disabled={inviteLoading}
                   >
                     {inviteLoading ? "Sending..." : "Send"}
@@ -606,7 +917,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
               ) : (
                 <button
                   type="button"
-                  onClick={() => onClose?.()}
+                  onClick={handleRequestClose}
                   className="rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
                 >
                   Done
@@ -615,13 +926,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
             </div>
           </div>
           {inviteStatus ? (
-            <p
-              className={`text-sm ${
-                inviteStatus === "Enter a valid email for each invitee." ? "text-rose-600" : "text-slate-600"
-              }`}
-            >
-              {inviteStatus}
-            </p>
+            <ToastNotification message={inviteStatus} onDismiss={() => setInviteStatus("")} />
           ) : null}
         </div>
       </div>

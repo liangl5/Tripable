@@ -35,7 +35,7 @@ export default function AvailabilityDetails({ members, availability, surveyDates
                   <div className="flex items-center gap-2">
                     <span>{member.name}</span>
                     {member.isLeader && (
-                      <span className="rounded-full bg-[#EEF2FF] px-2 py-0.5 text-xs font-semibold text-[#4C6FFF]">
+                      <span className="rounded-full bg-[#ecf5e9] px-2 py-0.5 text-xs font-semibold text-[#1e4840]">
                         Leader
                       </span>
                     )}

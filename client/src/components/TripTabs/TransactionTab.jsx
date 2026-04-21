@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import ThreadedComments from "../ThreadedComments.jsx";
+import { buildUserNamesById, fetchUserProfilesByIds } from "../../lib/userProfiles.js";
 
 const DEFAULT_FORM = {
   name: "",
@@ -44,7 +45,7 @@ function canDeleteTransaction(transaction, userId, userRole) {
   return transaction.createdById === userId;
 }
 
-export default function TransactionTab({ tab, tripId, userId, userRole, tripMembers }) {
+export default function TransactionTab({ tab, tripId, userId, userRole, tripMembers, isActive, onReadyChange }) {
   const [transactions, setTransactions] = useState([]);
   const [splitsByTransaction, setSplitsByTransaction] = useState({});
   const [personTotals, setPersonTotals] = useState({});
@@ -53,7 +54,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
   const [expandedTransactions, setExpandedTransactions] = useState({});
   const [actionMenuOpenId, setActionMenuOpenId] = useState("");
   const [showPersonTotals, setShowPersonTotals] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState(DEFAULT_FORM);
   const [editFormData, setEditFormData] = useState(DEFAULT_FORM);
   const [formWarning, setFormWarning] = useState("");
@@ -61,14 +62,19 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [userTotal, setUserTotal] = useState(0);
   const [tripTotal, setTripTotal] = useState(0);
+  const [historicalUserNamesById, setHistoricalUserNamesById] = useState({});
+
+  useEffect(() => {
+    if (!isActive) return;
+    onReadyChange?.(!loading);
+  }, [isActive, loading, onReadyChange]);
 
   const memberNamesById = useMemo(
-    () =>
-      (tripMembers || []).reduce((acc, member) => {
-        acc[member.id] = member.name || member.email || "Traveler";
-        return acc;
-      }, {}),
-    [tripMembers]
+    () => ({
+      ...historicalUserNamesById,
+      ...buildUserNamesById(tripMembers)
+    }),
+    [historicalUserNamesById, tripMembers]
   );
 
   const validateTransaction = (candidate) => {
@@ -168,6 +174,22 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
         nextTripTotal,
         nextPersonTotals
       } = await getTransactionWithSplits(rows);
+      const referencedUserIds = Array.from(
+        new Set(
+          [
+            ...rows.flatMap((transaction) => [transaction.createdById, transaction.paidByUserId]),
+            ...Object.values(splitMap).flatMap((splits) => (splits || []).map((split) => split.userId))
+          ].filter(Boolean)
+        )
+      );
+      const missingUserIds = referencedUserIds.filter((uid) => !memberNamesById[uid]);
+      if (missingUserIds.length) {
+        const profiles = await fetchUserProfilesByIds(missingUserIds);
+        setHistoricalUserNamesById((current) => ({
+          ...current,
+          ...buildUserNamesById(profiles)
+        }));
+      }
 
       setTransactions(rows);
       setSplitsByTransaction(splitMap);
@@ -179,7 +201,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
     } finally {
       setLoading(false);
     }
-  }, [getTransactionWithSplits, tab.id]);
+  }, [getTransactionWithSplits, memberNamesById, tab.id]);
 
   // Load transactions
   useEffect(() => {
@@ -405,7 +427,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
           {!showAddForm && (
             <button
               onClick={() => setShowAddForm(true)}
-              className="rounded-lg bg-ocean px-3 py-1 text-sm font-semibold text-white hover:bg-blue-600"
+              className="rounded-lg bg-ocean px-3 py-1 text-sm font-semibold text-white hover:bg-[#152f2a]"
             >
               + Add
             </button>
@@ -504,7 +526,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
               <button
                 onClick={handleAddTransaction}
                 disabled={loading}
-                className="flex-1 rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-50"
+                className="flex-1 rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-[#152f2a] disabled:opacity-50"
               >
                 Save Transaction
               </button>
@@ -671,7 +693,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleSaveTransactionEdit(transaction)}
-                      className="rounded-lg bg-ocean px-3 py-2 text-sm font-semibold text-white hover:bg-blue-600"
+                      className="rounded-lg bg-ocean px-3 py-2 text-sm font-semibold text-white hover:bg-[#152f2a]"
                     >
                       Save
                     </button>
@@ -713,6 +735,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
                 resourceId={transaction.id}
                 userId={userId}
                 userNamesById={memberNamesById}
+                canDeleteAnyComment={userRole === "owner"}
                 title="Comments"
               />
             </div>
