@@ -23,11 +23,14 @@ const TAB_TYPE_OPTIONS = [
   }
 ];
 
+const TAB_PANEL_CACHE_LIMIT = 4;
+
 export default function TabManager({ trip, tripId, userId, userRole, ideas, tripMembers }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [tabs, setTabs] = useState([]);
   const [activeTab, setActiveTab] = useState(null);
+  const [displayedTabId, setDisplayedTabId] = useState(null);
   const [hydratedTab, setHydratedTab] = useState(false);
   const [loading, setLoading] = useState(false);
   const [draggedTab, setDraggedTab] = useState(null);
@@ -47,10 +50,14 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
   const [tabDropdownOpen, setTabDropdownOpen] = useState(false);
   const [tabDropdownPosition, setTabDropdownPosition] = useState(null);
   const [buttonTooltip, setButtonTooltip] = useState(null);
+  const [cachedTabIds, setCachedTabIds] = useState([]);
+  const [tabReadyById, setTabReadyById] = useState({});
+  const [activePanelEntered, setActivePanelEntered] = useState(true);
   const tabStripRef = useRef(null);
   const tabMenuRef = useRef(null);
   const tabDropdownRef = useRef(null);
   const canManageTabs = userRole === "owner" || userRole === "editor";
+  const isAsyncTabType = (tabType) => tabType === "availability" || tabType === "list" || tabType === "itinerary" || tabType === "expenses";
 
   const normalizeTabName = (value) => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
   const isTabNameTaken = (candidateName, excludeTabId = null) => {
@@ -114,6 +121,7 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
           }
           const nextActive = loadedTabs.some((tab) => tab.id === storedTabId) ? storedTabId : loadedTabs[0].id;
           setActiveTab(nextActive);
+          setDisplayedTabId(nextActive);
           syncUrlTab(nextActive, { replace: true });
           setHydratedTab(true);
         }
@@ -158,6 +166,62 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
       });
     }
   }, [activeTab, tabs, tripId, userId, hydratedTab]);
+
+  useEffect(() => {
+    if (!activeTab) return;
+    setTabReadyById((current) => ({ ...current, [activeTab]: false }));
+  }, [activeTab]);
+
+  useEffect(() => {
+    setTabReadyById((current) => {
+      const validIds = new Set(tabs.map((tab) => tab.id));
+      const next = {};
+      Object.entries(current).forEach(([tabId, ready]) => {
+        if (validIds.has(tabId)) {
+          next[tabId] = ready;
+        }
+      });
+      return next;
+    });
+  }, [tabs]);
+
+  useEffect(() => {
+    if (!activeTab) return;
+    const activeTabEntry = tabs.find((tab) => tab.id === activeTab);
+    if (!activeTabEntry) return;
+
+    if (!isAsyncTabType(activeTabEntry.tabType) || tabReadyById[activeTab]) {
+      setDisplayedTabId(activeTab);
+    }
+  }, [activeTab, tabReadyById, tabs]);
+
+  useEffect(() => {
+    if (!displayedTabId) return;
+    setCachedTabIds((current) => {
+      const validTabIds = new Set(tabs.map((tab) => tab.id));
+      const next = [...current.filter((id) => id !== displayedTabId && validTabIds.has(id)), displayedTabId];
+      return next.slice(-TAB_PANEL_CACHE_LIMIT);
+    });
+  }, [displayedTabId, tabs]);
+
+  useEffect(() => {
+    if (!displayedTabId) return;
+    setActivePanelEntered(false);
+    const frameId = window.requestAnimationFrame(() => {
+      setActivePanelEntered(true);
+    });
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [displayedTabId]);
+
+  const handleTabReadyChange = (tabId, ready) => {
+    if (!tabId) return;
+    setTabReadyById((current) => {
+      if (current[tabId] === ready) return current;
+      return { ...current, [tabId]: ready };
+    });
+  };
 
   useEffect(() => {
     if (!draggedTab) return undefined;
@@ -532,6 +596,8 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
             tripId={tripId}
             userId={userId}
             userRole={userRole}
+            isActive={activeTab === tab.id}
+            onReadyChange={(ready) => handleTabReadyChange(tab.id, ready)}
           />
         );
       case "list":
@@ -547,6 +613,8 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
             onAddIdea={handleAddIdea}
             onVoteIdea={handleVoteIdea}
             onDeleteIdea={handleDeleteIdea}
+            isActive={activeTab === tab.id}
+            onReadyChange={(ready) => handleTabReadyChange(tab.id, ready)}
           />
         );
       case "itinerary":
@@ -559,6 +627,8 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
             tripMembers={tripMembers}
             ideas={ideas}
             trip={trip}
+            isActive={activeTab === tab.id}
+            onReadyChange={(ready) => handleTabReadyChange(tab.id, ready)}
           />
         );
       case "expenses":
@@ -569,6 +639,8 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
             userId={userId}
             userRole={userRole}
             tripMembers={tripMembers}
+            isActive={activeTab === tab.id}
+            onReadyChange={(ready) => handleTabReadyChange(tab.id, ready)}
           />
         );
       default:
@@ -829,23 +901,27 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
 
       {/* Tab Content */}
       <div className="grid flex-1 min-h-0 bg-white">
-        {tabs.map((tab) => {
-          const isActivePanel = activeTab === tab.id;
-          const panelOwnsScroll = tab.tabType === "list";
-          return (
-            <div
-              key={tab.id}
-              aria-hidden={!isActivePanel}
-              className={`col-start-1 row-start-1 transition-opacity duration-200 ease-out ${
-                panelOwnsScroll ? "overflow-hidden" : "overflow-y-auto"
-              } ${
-                isActivePanel ? "z-10 opacity-100 pointer-events-auto" : "z-0 opacity-0 pointer-events-none"
-              }`}
-            >
-              {renderTabPanel(tab)}
-            </div>
-          );
-        })}
+        {tabs
+          .filter((tab) => tab.id === activeTab || tab.id === displayedTabId || cachedTabIds.includes(tab.id))
+          .map((tab) => {
+            const isDisplayedPanel = displayedTabId === tab.id;
+            const panelOwnsScroll = tab.tabType === "list";
+            return (
+              <div
+                key={tab.id}
+                aria-hidden={!isDisplayedPanel}
+                className={`col-start-1 row-start-1 transition-opacity duration-300 ease-in-out ${
+                  panelOwnsScroll ? "overflow-hidden" : "overflow-y-auto"
+                } ${
+                  isDisplayedPanel
+                    ? `z-10 pointer-events-auto ${activePanelEntered ? "opacity-100" : "opacity-0"}`
+                    : "z-0 opacity-0 pointer-events-none"
+                }`}
+              >
+                {renderTabPanel(tab)}
+              </div>
+            );
+          })}
       </div>
 
       {tabDeleteConfirm ? (

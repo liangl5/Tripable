@@ -3,7 +3,7 @@ import { supabase } from "../../lib/supabase";
 import { DAY_NAMES, addMonths, formatISO, monthKey, startOfMonth } from "../../lib/calendarHelpers.js";
 import { buildUserNamesById, fetchUserProfilesByIds } from "../../lib/userProfiles.js";
 
-export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
+export default function AvailabilityTab({ tab, tripId, userId, userRole, isActive, onReadyChange }) {
   const [startMonth, setStartMonth] = useState(new Date());
   const [selectedDates, setSelectedDates] = useState(new Set());
   const [isDragging, setIsDragging] = useState(false);
@@ -27,12 +27,17 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
   const [commentsError, setCommentsError] = useState("");
   const [commentsTableReady, setCommentsTableReady] = useState(true);
   const [commentAuthorNamesById, setCommentAuthorNamesById] = useState({});
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [userSubmittedAt, setUserSubmittedAt] = useState(null);
   const [editStartSelectedDates, setEditStartSelectedDates] = useState(new Set());
   const canEditAvailability = true;
   const canEditCells = canEditAvailability && (!showHeatmap || isEditing);
   const canDeleteAnyComment = userRole === "owner";
+
+  useEffect(() => {
+    if (!isActive) return;
+    onReadyChange?.(!loading);
+  }, [isActive, loading, onReadyChange]);
 
   // Load user's current availability for this tab
   useEffect(() => {

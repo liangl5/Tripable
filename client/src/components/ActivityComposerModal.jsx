@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../lib/api.js";
 import { buildFreeformIdeaPayload, buildResolvedIdeaPayload } from "../lib/ideaComposer.js";
 import { isPlaceLikeList, normalizeListName } from "../lib/tripPlanning.js";
@@ -229,9 +230,9 @@ export default function ActivityComposerModal({
     }
   };
 
-  return (
+  const modal = (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/40 px-4 py-6"
+      className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/40 px-4 py-6"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           onClose();
@@ -428,4 +429,10 @@ export default function ActivityComposerModal({
       </div>
     </div>
   );
+
+  if (typeof document === "undefined") {
+    return modal;
+  }
+
+  return createPortal(modal, document.body);
 }

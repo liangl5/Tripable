@@ -17,7 +17,9 @@ export default function ListTab({
   ideas,
   onAddIdea,
   onVoteIdea,
-  onDeleteIdea
+  onDeleteIdea,
+  isActive,
+  onReadyChange
 }) {
   const [lists, setLists] = useState([]);
   const [mapPanelWidth, setMapPanelWidth] = useState(50);
@@ -27,7 +29,7 @@ export default function ListTab({
   const [newListName, setNewListName] = useState("");
   const [editingListId, setEditingListId] = useState(null);
   const [editingListName, setEditingListName] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [listCreateLoading, setListCreateLoading] = useState(false);
   const [deleteListConfirm, setDeleteListConfirm] = useState(null);
   const [deleteIdeaConfirm, setDeleteIdeaConfirm] = useState(null);
@@ -45,6 +47,11 @@ export default function ListTab({
   const reloadIdeas = useTripStore((state) => state.loadIdeas);
   const updateIdea = useTripStore((state) => state.updateIdea);
   const reorderIdeas = useTripStore((state) => state.reorderIdeas);
+
+  useEffect(() => {
+    if (!isActive) return;
+    onReadyChange?.(!loading);
+  }, [isActive, loading, onReadyChange]);
 
   const DisclosureChevron = ({ open }) => (
     <svg

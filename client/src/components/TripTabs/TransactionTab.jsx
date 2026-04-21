@@ -45,7 +45,7 @@ function canDeleteTransaction(transaction, userId, userRole) {
   return transaction.createdById === userId;
 }
 
-export default function TransactionTab({ tab, tripId, userId, userRole, tripMembers }) {
+export default function TransactionTab({ tab, tripId, userId, userRole, tripMembers, isActive, onReadyChange }) {
   const [transactions, setTransactions] = useState([]);
   const [splitsByTransaction, setSplitsByTransaction] = useState({});
   const [personTotals, setPersonTotals] = useState({});
@@ -54,7 +54,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
   const [expandedTransactions, setExpandedTransactions] = useState({});
   const [actionMenuOpenId, setActionMenuOpenId] = useState("");
   const [showPersonTotals, setShowPersonTotals] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState(DEFAULT_FORM);
   const [editFormData, setEditFormData] = useState(DEFAULT_FORM);
   const [formWarning, setFormWarning] = useState("");
@@ -63,6 +63,11 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
   const [userTotal, setUserTotal] = useState(0);
   const [tripTotal, setTripTotal] = useState(0);
   const [historicalUserNamesById, setHistoricalUserNamesById] = useState({});
+
+  useEffect(() => {
+    if (!isActive) return;
+    onReadyChange?.(!loading);
+  }, [isActive, loading, onReadyChange]);
 
   const memberNamesById = useMemo(
     () => ({

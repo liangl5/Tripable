@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { clearGeneratedItinerary, slugify } from "../../lib/tripPlanning";
 import ThreadedComments from "../ThreadedComments.jsx";
+import ConfirmModal from "../ConfirmModal.jsx";
 
 function ThumbUpIcon({ className }) {
   return (
@@ -41,7 +42,7 @@ function ThumbDownIcon({ className }) {
   );
 }
 
-export default function ItineraryTab({ tab, tripId, userId, userRole, tripMembers, ideas, trip }) {
+export default function ItineraryTab({ tab, tripId, userId, userRole, tripMembers, ideas, trip, isActive, onReadyChange }) {
   const [days, setDays] = useState([]);
   const [itineraryItems, setItineraryItems] = useState([]);
   const [allowedListIds, setAllowedListIds] = useState(null);
@@ -59,9 +60,19 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
   const [dateRangeError, setDateRangeError] = useState("");
   const [listOptions, setListOptions] = useState([]);
   const [unsavedChanges, setUnsavedChanges] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [expandedDescriptions, setExpandedDescriptions] = useState({});
+  const [confirmDateRangeShrinkOpen, setConfirmDateRangeShrinkOpen] = useState(false);
+  const [pendingDeletedDayIds, setPendingDeletedDayIds] = useState([]);
+  const [pendingCreatedDayIds, setPendingCreatedDayIds] = useState([]);
+  const [undoStack, setUndoStack] = useState([]);
+  const [redoStack, setRedoStack] = useState([]);
   const canManageItinerary = userRole === "owner" || userRole === "editor";
+
+  useEffect(() => {
+    if (!isActive) return;
+    onReadyChange?.(!loading);
+  }, [isActive, loading, onReadyChange]);
 
   const DisclosureChevron = ({ open }) => (
     <svg
@@ -140,6 +151,11 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
         }
         const hasDays = (daysData || []).length > 0;
         setIsEditMode(canManageItinerary && (!hasDays || nextItems.length === 0));
+        setPendingDeletedDayIds([]);
+        setPendingCreatedDayIds([]);
+        setUnsavedChanges(false);
+        setUndoStack([]);
+        setRedoStack([]);
       } catch (error) {
         console.error("Failed to load itinerary:", error);
       } finally {
@@ -216,10 +232,73 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
     });
   };
 
-  const handleAddDay = async () => {
+  const createSnapshot = () => ({
+    days: days.map((day) => ({ ...day })),
+    itineraryItems: itineraryItems.map((item) => ({ ...item })),
+    pendingDeletedDayIds: [...pendingDeletedDayIds],
+    pendingCreatedDayIds: [...pendingCreatedDayIds],
+    dateRangeStart,
+    dateRangeEnd
+  });
+
+  const restoreSnapshot = (snapshot) => {
+    if (!snapshot) return;
+    setDays((snapshot.days || []).map((day) => ({ ...day })));
+    setItineraryItems((snapshot.itineraryItems || []).map((item) => ({ ...item })));
+    setPendingDeletedDayIds([...(snapshot.pendingDeletedDayIds || [])]);
+    setPendingCreatedDayIds([...(snapshot.pendingCreatedDayIds || [])]);
+    setDateRangeStart(snapshot.dateRangeStart || "");
+    setDateRangeEnd(snapshot.dateRangeEnd || "");
+    setUnsavedChanges(true);
+  };
+
+  const pushUndoSnapshot = () => {
+    const snapshot = createSnapshot();
+    setUndoStack((current) => {
+      const next = [...current, snapshot];
+      if (next.length > 60) {
+        next.shift();
+      }
+      return next;
+    });
+    setRedoStack([]);
+  };
+
+  const handleUndo = () => {
+    if (!undoStack.length) return;
+    const previous = undoStack[undoStack.length - 1];
+    const currentSnapshot = createSnapshot();
+    setUndoStack((current) => current.slice(0, -1));
+    setRedoStack((current) => {
+      const next = [...current, currentSnapshot];
+      if (next.length > 60) {
+        next.shift();
+      }
+      return next;
+    });
+    restoreSnapshot(previous);
+  };
+
+  const handleRedo = () => {
+    if (!redoStack.length) return;
+    const nextSnapshot = redoStack[redoStack.length - 1];
+    const currentSnapshot = createSnapshot();
+    setRedoStack((current) => current.slice(0, -1));
+    setUndoStack((current) => {
+      const next = [...current, currentSnapshot];
+      if (next.length > 60) {
+        next.shift();
+      }
+      return next;
+    });
+    restoreSnapshot(nextSnapshot);
+  };
+
+  const handleAddDay = () => {
     if (!canManageItinerary) return;
 
     try {
+      pushUndoSnapshot();
       const maxDayNumber = days.reduce((max, day) => Math.max(max, day.dayNumber || 0), 0);
       const nextDayNumber = maxDayNumber + 1;
       const lastDay = [...days].sort((a, b) => a.dayNumber - b.dayNumber).at(-1);
@@ -234,23 +313,16 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
           nextDate = toDateStorageValue(nextDateKey);
         }
       }
-      const { data, error } = await supabase
-        .from("ItineraryDay")
-        .insert([
-          {
-            id: crypto.randomUUID(),
-            tripId,
-            tabId: tab.id,
-            dayNumber: nextDayNumber,
-            date: nextDate
-          }
-        ])
-        .select()
-        .single();
+      const localDay = {
+        id: crypto.randomUUID(),
+        tripId,
+        tabId: tab.id,
+        dayNumber: nextDayNumber,
+        date: nextDate
+      };
 
-      if (error) throw error;
-
-      setDays([...days, data].sort((a, b) => a.dayNumber - b.dayNumber));
+      setDays([...days, localDay].sort((a, b) => a.dayNumber - b.dayNumber));
+      setPendingCreatedDayIds((current) => [...current, localDay.id]);
       if (nextDateKey) {
         if (!dateRangeStart || nextDateKey < dateRangeStart) setDateRangeStart(nextDateKey);
         if (!dateRangeEnd || nextDateKey > dateRangeEnd) setDateRangeEnd(nextDateKey);
@@ -262,18 +334,17 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
   };
 
   const handleDeleteDay = async (dayId) => {
-    if (!canManageItinerary) return;
-    const shouldDelete = window.confirm("Delete this day and its activities? This cannot be undone.");
-    if (!shouldDelete) return;
-
-    try {
-      await supabase.from("ItineraryDay").delete().eq("id", dayId);
-      setDays(days.filter((d) => d.id !== dayId));
-      setItineraryItems(itineraryItems.filter((item) => item.itineraryDayId !== dayId));
-      setUnsavedChanges(true);
-    } catch (error) {
-      console.error("Failed to delete day:", error);
+    if (!canManageItinerary || !dayId) return;
+    pushUndoSnapshot();
+    setDays(days.filter((d) => d.id !== dayId));
+    setItineraryItems(itineraryItems.filter((item) => item.itineraryDayId !== dayId));
+    if (pendingCreatedDayIds.includes(dayId)) {
+      setPendingCreatedDayIds((current) => current.filter((id) => id !== dayId));
+      setPendingDeletedDayIds((current) => current.filter((id) => id !== dayId));
+    } else {
+      setPendingDeletedDayIds((current) => (current.includes(dayId) ? current : [...current, dayId]));
     }
+    setUnsavedChanges(true);
   };
 
   const handleDragStart = (activity) => {
@@ -308,6 +379,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
 
     try {
       if (draggedActivity) {
+        pushUndoSnapshot();
         const newItem = {
           id: crypto.randomUUID(),
           itineraryDayId: dayId,
@@ -320,6 +392,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
         setItineraryItems([...itineraryItems, newItem]);
         setUnsavedChanges(true);
       } else if (draggedItem) {
+        pushUndoSnapshot();
         const moved = itineraryItems.map((item) =>
           item.id === draggedItem.id
             ? {
@@ -348,6 +421,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
 
     if (!draggedItem) return;
 
+    pushUndoSnapshot();
     setItineraryItems(itineraryItems.filter((item) => item.id !== draggedItem.id));
     setUnsavedChanges(true);
     setDraggedItem(null);
@@ -356,6 +430,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
   const handleRemoveActivityFromDay = (itemId) => {
     if (!canManageItinerary || !isEditMode) return;
 
+    pushUndoSnapshot();
     setItineraryItems(itineraryItems.filter((i) => i.id !== itemId));
     setUnsavedChanges(true);
   };
@@ -377,8 +452,28 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
 
       // Delete all old items
       const dayIds = days.map((d) => d.id);
-      if (dayIds.length > 0) {
-        await supabase.from("ItineraryItem").delete().in("itineraryDayId", dayIds);
+      const deletedDayIds = pendingDeletedDayIds;
+      const allAffectedDayIds = Array.from(new Set([...dayIds, ...deletedDayIds]));
+      if (allAffectedDayIds.length > 0) {
+        await supabase.from("ItineraryItem").delete().in("itineraryDayId", allAffectedDayIds);
+      }
+
+      // Persist day deletions only when saving changes.
+      if (deletedDayIds.length > 0) {
+        await supabase.from("ItineraryDay").delete().in("id", deletedDayIds);
+      }
+
+      // Persist newly added days only when saving changes.
+      const createdDays = days.filter((day) => pendingCreatedDayIds.includes(day.id));
+      if (createdDays.length > 0) {
+        const createdDayRows = createdDays.map((day) => ({
+          id: day.id,
+          tripId,
+          tabId: tab.id,
+          dayNumber: day.dayNumber,
+          date: day.date || null
+        }));
+        await supabase.from("ItineraryDay").insert(createdDayRows);
       }
 
       // Insert new items
@@ -388,6 +483,10 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
 
       clearGeneratedItinerary(tripId);
       setUnsavedChanges(false);
+      setPendingDeletedDayIds([]);
+      setPendingCreatedDayIds([]);
+      setUndoStack([]);
+      setRedoStack([]);
       setIsEditMode(itineraryItems.length === 0);
     } catch (error) {
       console.error("Failed to save itinerary:", error);
@@ -396,7 +495,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
     }
   };
 
-  const handleApplyDateRange = async () => {
+  const handleApplyDateRange = async (skipShrinkConfirm = false) => {
     if (!canManageItinerary || !isEditMode) return;
     setDateRangeError("");
 
@@ -416,14 +515,13 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
     const extraDayIds = new Set(extraDays.map((day) => day.id));
     const extraItemCount = itineraryItems.filter((item) => extraDayIds.has(item.itineraryDayId)).length;
 
-    if (extraItemCount > 0) {
-      const proceed = window.confirm(
-        "Shortening the date range will remove days and any activities scheduled on them. Continue?"
-      );
-      if (!proceed) return;
+    if (extraItemCount > 0 && !skipShrinkConfirm) {
+      setConfirmDateRangeShrinkOpen(true);
+      return;
     }
 
     try {
+      pushUndoSnapshot();
       setLoading(true);
       const updates = [];
       const nextDays = [];
@@ -658,15 +756,19 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
               Set a date range to create days, then drag items from the Activity Bank onto each day.
             </p>
             {canManageItinerary ? (
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsEditMode(true)}
-                  className="rounded-full bg-ocean px-5 py-2 text-sm font-semibold text-white hover:bg-[#152f2a]"
-                >
-                  Set itinerary dates
-                </button>
-              </div>
+              isEditMode ? (
+                <p className="mt-4 text-sm text-slate-500">Use the date range controls below to create itinerary days.</p>
+              ) : (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditMode(true)}
+                    className="rounded-full bg-ocean px-5 py-2 text-sm font-semibold text-white hover:bg-[#152f2a]"
+                  >
+                    Set itinerary dates
+                  </button>
+                </div>
+              )
             ) : (
               <p className="mt-4 text-sm text-slate-500">Ask the trip owner to set itinerary dates.</p>
             )}
@@ -711,10 +813,26 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
                 </div>
                 {canManageItinerary && isEditMode && (
                   <button
-                    onClick={() => handleDeleteDay(day.id)}
-                    className="text-xs text-coral hover:font-semibold"
+                    onClick={() => void handleDeleteDay(day.id)}
+                    className="text-coral hover:text-red-600"
+                    aria-label="Delete day"
+                    title="Delete day"
                   >
-                    Delete
+                    <svg
+                      className="h-4 w-4"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M3 6h18" />
+                      <path d="M8 6V4h8v2" />
+                      <path d="M6 6l1 14h10l1-14" />
+                      <path d="M10 11v6" />
+                      <path d="M14 11v6" />
+                    </svg>
                   </button>
                 )}
               </div>
@@ -1015,9 +1133,48 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
         </div>
       ) : null}
 
+      <ConfirmModal
+        open={confirmDateRangeShrinkOpen}
+        title="Remove extra days?"
+        message="Shortening the date range will remove days and any activities scheduled on them. Continue?"
+        confirmText="Continue"
+        tone="warning"
+        onCancel={() => setConfirmDateRangeShrinkOpen(false)}
+        onConfirm={() => {
+          setConfirmDateRangeShrinkOpen(false);
+          void handleApplyDateRange(true);
+        }}
+      />
+
       {/* Save Button */}
       {unsavedChanges && isEditMode && (
         <div className="fixed bottom-6 right-6 flex gap-3">
+          <button
+            type="button"
+            onClick={handleUndo}
+            disabled={loading || undoStack.length === 0}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 transition hover:border-ocean hover:text-ocean disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Undo"
+            title="Undo"
+          >
+            <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+              <path d="M8 5 3.5 9.5 8 14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M4 9.5h6.5a5 5 0 1 1 0 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={handleRedo}
+            disabled={loading || redoStack.length === 0}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 transition hover:border-ocean hover:text-ocean disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Redo"
+            title="Redo"
+          >
+            <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+              <path d="m12 5 4.5 4.5L12 14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M16 9.5H9.5a5 5 0 1 0 0 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
           <button
             onClick={handleSaveItinerary}
             disabled={loading}
