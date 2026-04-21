@@ -662,7 +662,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
                 <button
                   type="button"
                   onClick={() => setIsEditMode(true)}
-                  className="rounded-full bg-ocean px-5 py-2 text-sm font-semibold text-white hover:bg-blue-600"
+                  className="rounded-full bg-ocean px-5 py-2 text-sm font-semibold text-white hover:bg-[#152f2a]"
                 >
                   Set itinerary dates
                 </button>
@@ -1006,7 +1006,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
                 type="button"
                 onClick={() => void saveActivityBankFilter()}
                 disabled={activityBankFilterSaving}
-                className="rounded-xl bg-ocean px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-60"
+                className="rounded-xl bg-ocean px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#152f2a] disabled:opacity-60"
               >
                 {activityBankFilterSaving ? "Saving..." : "Save"}
               </button>
@@ -1021,7 +1021,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
           <button
             onClick={handleSaveItinerary}
             disabled={loading}
-            className="rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-50"
+            className="rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-[#152f2a] disabled:opacity-50"
           >
             Save Changes
           </button>

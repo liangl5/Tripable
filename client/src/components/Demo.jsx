@@ -30,7 +30,7 @@ function DemoMock() {
         <div className="space-y-4">
           <div className="relative min-h-[220px] overflow-hidden rounded-[1.5rem] border border-slate-200/70 bg-[linear-gradient(180deg,#E3ECFF_0%,#E9F5E7_100%)]">
             <svg className="absolute inset-0 h-full w-full opacity-70" viewBox="0 0 500 300" fill="none" aria-hidden="true">
-              <path d="M34 234C133 126 187 188 282 131C351 89 400 91 472 52" stroke="#4C6FFF" strokeWidth="12" strokeLinecap="round" />
+              <path d="M34 234C133 126 187 188 282 131C351 89 400 91 472 52" stroke="#1e4840" strokeWidth="12" strokeLinecap="round" />
               <path d="M29 118C131 99 174 88 274 113C350 133 434 130 503 108" stroke="#FFB86B" strokeOpacity="0.8" strokeWidth="10" strokeLinecap="round" />
             </svg>
             {[

@@ -326,7 +326,7 @@ export default function TripSidebarHeader() {
                         <button
                           type="button"
                           onClick={() => handleJoinInvite(invite.tripId, invite.id)}
-                          className="flex-1 rounded-lg bg-ocean px-3 py-2 text-center text-xs font-semibold text-white hover:bg-blue-600"
+                          className="flex-1 rounded-lg bg-ocean px-3 py-2 text-center text-xs font-semibold text-white hover:bg-[#152f2a]"
                         >
                           Join trip
                         </button>
@@ -501,7 +501,7 @@ export default function TripSidebarHeader() {
                 <button
                   type="button"
                   onClick={handleProfileClick}
-                  className="w-full rounded-lg bg-ocean px-3 py-2 text-sm font-semibold text-white hover:bg-blue-600"
+                  className="w-full rounded-lg bg-ocean px-3 py-2 text-sm font-semibold text-white hover:bg-[#152f2a]"
                 >
                   Edit Profile
                 </button>

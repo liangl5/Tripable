@@ -21,6 +21,7 @@ export default function ListTab({
 }) {
   const [lists, setLists] = useState([]);
   const [mapPanelWidth, setMapPanelWidth] = useState(50);
+  const [panelHeight, setPanelHeight] = useState(null);
   const [collapsedLists, setCollapsedLists] = useState({});
   const [isAddingList, setIsAddingList] = useState(false);
   const [newListName, setNewListName] = useState("");
@@ -111,6 +112,40 @@ export default function ListTab({
       document.removeEventListener("mouseup", handleMouseUp);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    let frameId = 0;
+
+    const measurePanelHeight = () => {
+      if (!containerRef.current) return;
+      const viewportHeight = window.visualViewport?.height || window.innerHeight || 0;
+      const { top } = containerRef.current.getBoundingClientRect();
+      const nextHeight = Math.max(320, Math.round(viewportHeight - Math.max(top, 0)));
+      setPanelHeight((current) => (current === nextHeight ? current : nextHeight));
+    };
+
+    const scheduleMeasure = () => {
+      if (frameId) return;
+      frameId = window.requestAnimationFrame(() => {
+        frameId = 0;
+        measurePanelHeight();
+      });
+    };
+
+    scheduleMeasure();
+    window.addEventListener("resize", scheduleMeasure);
+    window.addEventListener("scroll", scheduleMeasure, true);
+
+    return () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+      window.removeEventListener("resize", scheduleMeasure);
+      window.removeEventListener("scroll", scheduleMeasure, true);
     };
   }, []);
 
@@ -496,12 +531,13 @@ export default function ListTab({
     acc[member.id] = member.name || member.email || "Traveler";
     return acc;
   }, {});
+  const panelHeightStyle = panelHeight ? { height: `${panelHeight}px`, maxHeight: `${panelHeight}px` } : undefined;
 
   return (
-    <div ref={containerRef} className="flex h-[calc(100dvh-180px)] max-h-[calc(100dvh-180px)] overflow-hidden gap-0">
+    <div ref={containerRef} className="flex min-h-[320px] overflow-hidden gap-0" style={panelHeightStyle}>
       {/* Left Panel: Lists */}
-      <div className="h-full flex flex-col overflow-y-auto border-r border-slate-200" style={{ width: leftWidth }}>
-        <div className="flex-1 p-4 space-y-2">
+      <div className="flex h-full min-h-0 flex-col border-r border-slate-200" style={{ width: leftWidth }}>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-2">
           {/* Empty state: No lists or activities */}
           {!loading && lists.length === 0 && !isAddingList && (
             <div>
@@ -537,7 +573,7 @@ export default function ListTab({
                 <button
                     onClick={handleAddList}
                     disabled={listCreateLoading}
-                    className="flex-1 rounded-lg bg-ocean px-2 py-1 text-xs font-semibold text-white hover:bg-blue-600"
+                    className="flex-1 rounded-lg bg-ocean px-2 py-1 text-xs font-semibold text-white hover:bg-[#152f2a]"
                   >
                     {listCreateLoading ? "Creating..." : "Create"}
                   </button>
@@ -850,7 +886,7 @@ export default function ListTab({
       </div>
 
       {/* Right Panel: Map */}
-      <div className="h-full overflow-hidden" style={{ width: rightWidth }}>
+      <div className="h-full min-h-0 overflow-hidden" style={{ width: rightWidth }}>
         <TripMapPanel tripId={tripId} destination={trip?.destination} mappedIdeas={mappedIdeasForThisTab} immersive />
       </div>
 

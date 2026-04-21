@@ -534,7 +534,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
             ))}
             <button
               type="button"
-              className="text-xs font-semibold text-ocean hover:text-blue-700"
+              className="text-xs font-semibold text-ocean hover:text-[#152f2a]"
               onClick={() =>
                 setInviteRows((current) => [...current, { email: "", role: "editor" }])
               }
@@ -908,7 +908,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
                         setInviteLoading(false);
                       }
                     }}
-                    className="rounded-lg bg-ocean px-3 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-60"
+                    className="rounded-lg bg-ocean px-3 py-2 text-sm font-semibold text-white hover:bg-[#152f2a] disabled:opacity-60"
                     disabled={inviteLoading}
                   >
                     {inviteLoading ? "Sending..." : "Send"}

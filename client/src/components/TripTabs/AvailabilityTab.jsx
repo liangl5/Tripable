@@ -567,7 +567,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
                   <textarea
                     value={editDraft}
                     onChange={(event) => setEditDraft(event.target.value)}
-                    className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#4C6FFF]"
+                    className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
                   />
                   <div className="mt-2 flex gap-2">
                     <button
@@ -635,7 +635,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
                 value={replyDraft}
                 onChange={(event) => setReplyDraft(event.target.value)}
                 placeholder="Write a reply..."
-                className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#4C6FFF]"
+                className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
               />
               <div className="mt-2 flex justify-end gap-2">
                 <button
@@ -887,7 +887,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
             ) : (
               <>
                 <div className="mb-4 flex items-start gap-3 rounded-xl bg-white p-3 shadow-sm">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#4C6FFF] text-xs font-semibold text-white">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#1e4840] text-xs font-semibold text-white">
                     {(userNamesById[userId] || "You").slice(0, 1).toUpperCase()}
                   </div>
                   <div className="flex-1">
@@ -895,7 +895,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
                       value={commentDraft}
                       onChange={(event) => setCommentDraft(event.target.value)}
                       placeholder="Write a comment..."
-                      className="min-h-[72px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#4C6FFF]"
+                      className="min-h-[72px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
                     />
                     <div className="mt-2 flex justify-end">
                       <button
@@ -988,7 +988,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole }) {
               <button
                 onClick={handleSave}
                 disabled={loading}
-                className="flex-1 rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-50"
+                className="flex-1 rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-[#152f2a] disabled:opacity-50"
               >
                 Save Availability
               </button>

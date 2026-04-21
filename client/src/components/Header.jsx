@@ -343,7 +343,7 @@ export default function Header() {
                               Decline
                             </button>
                             <button
-                              className="flex-1 rounded-lg bg-ocean px-3 py-2 text-center text-xs font-semibold text-white hover:bg-blue-600"
+                              className="flex-1 rounded-lg bg-ocean px-3 py-2 text-center text-xs font-semibold text-white hover:bg-[#152f2a]"
                               onClick={() => handleJoinInvite(invite.tripId, invite.id)}
                             >
                               Join trip
@@ -493,7 +493,7 @@ export default function Header() {
                   <div className="p-3">
                     <button
                       onClick={handleProfileClick}
-                      className="w-full rounded-lg bg-ocean px-3 py-2 text-sm font-semibold text-white hover:bg-blue-600"
+                      className="w-full rounded-lg bg-ocean px-3 py-2 text-sm font-semibold text-white hover:bg-[#152f2a]"
                     >
                       Manage Your Account
                     </button>

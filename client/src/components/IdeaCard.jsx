@@ -60,7 +60,7 @@ export default function IdeaCard({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               {idea.listName ? (
-                <span className="rounded-full bg-[#EEF2FF] px-3 py-1 text-[11px] font-semibold text-ocean">
+                <span className="rounded-full bg-[#ecf5e9] px-3 py-1 text-[11px] font-semibold text-ocean">
                   {idea.listName}
                 </span>
               ) : null}

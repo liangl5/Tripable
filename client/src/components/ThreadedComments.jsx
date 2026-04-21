@@ -323,7 +323,7 @@ export default function ThreadedComments({
                   <textarea
                     value={editDraft}
                     onChange={(event) => setEditDraft(event.target.value)}
-                    className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#4C6FFF]"
+                    className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
                   />
                   <div className="mt-2 flex gap-2">
                     <button
@@ -393,7 +393,7 @@ export default function ThreadedComments({
                 value={replyDraft}
                 onChange={(event) => setReplyDraft(event.target.value)}
                 placeholder="Write a reply..."
-                className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#4C6FFF]"
+                className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
               />
               <div className="mt-2 flex justify-end gap-2">
                 <button
@@ -444,7 +444,7 @@ export default function ThreadedComments({
           ) : (
             <>
               <div className="mb-3 flex items-start gap-3 rounded-xl bg-white p-3 shadow-sm">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#4C6FFF] text-xs font-semibold text-white">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#1e4840] text-xs font-semibold text-white">
                   {getAuthorName(userId).slice(0, 1).toUpperCase()}
                 </div>
                 <div className="flex-1">
@@ -452,7 +452,7 @@ export default function ThreadedComments({
                     value={commentDraft}
                     onChange={(event) => setCommentDraft(event.target.value)}
                     placeholder="Write a comment..."
-                    className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#4C6FFF]"
+                    className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
                   />
                   <div className="mt-2 flex justify-end">
                     <button

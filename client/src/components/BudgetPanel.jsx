@@ -91,7 +91,7 @@ export default function BudgetPanel({ trip, onChange, onPersistMeta }) {
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#5A8A64]">Spent</p>
           <p className="mt-3 text-2xl font-semibold text-ink">{formatCurrency(summary.spent)}</p>
         </div>
-        <div className={`rounded-2xl px-4 py-4 ${summary.remaining < 0 ? "bg-[#FFF1F1]" : "bg-[#EEF2FF]"}`}>
+        <div className={`rounded-2xl px-4 py-4 ${summary.remaining < 0 ? "bg-[#FFF1F1]" : "bg-[#ecf5e9]"}`}>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Remaining</p>
           <p className="mt-3 text-2xl font-semibold text-ink">{formatCurrency(summary.remaining)}</p>
         </div>

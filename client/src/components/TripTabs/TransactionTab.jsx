@@ -422,7 +422,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
           {!showAddForm && (
             <button
               onClick={() => setShowAddForm(true)}
-              className="rounded-lg bg-ocean px-3 py-1 text-sm font-semibold text-white hover:bg-blue-600"
+              className="rounded-lg bg-ocean px-3 py-1 text-sm font-semibold text-white hover:bg-[#152f2a]"
             >
               + Add
             </button>
@@ -521,7 +521,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
               <button
                 onClick={handleAddTransaction}
                 disabled={loading}
-                className="flex-1 rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-50"
+                className="flex-1 rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-[#152f2a] disabled:opacity-50"
               >
                 Save Transaction
               </button>
@@ -688,7 +688,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleSaveTransactionEdit(transaction)}
-                      className="rounded-lg bg-ocean px-3 py-2 text-sm font-semibold text-white hover:bg-blue-600"
+                      className="rounded-lg bg-ocean px-3 py-2 text-sm font-semibold text-white hover:bg-[#152f2a]"
                     >
                       Save
                     </button>

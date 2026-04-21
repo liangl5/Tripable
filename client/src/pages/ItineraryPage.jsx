@@ -65,7 +65,7 @@ export default function ItineraryPage() {
           <h1 className="mt-2 text-3xl font-semibold text-ink">{currentTrip?.name}</h1>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             {currentTrip?.destination ? (
-              <span className="rounded-full bg-[#EEF2FF] px-3 py-2 text-xs font-semibold text-ocean">
+              <span className="rounded-full bg-[#ecf5e9] px-3 py-2 text-xs font-semibold text-ocean">
                 {currentTrip.destination.label}
               </span>
             ) : null}

@@ -749,7 +749,7 @@ export default function TripList({
               </button>
               <button
                 onClick={handleRenameSave}
-                className="rounded-xl bg-ocean px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-70"
+                className="rounded-xl bg-ocean px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#152f2a] disabled:opacity-70"
                 disabled={renameSaving}
               >
                 {renameSaving ? "Saving..." : "Save"}

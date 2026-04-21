@@ -128,7 +128,7 @@ export default function UserProfilePage() {
             <button
               type="submit"
               disabled={isUpdatingDisplayName || newDisplayName === (profile?.name || "")}
-              className="rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-[#152f2a] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isUpdatingDisplayName ? "Updating..." : "Update Display Name"}
             </button>
@@ -149,7 +149,7 @@ export default function UserProfilePage() {
           </p>
           <button
             onClick={handleResetPassword}
-            className="rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600"
+            className="rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-[#152f2a]"
           >
             Reset Password
           </button>

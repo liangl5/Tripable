@@ -831,11 +831,14 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
       <div className="grid flex-1 min-h-0 bg-white">
         {tabs.map((tab) => {
           const isActivePanel = activeTab === tab.id;
+          const panelOwnsScroll = tab.tabType === "list";
           return (
             <div
               key={tab.id}
               aria-hidden={!isActivePanel}
-              className={`col-start-1 row-start-1 overflow-y-auto transition-opacity duration-200 ease-out ${
+              className={`col-start-1 row-start-1 transition-opacity duration-200 ease-out ${
+                panelOwnsScroll ? "overflow-hidden" : "overflow-y-auto"
+              } ${
                 isActivePanel ? "z-10 opacity-100 pointer-events-auto" : "z-0 opacity-0 pointer-events-none"
               }`}
             >
@@ -935,7 +938,7 @@ export default function TabManager({ trip, tripId, userId, userRole, ideas, trip
               <button
                 onClick={() => void handleAddNewTab()}
                 disabled={tabRenameLoading}
-                className="rounded-xl bg-ocean px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-60"
+                className="rounded-xl bg-ocean px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#152f2a] disabled:opacity-60"
               >
                 Create
               </button>

@@ -45,7 +45,7 @@ export default function Navbar() {
               </Link>
               <Link
                 to="/auth"
-                className="rounded-full bg-[#4C6FFF] px-5 py-2.5 text-white shadow-card transition hover:bg-[#3F5CE0]"
+                className="rounded-full bg-[#1e4840] px-5 py-2.5 text-white shadow-card transition hover:bg-[#152f2a]"
               >
                 Sign Up
               </Link>

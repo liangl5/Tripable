@@ -16,7 +16,7 @@ export default function DayCard({ day, onMove }) {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-[#EEF2FF] px-3 py-1 text-[11px] font-semibold text-ocean">
+                  <span className="rounded-full bg-[#ecf5e9] px-3 py-1 text-[11px] font-semibold text-ocean">
                     {item.timeLabel || `Stop ${index + 1}`}
                   </span>
                   <span className="rounded-full bg-mist px-3 py-1 text-[11px] font-semibold text-slate-500">
