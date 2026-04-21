@@ -549,6 +549,11 @@ export default function ListTab({
                   + New List
                 </button>
               )}
+              {!canManageLists && (
+                <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  Wait for an Editor to create a list, or request editor permissions.
+                </p>
+              )}
             </div>
           )}
 
