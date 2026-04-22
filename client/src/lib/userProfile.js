@@ -14,6 +14,12 @@ function defaultDisplayNameFromSession(session) {
   return "Traveler";
 }
 
+export function isDeletedUserProfile(profile) {
+  const name = String(profile?.name || "").trim().toLowerCase();
+  const email = String(profile?.email || "").trim().toLowerCase();
+  return /^deleteduser\d+$/.test(name) || email.endsWith("@deleted.tripable.local");
+}
+
 export async function fetchUserProfile(session) {
   const userId = session?.user?.id;
   if (!userId) return null;

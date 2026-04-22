@@ -105,7 +105,12 @@ export function AuthStatus() {
       setPassword("");
       setConfirmPassword("");
       const { data } = await supabase.auth.getSession();
-      await refreshProfile(data?.session || null);
+      const loadedProfile = await refreshProfile(data?.session || null);
+      if (!loadedProfile) {
+        setMessage("Error: This account is no longer active.");
+        setLoading(false);
+        return;
+      }
       setIsRedirecting(true);
       setTimeout(() => navigate(returnUrl), 300);
     }

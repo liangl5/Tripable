@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
 function getSupabaseAdminClient() {
@@ -47,6 +48,17 @@ async function assertNoError(result, fallbackMessage) {
 
 function buildDeletedUserName() {
   return `deleteduser${Math.floor(100000 + Math.random() * 900000)}`;
+}
+
+function buildDeletedProfile() {
+  const name = buildDeletedUserName();
+  const id = `deleted-${randomUUID()}`;
+  return {
+    id,
+    name,
+    email: `${name}-${randomUUID()}@deleted.tripable.local`,
+    avatarColor: "bg-slate-200 text-slate-700"
+  };
 }
 
 function isMissingAvatarColorColumn(error) {
@@ -109,26 +121,77 @@ async function insertDeletedUserProfile(supabase, userId, profilePatch) {
   }
 }
 
-async function deleteOwnedTripsAndAnonymizeProfile(supabase, userId) {
-  const deletedUserName = buildDeletedUserName();
+async function reassignAuthoredRowsToDeletedProfile(supabase, userId, deletedUserId) {
+  const updates = [
+    ["Idea", "createdById"],
+    ["Vote", "userId"],
+    ["UserAvailability", "userId"],
+    ["AvailabilityTabData", "userId"],
+    ["AvailabilityTabComment", "userId"],
+    ["IdeaComment", "userId"],
+    ["ItineraryDayComment", "userId"],
+    ["TransactionComment", "userId"],
+    ["Transaction", "createdById"],
+    ["Transaction", "paidByUserId"],
+    ["TransactionSplit", "userId"],
+    ["PendingTripInvite", "createdById"],
+    ["PendingTripInvite", "acceptedByUserId"]
+  ];
+
+  for (const [table, column] of updates) {
+    await assertNoError(
+      await supabase.from(table).update({ [column]: deletedUserId }).eq(column, userId),
+      `Unable to anonymize ${table}.${column}.`
+    );
+  }
+}
+
+async function removeAccessRows(supabase, userId) {
+  const accessTables = ["TripMember", "UserTripRole", "TripTabPreference", "TripStar"];
+
+  for (const table of accessTables) {
+    await assertNoError(
+      await supabase.from(table).delete().eq("userId", userId),
+      `Unable to remove deleted account access from ${table}.`
+    );
+  }
+}
+
+async function prepareDeletedAccountData(supabase, userId) {
+  const deletedProfile = buildDeletedProfile();
+  const deletedProfilePatch = {
+    name: deletedProfile.name,
+    email: deletedProfile.email,
+    avatarColor: deletedProfile.avatarColor
+  };
+  const oldProfilePatch = {
+    name: deletedProfile.name,
+    email: `${deletedProfile.name}-old-${randomUUID()}@deleted.tripable.local`,
+    avatarColor: deletedProfile.avatarColor
+  };
 
   await assertNoError(
     await supabase.from("Trip").delete().eq("createdById", userId),
     "Unable to delete owned trips."
   );
 
-  const profilePatch = {
-    name: deletedUserName,
-    email: `${deletedUserName}@deleted.tripable.local`,
-    avatarColor: "bg-slate-200 text-slate-700"
-  };
-
-  const updatedProfile = await updateDeletedUserProfile(supabase, userId, profilePatch);
-  if (!updatedProfile?.id) {
-    await insertDeletedUserProfile(supabase, userId, profilePatch);
+  await insertDeletedUserProfile(supabase, deletedProfile.id, deletedProfilePatch);
+  const updatedOldProfile = await updateDeletedUserProfile(supabase, userId, oldProfilePatch);
+  if (!updatedOldProfile?.id) {
+    await insertDeletedUserProfile(supabase, userId, oldProfilePatch);
   }
 
-  return deletedUserName;
+  await reassignAuthoredRowsToDeletedProfile(supabase, userId, deletedProfile.id);
+  await removeAccessRows(supabase, userId);
+
+  return deletedProfile;
+}
+
+async function removeOriginalProfile(supabase, userId) {
+  await assertNoError(
+    await supabase.from("User").delete().eq("id", userId),
+    "Unable to remove the deleted account profile."
+  );
 }
 
 export default async function handler(req, res) {
@@ -159,14 +222,21 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Account confirmation did not match the signed-in user." });
     }
 
-    const deletedUserName = await deleteOwnedTripsAndAnonymizeProfile(supabase, data.user.id);
+    const { error: signOutError } = await supabase.auth.admin.signOut(accessToken, "global");
+    if (signOutError) {
+      console.warn("Unable to revoke deleted account sessions before deletion:", signOutError.message);
+    }
+
+    const deletedProfile = await prepareDeletedAccountData(supabase, data.user.id);
 
     const { error: deleteUserError } = await supabase.auth.admin.deleteUser(data.user.id);
     if (deleteUserError) {
       throw new Error(deleteUserError.message || "Unable to delete auth account.");
     }
 
-    return res.status(200).json({ ok: true, deletedUserName });
+    await removeOriginalProfile(supabase, data.user.id);
+
+    return res.status(200).json({ ok: true, deletedUserName: deletedProfile.name });
   } catch (error) {
     return res.status(500).json({
       error: "Unable to delete your account right now.",

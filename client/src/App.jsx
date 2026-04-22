@@ -2,7 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState, createContext
 import { Routes, Route, useLocation } from "react-router-dom";
 import { supabase } from "./lib/supabase";
 import { AuthStatus } from "./components/AuthStatus";
-import { ensureUserProfile } from "./lib/userProfile.js";
+import { ensureUserProfile, isDeletedUserProfile } from "./lib/userProfile.js";
 import { identifyUser, resetAnalytics, trackPageView } from "./lib/analytics.js";
 
 const HomePage = lazy(() => import("./pages/HomePage.jsx"));
@@ -36,18 +36,32 @@ export default function App() {
   const [profileError, setProfileError] = useState(null);
   const lastTrackedPathRef = useRef("");
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
-    return () => subscription.unsubscribe();
+  const clearLocalSession = useCallback(async () => {
+    setSession(null);
+    setProfile(null);
+    setProfileError(null);
+    resetAnalytics();
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // Local session state is already cleared; ignore network/logout errors here.
+    }
   }, []);
+
+  const validateSession = useCallback(async (nextSession) => {
+    if (!nextSession) return null;
+
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data?.user || data.user.id !== nextSession.user?.id) {
+      await clearLocalSession();
+      return null;
+    }
+
+    return {
+      ...nextSession,
+      user: data.user
+    };
+  }, [clearLocalSession]);
 
   const refreshProfile = useCallback(async (nextSession = session) => {
     if (!nextSession) {
@@ -60,6 +74,10 @@ export default function App() {
     setProfileError(null);
     try {
       const ensured = await ensureUserProfile(nextSession);
+      if (isDeletedUserProfile(ensured)) {
+        await clearLocalSession();
+        return null;
+      }
       setProfile(ensured);
       return ensured;
     } catch (error) {
@@ -68,7 +86,34 @@ export default function App() {
     } finally {
       setProfileLoading(false);
     }
-  }, [session]);
+  }, [clearLocalSession, session]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSession = async () => {
+      const { data: { session: storedSession } } = await supabase.auth.getSession();
+      const validSession = await validateSession(storedSession);
+      if (!isMounted) return;
+      setSession(validSession);
+      setLoading(false);
+    };
+
+    void loadSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      void validateSession(nextSession).then((validSession) => {
+        if (isMounted) {
+          setSession(validSession);
+        }
+      });
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, [validateSession]);
 
   useEffect(() => {
     if (!session) {
