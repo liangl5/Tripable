@@ -13,6 +13,10 @@ import {
   removeTripMeta,
   slugify
 } from "./tripPlanning.js";
+import {
+  getRandomTripBackgroundImage,
+  normalizeTripBackgroundImage
+} from "./tripBackgrounds.js";
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const GOOGLE_DESTINATION_AUTOCOMPLETE_FIELDS = [
@@ -802,6 +806,7 @@ function formatTrip(trip, memberCount = 0) {
   return hydrateTrip({
     id: trip.id,
     name: trip.name,
+    backgroundImage: normalizeTripBackgroundImage(trip.backgroundImage),
     startDate: toISODate(trip.startDate),
     endDate: toISODate(trip.endDate),
     createdAt: trip.createdAt || trip.created_at || null,
@@ -824,6 +829,7 @@ async function formatTripDetails(trip, viewerUserId, members, leaders, availabil
   return hydrateTrip({
     id: trip.id,
     name: trip.name,
+    backgroundImage: normalizeTripBackgroundImage(trip.backgroundImage),
     startDate: toISODate(trip.startDate),
     endDate: toISODate(trip.endDate),
     destination: trip.destination || null,
@@ -1305,6 +1311,7 @@ export const api = {
     const tripInsert = {
       id: tripId,
       name: payload.name,
+      backgroundImage: normalizeTripBackgroundImage(payload?.backgroundImage) || getRandomTripBackgroundImage(),
       createdById: user.id
     };
 
@@ -1341,6 +1348,7 @@ export const api = {
 
     return {
       ...trip,
+      backgroundImage: normalizeTripBackgroundImage(trip.backgroundImage) || tripInsert.backgroundImage,
       destination: null,
       lists: [],
       invitees: Array.isArray(payload.invitees) ? payload.invitees : [],
@@ -1368,6 +1376,7 @@ export const api = {
     const tripInsert = {
       id: newTripId,
       name: payload?.name || `Copy of ${sourceTrip.name || "Trip"}`,
+      backgroundImage: normalizeTripBackgroundImage(sourceTrip.backgroundImage) || getRandomTripBackgroundImage(),
       createdById: user.id
     };
 
@@ -1882,6 +1891,17 @@ export const api = {
         throw new Error("Trip name cannot be empty");
       }
       updates.name = nextName;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload || {}, "backgroundImage")) {
+      if (role !== "owner") {
+        throw new Error("Only trip owners can change trip backgrounds");
+      }
+      const nextBackgroundImage = normalizeTripBackgroundImage(payload?.backgroundImage);
+      if (!nextBackgroundImage) {
+        throw new Error("Select a valid trip background image");
+      }
+      updates.backgroundImage = nextBackgroundImage;
     }
 
     if (!Object.keys(updates).length) {

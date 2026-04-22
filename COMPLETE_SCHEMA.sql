@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS "User" (
 CREATE TABLE "Trip" (
   id TEXT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
+  "backgroundImage" TEXT,
   "createdById" TEXT NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
   "createdAt" TIMESTAMPTZ DEFAULT NOW()
 );
