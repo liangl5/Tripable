@@ -125,8 +125,6 @@ async function reassignAuthoredRowsToDeletedProfile(supabase, userId, deletedUse
   const updates = [
     ["Idea", "createdById"],
     ["Vote", "userId"],
-    ["UserAvailability", "userId"],
-    ["AvailabilityTabData", "userId"],
     ["AvailabilityTabComment", "userId"],
     ["IdeaComment", "userId"],
     ["ItineraryDayComment", "userId"],
@@ -142,6 +140,17 @@ async function reassignAuthoredRowsToDeletedProfile(supabase, userId, deletedUse
     await assertNoError(
       await supabase.from(table).update({ [column]: deletedUserId }).eq(column, userId),
       `Unable to anonymize ${table}.${column}.`
+    );
+  }
+}
+
+async function deleteAvailabilityRows(supabase, userId) {
+  const availabilityTables = ["UserAvailability", "AvailabilityTabData"];
+
+  for (const table of availabilityTables) {
+    await assertNoError(
+      await supabase.from(table).delete().eq("userId", userId),
+      `Unable to remove deleted account availability from ${table}.`
     );
   }
 }
@@ -182,6 +191,7 @@ async function prepareDeletedAccountData(supabase, userId) {
   }
 
   await reassignAuthoredRowsToDeletedProfile(supabase, userId, deletedProfile.id);
+  await deleteAvailabilityRows(supabase, userId);
   await removeAccessRows(supabase, userId);
 
   return deletedProfile;

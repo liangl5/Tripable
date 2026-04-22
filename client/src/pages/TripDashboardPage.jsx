@@ -785,15 +785,18 @@ export default function TripDashboardPage() {
               </div>
 
               <div className="flex items-center gap-3">
-                {userRole === "owner" ? (
+                {userRole ? (
                   <button
                     onClick={() => {
                       setShareOpen(true);
-                      void trackEvent("trip_share_opened", { trip_id: tripId });
+                      void trackEvent(userRole === "owner" ? "trip_share_opened" : "trip_people_opened", {
+                        trip_id: tripId,
+                        role: userRole
+                      });
                     }}
                     className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-300"
                   >
-                    Invite
+                    {userRole === "owner" ? "Invite" : "People"}
                   </button>
                 ) : null}
 
@@ -834,8 +837,10 @@ export default function TripDashboardPage() {
       </div>
 
       <ShareTripModal
-        open={shareOpen && userRole === "owner"}
+        open={shareOpen}
         trip={trip}
+        readOnly={userRole !== "owner"}
+        viewerRole={userRole}
         onClose={() => setShareOpen(false)}
       />
 

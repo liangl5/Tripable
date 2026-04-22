@@ -9,6 +9,7 @@ import {
   getTripBackgroundOption
 } from "../lib/tripBackgrounds.js";
 import { getAvatarColor } from "../lib/avatarColors.js";
+import { isDeletedUserProfile } from "../lib/userProfile.js";
 import LoadingProgressBar from "./LoadingProgressBar.jsx";
 import ConfirmModal from "./ConfirmModal.jsx";
 import ShareTripModal from "./ShareTripModal.jsx";
@@ -724,9 +725,10 @@ export default function TripList({
                 </div>
                 <div className="relative flex items-center">
                   {(() => {
-                    const allMembers = trip.members && trip.members.length
+                    const rawMembers = trip.members && trip.members.length
                       ? trip.members
                       : [{ id: trip.createdById || "owner", name: trip.ownerDisplayName || "Trip owner" }];
+                    const allMembers = rawMembers.filter((member) => !isDeletedUserProfile(member));
                     const sortedMembers = [...allMembers].sort((a, b) =>
                       String(a.name || "Traveler").localeCompare(String(b.name || "Traveler"), undefined, {
                         sensitivity: "base"

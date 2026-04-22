@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { DAY_NAMES, addMonths, formatISO, monthKey, startOfMonth } from "../../lib/calendarHelpers.js";
+import { isDeletedUserProfile } from "../../lib/userProfile.js";
 import { buildUserNamesById, fetchUserProfilesByIds } from "../../lib/userProfiles.js";
 
 export default function AvailabilityTab({ tab, tripId, userId, userRole, isActive, onReadyChange }) {
@@ -114,34 +115,35 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
           ].filter(Boolean))
         );
         const userProfiles = await fetchUserProfilesByIds(participantIds);
-        const sortedProfiles = [...userProfiles].sort((left, right) =>
+        const activeProfiles = userProfiles.filter((profile) => !isDeletedUserProfile(profile));
+        const activeUserIds = new Set(activeProfiles.map((profile) => profile.id));
+        const availabilityRows = (data || []).filter((entry) => activeUserIds.has(entry.userId));
+        const sortedProfiles = [...activeProfiles].sort((left, right) =>
           String(left.name || left.email || "").localeCompare(String(right.name || right.email || ""))
         );
         const userNameById = buildUserNamesById(sortedProfiles);
         setAllUsers(sortedProfiles);
 
-        if (data) {
-          const counts = {};
-          const byDateUserIds = {};
-          data.forEach(({ date, userId: uid }) => {
-            const dateStr = date.split("T")[0];
-            counts[dateStr] = (counts[dateStr] || 0) + 1;
-            if (!byDateUserIds[dateStr]) byDateUserIds[dateStr] = [];
-            byDateUserIds[dateStr].push(uid);
-          });
-          setAvailabilityData(counts);
+        const counts = {};
+        const byDateUserIds = {};
+        availabilityRows.forEach(({ date, userId: uid }) => {
+          const dateStr = date.split("T")[0];
+          counts[dateStr] = (counts[dateStr] || 0) + 1;
+          if (!byDateUserIds[dateStr]) byDateUserIds[dateStr] = [];
+          byDateUserIds[dateStr].push(uid);
+        });
+        setAvailabilityData(counts);
 
-          const byDateNames = {};
-          Object.entries(byDateUserIds).forEach(([date, ids]) => {
-            byDateNames[date] = ids
-              .map((id) => userNameById[id] || "Traveler")
-              .sort((a, b) => a.localeCompare(b));
-          });
-          setAvailableUsersByDate(byDateNames);
-        }
+        const byDateNames = {};
+        Object.entries(byDateUserIds).forEach(([date, ids]) => {
+          byDateNames[date] = ids
+            .map((id) => userNameById[id] || "Traveler")
+            .sort((a, b) => a.localeCompare(b));
+        });
+        setAvailableUsersByDate(byDateNames);
 
         const byUser = {};
-        (data || []).forEach(({ userId: uid, date }) => {
+        availabilityRows.forEach(({ userId: uid, date }) => {
           if (!byUser[uid]) byUser[uid] = [];
           byUser[uid].push(date.split("T")[0]);
         });

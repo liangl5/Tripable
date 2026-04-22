@@ -3,6 +3,7 @@ import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
 import { getAvatarColor } from "../lib/avatarColors.js";
 import { supabase } from "../lib/supabase.js";
+import { isDeletedUserProfile } from "../lib/userProfile.js";
 import ToastNotification from "./ToastNotification.jsx";
 
 const ROLE_LABELS = {
@@ -29,7 +30,7 @@ const formatPendingInviteName = (email) => {
     .join(" ");
 };
 
-export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
+export default function ShareTripModal({ open, trip, onClose, onLinkCopied, readOnly = false, viewerRole = "" }) {
   const session = useSession();
   const sendTripInvites = useTripStore((state) => state.sendTripInvites);
   const [inviteStatus, setInviteStatus] = useState("");
@@ -100,7 +101,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
           .select("id, name, email, avatarColor")
           .in("id", userIds);
         if (userError) throw userError;
-        users = userRows || [];
+        users = (userRows || []).filter((user) => !isDeletedUserProfile(user));
       }
 
       let roleRows = [];
@@ -128,6 +129,19 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
         if (b.role === "owner") return 1;
         return a.name.localeCompare(b.name);
       });
+
+      const roleSnapshot = members.reduce((acc, member) => {
+        acc[member.id] = member.role;
+        return acc;
+      }, {});
+
+      if (!canInvite) {
+        setAccessMembers(members);
+        setPendingInviteEntries([]);
+        setPendingRoleChanges({});
+        setOriginalRoles(roleSnapshot);
+        return;
+      }
 
       const { data: pendingRows, error: pendingError } = await supabase
         .from("PendingTripInvite")
@@ -184,12 +198,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
       setAccessMembers(members);
       setPendingInviteEntries(pendingEntries);
       setPendingRoleChanges({});
-      setOriginalRoles(
-        members.reduce((acc, member) => {
-          acc[member.id] = member.role;
-          return acc;
-        }, {})
-      );
+      setOriginalRoles(roleSnapshot);
     } catch (error) {
       console.error("Failed to load trip members", error);
       setAccessMembers([]);
@@ -253,14 +262,18 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
     };
   }, [inviteRoleMenuOpenIndex]);
 
-  const currentUserRole = accessMembers.find((member) => member.id === session?.user?.id)?.role || "suggestor";
-  const canManageRoles = currentUserRole === "owner" || currentUserRole === "editor";
-  const canManagePendingInvites = currentUserRole === "owner";
+  const currentUserRole =
+    accessMembers.find((member) => member.id === session?.user?.id)?.role || viewerRole || trip?.userRole || "suggestor";
+  const canInvite = !readOnly && currentUserRole === "owner";
+  const canManageRoles = canInvite;
+  const canManagePendingInvites = canInvite;
+  const visiblePendingInviteEntries = canInvite ? pendingInviteEntries : [];
 
   const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
 
   const handleRoleChange = (memberId, nextRole) => {
     if (!trip?.id) return;
+    if (!canManageRoles) return;
     if (!memberId || !nextRole) return;
     setPendingRoleChanges((current) => {
       const next = { ...current };
@@ -278,8 +291,8 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
   };
 
   const pendingChangeCount = Object.keys(pendingRoleChanges).length;
-  const hasInviteDrafts = inviteRows.some((row) => String(row.email || "").trim());
-  const hasPeopleWithAccess = accessMembers.length > 0 || pendingInviteEntries.length > 0;
+  const hasInviteDrafts = canInvite && inviteRows.some((row) => String(row.email || "").trim());
+  const hasPeopleWithAccess = accessMembers.length > 0 || visiblePendingInviteEntries.length > 0;
 
   const removeInviteRow = (index) => {
     setInviteRoleMenuOpenIndex((current) => {
@@ -308,6 +321,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
 
   const handleSaveRoleChanges = async () => {
     if (!trip?.id || pendingChangeCount === 0) return;
+    if (!canManageRoles) return;
     setSavingRoleChanges(true);
     try {
       const entries = Object.entries(pendingRoleChanges);
@@ -406,11 +420,15 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
         className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-card"
         onClick={(event) => event.stopPropagation()}
       >
-        <h3 className="text-lg font-semibold text-ink">Share trip</h3>
-        <p className="mt-1 text-sm text-slate-600">Invite people by email or copy the link.</p>
+        <h3 className="text-lg font-semibold text-ink">{canInvite ? "Share trip" : "People with access"}</h3>
+        {canInvite ? (
+          <p className="mt-1 text-sm text-slate-600">Invite people by email or copy the link.</p>
+        ) : null}
         <div className="mt-4 space-y-3">
-          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Invite by email</label>
-          <div className="space-y-3">
+          {canInvite ? (
+            <>
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Invite by email</label>
+              <div className="space-y-3">
             {inviteRows.map((row, index) => (
               <div key={`invite-row-${index}`} className="flex items-center gap-2">
                 <button
@@ -552,7 +570,9 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
                 Notify people
               </label>
             </div>
-          </div>
+              </div>
+            </>
+          ) : null}
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">People with access</p>
             <div className="mt-2 space-y-2">
@@ -652,7 +672,7 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
                     )}
                   </div>
                 ))}
-                {pendingInviteEntries.map((invite) => (
+                {visiblePendingInviteEntries.map((invite) => (
                   <div
                     key={`pending-${invite.id}`}
                     className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2"
@@ -746,17 +766,19 @@ export default function ShareTripModal({ open, trip, onClose, onLinkCopied }) {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={async () => {
-                const link = `${window.location.origin}/trips/${trip.id}/invite`;
-                await navigator.clipboard.writeText(link);
-                setInviteStatus("Link copied");
-                onLinkCopied?.(trip);
-              }}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-ink hover:border-ocean hover:text-ocean"
-            >
-              Copy link
-            </button>
+            {canInvite ? (
+              <button
+                onClick={async () => {
+                  const link = `${window.location.origin}/trips/${trip.id}/invite`;
+                  await navigator.clipboard.writeText(link);
+                  setInviteStatus("Link copied");
+                  onLinkCopied?.(trip);
+                }}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-ink hover:border-ocean hover:text-ocean"
+              >
+                Copy link
+              </button>
+            ) : null}
             <div className="ml-auto flex items-center gap-2">
               {pendingChangeCount > 0 ? (
                 <>
