@@ -81,6 +81,7 @@ export default function TripDashboardPage() {
   const tripNameInputRef = useRef(null);
   const ideas = useTripStore((state) => state.ideas);
   const loadIdeas = useTripStore((state) => state.loadIdeas);
+  const deleteTrip = useTripStore((state) => state.deleteTrip);
   const leaveTrip = useTripStore((state) => state.leaveTrip);
   const leaveTripLoading = useTripStore((state) => state.leaveTripLoading);
   const sendTripInvites = useTripStore((state) => state.sendTripInvites);
@@ -635,7 +636,7 @@ export default function TripDashboardPage() {
     try {
       setActionLoading(true);
       const deletedTripName = String(trip?.name || "Trip");
-      await supabase.from("Trip").delete().eq("id", tripId);
+      await deleteTrip(tripId);
       void trackEvent("trip_deleted_dashboard", { trip_id: tripId });
       setFlashNotice({
         kind: "trip_deleted",
@@ -654,11 +655,12 @@ export default function TripDashboardPage() {
 
   const handleDeleteTrip = () => {
     if (userRole !== "owner") return;
+    const tripName = String(trip?.name || "This trip");
     setConfirmDialog({
       kind: "delete",
-      title: "Delete trip?",
-      message: "Delete this trip? This cannot be undone.",
-      confirmText: "Delete",
+      title: "Permanently delete trip?",
+      message: `${tripName} will be permanently deleted for everyone. This cannot be undone.`,
+      confirmText: "Delete permanently",
       tone: "danger"
     });
   };

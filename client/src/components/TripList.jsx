@@ -261,6 +261,10 @@ export default function TripList({
   };
 
   const visibleTrips = useMemo(() => trips, [trips]);
+  const selectedOwnedTripCount = useMemo(
+    () => visibleTrips.filter((trip) => selectedTripIds.has(trip.id) && trip.canDelete !== false).length,
+    [selectedTripIds, visibleTrips]
+  );
 
   const toggleTripSelection = (tripId) => {
     setSelectedTripIds((current) => {
@@ -298,7 +302,10 @@ export default function TripList({
   };
 
   const handleBulkDelete = () => {
-    const ids = Array.from(selectedTripIds);
+    const ids = Array.from(selectedTripIds).filter((tripId) => {
+      const trip = trips.find((item) => item.id === tripId);
+      return trip && trip.canDelete !== false;
+    });
     if (!ids.length) return;
     setDeleteConfirm({
       actionType: "delete",
@@ -350,10 +357,10 @@ export default function TripList({
           <button
             type="button"
             onClick={handleBulkDelete}
-            disabled={!selectedTripIds.size}
+            disabled={!selectedOwnedTripCount}
             className="rounded-full border border-[#baf59c] bg-[#baf59c] px-4 py-2 text-xs font-semibold text-[#1e4840] hover:bg-[#a7ee84] disabled:opacity-60"
           >
-            Delete selected
+            {selectedOwnedTripCount ? "Delete selected" : "No owned trips selected"}
           </button>
         </div>
       ) : null}
@@ -776,17 +783,17 @@ export default function TripList({
             deleteConfirm.actionType === "leave"
               ? "Leave trip?"
               : deleteConfirm.ids?.length
-                ? `Delete ${deleteConfirm.ids.length} selected trips?`
-                : "Delete trip?"
+                ? `Permanently delete ${deleteConfirm.ids.length} selected trips?`
+                : "Permanently delete trip?"
           }
           message={
             deleteConfirm.actionType === "leave"
               ? `Leave \"${deleteConfirm.name || "this trip"}\"? You will need a new invite link to rejoin.`
               : deleteConfirm.ids?.length
-                ? `Delete these ${deleteConfirm.ids.length} selected trips? This cannot be undone.`
-                : `Delete \"${deleteConfirm.name || "this trip"}\"? This cannot be undone.`
+                ? `These ${deleteConfirm.ids.length} trips will be permanently deleted for everyone. This cannot be undone.`
+                : `\"${deleteConfirm.name || "This trip"}\" will be permanently deleted for everyone. This cannot be undone.`
           }
-          confirmText={deleteConfirm.actionType === "leave" ? "Leave" : "Delete"}
+          confirmText={deleteConfirm.actionType === "leave" ? "Leave" : "Delete permanently"}
           tone={deleteConfirm.actionType === "leave" ? "warning" : "danger"}
           loading={deleteLoading}
           showLoadingBar

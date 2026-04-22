@@ -38,6 +38,7 @@ export default function ListTab({
   const [composerState, setComposerState] = useState(null);
   const [actionMenu, setActionMenu] = useState(null);
   const [dragState, setDragState] = useState({ ideaId: null, overListId: null, overIdeaId: null, overSide: null });
+  const [listDragState, setListDragState] = useState({ listId: null, overListId: null, overSide: null });
   const [expandedDescriptions, setExpandedDescriptions] = useState({});
   const [listActionError, setListActionError] = useState("");
   const containerRef = useRef(null);
@@ -76,7 +77,7 @@ export default function ListTab({
       try {
         setLoading(true);
         const dbLists = await api.getLists(tripId, tab.id);
-        setLists(dbLists);
+        setLists([...dbLists].sort(sortLists));
       } catch (error) {
         console.error("Failed to load lists:", error);
       } finally {
@@ -165,6 +166,15 @@ export default function ListTab({
     return new Date(left?.createdAt || 0).getTime() - new Date(right?.createdAt || 0).getTime();
   };
 
+  const sortLists = (left, right) => {
+    const leftOrder = Number.isFinite(Number(left?.order)) ? Number(left.order) : 0;
+    const rightOrder = Number.isFinite(Number(right?.order)) ? Number(right.order) : 0;
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+    return new Date(left?.createdAt || 0).getTime() - new Date(right?.createdAt || 0).getTime();
+  };
+
   useEffect(() => {
     if (!actionMenu) return undefined;
 
@@ -198,7 +208,9 @@ export default function ListTab({
       setListCreateLoading(true);
       setListActionError("");
       const newList = await api.createList(tripId, newListName, tab.id);
-      setLists((current) => (current.some((list) => list.id === newList.id) ? current : [...current, newList]));
+      setLists((current) =>
+        current.some((list) => list.id === newList.id) ? current : [...current, newList].sort(sortLists)
+      );
       void trackEvent("list_created", {
         trip_id: tripId,
         list_id: newList.id,
@@ -242,7 +254,7 @@ export default function ListTab({
     try {
       setListActionError("");
       const updatedList = await api.updateList(listId, editingListName);
-      setLists(lists.map((l) => (l.id === listId ? updatedList : l)));
+      setLists(lists.map((l) => (l.id === listId ? updatedList : l)).sort(sortLists));
       void trackEvent("list_updated", {
         trip_id: tripId,
         list_id: listId,
@@ -308,6 +320,100 @@ export default function ListTab({
 
   const resetDragState = () => {
     setDragState({ ideaId: null, overListId: null, overIdeaId: null, overSide: null });
+  };
+
+  const resetListDragState = () => {
+    setListDragState({ listId: null, overListId: null, overSide: null });
+  };
+
+  const getListDropSide = (event) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const midpointY = bounds.top + bounds.height / 2;
+    return event.clientY >= midpointY ? "bottom" : "top";
+  };
+
+  const handleListDragStart = (event, list) => {
+    if (!canManageLists || !list?.id) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("application/x-tripable-list", list.id);
+    event.dataTransfer.setData("text/plain", list.id);
+    setActionMenu(null);
+    setListDragState({ listId: list.id, overListId: null, overSide: null });
+  };
+
+  const handleListDragOver = (event, targetList) => {
+    if (!canManageLists || !listDragState.listId || listDragState.listId === targetList?.id) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const overSide = getListDropSide(event);
+    event.dataTransfer.dropEffect = "move";
+    setListDragState((current) => {
+      if (current.overListId === targetList.id && current.overSide === overSide) {
+        return current;
+      }
+      return {
+        ...current,
+        overListId: targetList.id,
+        overSide
+      };
+    });
+  };
+
+  const commitListDrop = async (draggedListId, targetListId, targetSide = null) => {
+    if (!canManageLists || !draggedListId || !targetListId || draggedListId === targetListId) {
+      resetListDragState();
+      return;
+    }
+
+    const previousLists = lists;
+    const draggedList = lists.find((list) => list.id === draggedListId);
+    if (!draggedList) {
+      resetListDragState();
+      return;
+    }
+
+    const nextLists = lists.filter((list) => list.id !== draggedListId);
+    const targetIndex = nextLists.findIndex((list) => list.id === targetListId);
+    if (targetIndex < 0) {
+      resetListDragState();
+      return;
+    }
+
+    const insertIndex = targetSide === "bottom" ? targetIndex + 1 : targetIndex;
+    nextLists.splice(insertIndex, 0, draggedList);
+    const reorderedLists = nextLists.map((list, index) => ({ ...list, order: index }));
+
+    setLists(reorderedLists);
+    resetListDragState();
+
+    try {
+      setListActionError("");
+      const updatedLists = await api.reorderLists(
+        tripId,
+        tab.id,
+        reorderedLists.map((list, index) => ({ id: list.id, order: index }))
+      );
+      setLists(updatedLists.length ? updatedLists : reorderedLists);
+      void trackEvent("lists_reordered_in_list_tab", {
+        trip_id: tripId,
+        tab_id: tab.id,
+        list_id: draggedListId
+      });
+    } catch (error) {
+      console.error("Failed to reorder lists:", error);
+      setLists(previousLists);
+      setListActionError(error?.message || "Failed to reorder lists");
+    }
+  };
+
+  const handleListDrop = async (event, targetList) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const draggedListId = listDragState.listId || event.dataTransfer.getData("application/x-tripable-list");
+    await commitListDrop(draggedListId, targetList.id, listDragState.overSide || getListDropSide(event));
   };
 
   const canReorderIdea = (idea) => {
@@ -604,17 +710,60 @@ export default function ListTab({
             )}
 
           {lists.map((list) => (
-            <div
-              key={list.id}
-              className={`relative overflow-hidden rounded-2xl border bg-white shadow-sm transition ${
-                dragState.ideaId && dragState.overListId === list.id && !dragState.overIdeaId
-                  ? "border-ocean ring-1 ring-ocean/25"
-                  : "border-slate-200"
-              }`}
-              onDragOver={(event) => handleIdeaDragOver(event, list.id, null)}
-              onDrop={(event) => void handleIdeaDrop(event, list.id, null)}
-            >
+            <div key={list.id} className="relative">
+              {listDragState.listId &&
+              listDragState.overListId === list.id &&
+              listDragState.listId !== list.id &&
+              listDragState.overSide === "top" ? (
+                <div
+                  className="pointer-events-none absolute -top-1 left-2 right-2 z-40 h-1 rounded-full bg-ocean shadow-sm"
+                />
+              ) : null}
+              <div
+                className={`relative overflow-hidden rounded-2xl border bg-white shadow-sm transition ${
+                  listDragState.listId && listDragState.overListId === list.id && listDragState.listId !== list.id
+                    ? "border-ocean ring-1 ring-ocean/25"
+                    : dragState.ideaId && dragState.overListId === list.id && !dragState.overIdeaId
+                    ? "border-ocean ring-1 ring-ocean/25"
+                    : "border-slate-200"
+                } ${listDragState.listId === list.id ? "opacity-65" : ""}`}
+                onDragOver={(event) => {
+                  if (listDragState.listId) {
+                    handleListDragOver(event, list);
+                  } else {
+                    handleIdeaDragOver(event, list.id, null);
+                  }
+                }}
+                onDrop={(event) => {
+                  if (listDragState.listId) {
+                    void handleListDrop(event, list);
+                  } else {
+                    void handleIdeaDrop(event, list.id, null);
+                  }
+                }}
+              >
               <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/90 px-3 py-2">
+                {canManageLists ? (
+                  <button
+                    type="button"
+                    draggable
+                    onDragStart={(event) => handleListDragStart(event, list)}
+                    onDragEnd={resetListDragState}
+                    onClick={(event) => event.stopPropagation()}
+                    className="inline-flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded-full text-slate-400 transition hover:bg-white hover:text-ink active:cursor-grabbing"
+                    aria-label="Drag to reorder list"
+                    title="Drag to reorder list"
+                  >
+                    <svg viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor" aria-hidden="true">
+                      <circle cx="7" cy="5" r="1.3" />
+                      <circle cx="13" cy="5" r="1.3" />
+                      <circle cx="7" cy="10" r="1.3" />
+                      <circle cx="13" cy="10" r="1.3" />
+                      <circle cx="7" cy="15" r="1.3" />
+                      <circle cx="13" cy="15" r="1.3" />
+                    </svg>
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => toggleCollapse(list.id)}
@@ -739,9 +888,19 @@ export default function ListTab({
                         key={idea.id}
                         draggable={canDragIdea}
                         onDragStart={(event) => handleIdeaDragStart(event, idea)}
-                        onDragEnd={resetDragState}
-                        onDragOver={(event) => handleIdeaDragOver(event, list.id, idea.id)}
-                        onDrop={(event) => void handleIdeaDrop(event, list.id, idea.id)}
+                          onDragEnd={resetDragState}
+                        onDragOver={(event) => {
+                          if (listDragState.listId) {
+                            return;
+                          }
+                          handleIdeaDragOver(event, list.id, idea.id);
+                        }}
+                        onDrop={(event) => {
+                          if (listDragState.listId) {
+                            return;
+                          }
+                          void handleIdeaDrop(event, list.id, idea.id);
+                        }}
                         className={`relative rounded-xl border bg-slate-50/75 p-3 transition ${
                           isDropTarget
                             ? "border-ocean/70 ring-1 ring-ocean/25"
@@ -871,6 +1030,15 @@ export default function ListTab({
                   </button>
 
                 </div>
+              ) : null}
+              </div>
+              {listDragState.listId &&
+              listDragState.overListId === list.id &&
+              listDragState.listId !== list.id &&
+              listDragState.overSide === "bottom" ? (
+                <div
+                  className="pointer-events-none absolute -bottom-1 left-2 right-2 z-40 h-1 rounded-full bg-ocean shadow-sm"
+                />
               ) : null}
             </div>
           ))}

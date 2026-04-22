@@ -811,7 +811,9 @@ function formatTrip(trip, memberCount = 0) {
     budgetTotal: trip.budgetTotal ?? "",
     expenses: trip.expenses || [],
     memberCount,
-    createdById: trip.createdById
+    createdById: trip.createdById,
+    userRole: trip.userRole || null,
+    canDelete: trip.canDelete
   });
 }
 
@@ -1131,7 +1133,6 @@ export const api = {
     const user = await getOrCreateUser();
     const userId = user.id;
 
-    // Get trips created by user
     const { data: createdTripsData, error: createdError } = await supabase
       .from("Trip")
       .select("*")
@@ -1140,7 +1141,6 @@ export const api = {
 
     if (createdError) throw createdError;
 
-    // Get trip IDs where user is a member
     const { data: membershipData, error: memberError } = await supabase
       .from("TripMember")
       .select("tripId")
@@ -1169,8 +1169,30 @@ export const api = {
     createdTrips.forEach(trip => tripMap.set(trip.id, trip));
     memberTripsData.forEach(trip => tripMap.set(trip.id, trip));
 
-    // Get member counts
+    const tripIds = Array.from(tripMap.keys());
+    let roleMap = new Map();
+
+    if (tripIds.length) {
+      const { data: roleRows, error: roleError } = await supabase
+        .from("UserTripRole")
+        .select("tripId, role")
+        .in("tripId", tripIds)
+        .eq("userId", userId);
+
+      if (roleError) throw roleError;
+      roleMap = new Map((roleRows || []).map((row) => [row.tripId, normalizeTripRole(row.role)]));
+    }
+
     const trips = Array.from(tripMap.values())
+      .map((trip) => {
+        const isOwner = trip.createdById === userId;
+        const userRole = isOwner ? "owner" : roleMap.get(trip.id) || "suggestor";
+        return {
+          ...trip,
+          userRole,
+          canDelete: isOwner
+        };
+      })
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     const tripsWithCounts = await Promise.all(
@@ -1323,7 +1345,9 @@ export const api = {
       lists: [],
       invitees: Array.isArray(payload.invitees) ? payload.invitees : [],
       budgetTotal: "",
-      expenses: []
+      expenses: [],
+      userRole: "owner",
+      canDelete: true
     };
   },
 
@@ -1617,7 +1641,12 @@ export const api = {
       }
     }
 
-    return this.getTrip(newTripId);
+    const duplicatedTrip = await this.getTrip(newTripId);
+    return {
+      ...duplicatedTrip,
+      userRole: "owner",
+      canDelete: true
+    };
   },
 
   async sendTripInvites(payload) {
@@ -1712,60 +1741,31 @@ export const api = {
   async deleteTrip(tripId) {
     const user = await getOrCreateUser();
 
-    const { data: trip } = await supabase
+    const { data: trip, error: tripError } = await supabase
       .from("Trip")
-      .select("createdById")
+      .select("id, createdById")
       .eq("id", tripId)
       .single();
+
+    if (tripError || !trip) {
+      throw new Error("Trip not found");
+    }
 
     if (trip.createdById !== user.id) {
       throw new Error("Only the trip owner can delete this trip");
     }
 
-    // Delete all related data in correct dependency order
-    // 1. Get all idea IDs for this trip, then delete their votes
-    const { data: ideas } = await supabase
-      .from("Idea")
-      .select("id")
-      .eq("tripId", tripId);
-
-    if (ideas && ideas.length > 0) {
-      const ideaIds = ideas.map(idea => idea.id);
-      await supabase.from("Vote").delete().in("ideaId", ideaIds);
-    }
-
-    // 2. Delete ideas
-    await supabase.from("Idea").delete().eq("tripId", tripId);
-
-    // 3. Get all itinerary day IDs, then delete their items
-    const { data: days } = await supabase
-      .from("ItineraryDay")
-      .select("id")
-      .eq("tripId", tripId);
-
-    if (days && days.length > 0) {
-      const dayIds = days.map(day => day.id);
-      await supabase.from("ItineraryItem").delete().in("itineraryDayId", dayIds);
-    }
-
-    // 4. Delete other trip data
-    await supabase.from("ItineraryDay").delete().eq("tripId", tripId);
-    await supabase.from("UserAvailability").delete().eq("tripId", tripId);
-    await supabase.from("SurveyDate").delete().eq("tripId", tripId);
-    await supabase.from("TripMember").delete().eq("tripId", tripId);
-    await supabase.from("UserTripRole").delete().eq("tripId", tripId);
-    await supabase.from("List").delete().eq("tripId", tripId);
-    await supabase.from("TripTabConfiguration").delete().eq("tripId", tripId);
-    await supabase.from("AvailabilityTabData").delete().eq("tripId", tripId);
-    await supabase.from("Transaction").delete().eq("tripId", tripId);
-
-    // 5. Finally delete the trip
-    const { error } = await supabase
+    const { data: deletedRows, error } = await supabase
       .from("Trip")
       .delete()
-      .eq("id", tripId);
+      .eq("id", tripId)
+      .eq("createdById", user.id)
+      .select("id");
 
     if (error) throw error;
+    if (!deletedRows?.length) {
+      throw new Error("Unable to delete this trip right now");
+    }
 
     removeTripMeta(tripId);
     clearIdeaMeta(tripId);
@@ -2465,6 +2465,57 @@ export const api = {
 
     if (error) throw error;
     return lists || [];
+  },
+
+  async reorderLists(tripId, tabId, updates) {
+    const user = await getOrCreateUser();
+    const role = await getTripRoleForUser(tripId, user.id);
+    if (role !== "owner" && role !== "editor") {
+      throw new Error("Only trip owners and editors can reorder lists");
+    }
+
+    const normalizedUpdates = Array.isArray(updates)
+      ? updates
+          .map((update) => ({
+            id: String(update?.id || "").trim(),
+            order: Number(update?.order)
+          }))
+          .filter((update) => update.id && Number.isFinite(update.order))
+      : [];
+
+    if (!normalizedUpdates.length) {
+      return [];
+    }
+
+    const listIds = normalizedUpdates.map((update) => update.id);
+    const { data: existingLists, error: fetchError } = await supabase
+      .from("List")
+      .select("id")
+      .eq("tripId", tripId)
+      .eq("tabId", tabId)
+      .in("id", listIds);
+
+    if (fetchError) throw fetchError;
+    if ((existingLists || []).length !== listIds.length) {
+      throw new Error("One or more lists could not be found");
+    }
+
+    const updatedLists = [];
+    for (const update of normalizedUpdates) {
+      const { data, error } = await supabase
+        .from("List")
+        .update({ order: update.order })
+        .eq("id", update.id)
+        .eq("tripId", tripId)
+        .eq("tabId", tabId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      updatedLists.push(data);
+    }
+
+    return updatedLists.sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
   },
 
   async createList(tripId, name, tabId) {
