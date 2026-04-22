@@ -38,31 +38,38 @@ function createApiResponse(res) {
 }
 
 function localApiPlugin() {
+  const routes = new Map([
+    ["/api/delete-account", "delete-account.js"],
+    ["/api/send-password-reset", "send-password-reset.js"]
+  ]);
+
   return {
     name: "tripable-local-api",
     configureServer(server) {
-      server.middlewares.use("/api/delete-account", async (req, res) => {
-        try {
-          const body = await readRequestBody(req);
-          const routePath = path.join(__dirname, "api", "delete-account.js");
-          const routeUrl = `${pathToFileURL(routePath).href}?t=${Date.now()}`;
-          const { default: handler } = await import(routeUrl);
-          await handler({
-            method: req.method,
-            headers: req.headers,
-            body
-          }, createApiResponse(res));
-        } catch (error) {
-          server.config.logger.error(error);
-          if (!res.writableEnded) {
-            res.statusCode = 500;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({
-              error: "Local API route failed.",
-              details: error?.message || "unknown_error"
-            }));
+      routes.forEach((routeFileName, routePathname) => {
+        server.middlewares.use(routePathname, async (req, res) => {
+          try {
+            const body = await readRequestBody(req);
+            const routePath = path.join(__dirname, "api", routeFileName);
+            const routeUrl = `${pathToFileURL(routePath).href}?t=${Date.now()}`;
+            const { default: handler } = await import(routeUrl);
+            await handler({
+              method: req.method,
+              headers: req.headers,
+              body
+            }, createApiResponse(res));
+          } catch (error) {
+            server.config.logger.error(error);
+            if (!res.writableEnded) {
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({
+                error: "Local API route failed.",
+                details: error?.message || "unknown_error"
+              }));
+            }
           }
-        }
+        });
       });
     }
   };
