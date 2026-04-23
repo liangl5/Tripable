@@ -231,7 +231,7 @@ export function AuthStatus() {
             </>
           ) : null}
           <div className={isBusy ? "pointer-events-none select-none" : ""}>
-            <TripableLogoLink className="mb-6" compact showTagline={false} />
+            <TripableLogoLink className="mb-6" size="sm" showTagline={false} />
             <div className="mb-8">
               <h2 className="mt-2 text-3xl font-semibold text-[#1e4840]">
                 {isResetPassword

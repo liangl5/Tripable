@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import tripableLogo from "../../imgs/duck.png";
+import TripableLogo from "./TripableLogo.jsx";
 
 function joinClasses(...classes) {
   return classes.filter(Boolean).join(" ");
@@ -7,34 +7,30 @@ function joinClasses(...classes) {
 
 export default function TripableLogoLink({
   className = "",
-  compact = false,
-  showTagline = true,
-  surface = false
+  size = "md",
+  showTagline = false,
+  surface = "light"
 }) {
   return (
     <Link
       to="/"
       aria-label="Go to the Tripable home page"
       className={joinClasses(
-        "group inline-flex items-center gap-3 transition",
-        surface && "rounded-full bg-white/90 px-4 py-2 shadow-card backdrop-blur-sm",
+        "group inline-flex flex-col items-start gap-1 transition",
         className
       )}
     >
-      <img
-        src={tripableLogo}
-        alt="Tripable logo"
-        className={joinClasses(
-          "w-auto object-contain transition-transform group-hover:scale-[1.03]",
-          compact ? "h-10" : "h-12"
-        )}
+      <TripableLogo
+        alt=""
+        surface={surface}
+        size={size}
+        className="transition-transform group-hover:scale-[1.03]"
       />
-      <div>
-        <p className={joinClasses("font-bold tracking-tight text-ink", compact ? "text-base" : "text-lg")}>
-          Tripable
+      {showTagline ? (
+        <p className={joinClasses("pl-1 text-xs font-medium", surface === "dark" ? "text-white/70" : "text-ink/60")}>
+          Plan together
         </p>
-        {showTagline ? <p className="text-xs text-ink/60">Plan together</p> : null}
-      </div>
+      ) : null}
     </Link>
   );
 }

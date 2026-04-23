@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useSession } from "../App";
+import TripableLogo from "./TripableLogo.jsx";
 
 export default function CTA() {
   const navigate = useNavigate();
@@ -16,7 +17,7 @@ export default function CTA() {
   return (
     <section className="px-5 py-10 sm:px-6 lg:px-8 lg:py-12">
       <div className="mx-auto max-w-6xl overflow-hidden rounded-[2.25rem] bg-[#1e4840] px-8 py-14 text-center shadow-card sm:px-12">
-        <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#baf59c]">Tripable</p>
+        <TripableLogo alt="Tripable" surface="dark" size="sm" className="mx-auto" />
         <h2 className="mx-auto mt-4 max-w-3xl text-3xl font-bold tracking-tight text-white sm:text-5xl">
           Make planning the beginning of the trip.
         </h2>
