@@ -33,6 +33,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
   const [loading, setLoading] = useState(true);
   const [userSubmittedAt, setUserSubmittedAt] = useState(null);
   const [editStartSelectedDates, setEditStartSelectedDates] = useState(new Set());
+  const [memberAvailabilityThreshold, setMemberAvailabilityThreshold] = useState(2);
   const canEditAvailability = true;
   const canEditCells = canEditAvailability && (!showHeatmap || isEditing);
   const canDeleteAnyComment = userRole === "owner";
@@ -231,11 +232,15 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
 
     return dates;
   }, [startMonth]);
+  const maxMemberAvailabilityThreshold = Math.max(2, allUsers.length || 2);
+  const effectiveMemberAvailabilityThreshold = Math.min(memberAvailabilityThreshold, maxMemberAvailabilityThreshold);
+  const memberAvailabilityThresholdOptions = useMemo(() => {
+    if (allUsers.length < 2) return [];
+    return Array.from({ length: allUsers.length - 1 }, (_, index) => index + 2);
+  }, [allUsers.length]);
   const visibleAvailabilityDates = useMemo(() => {
-    return displayedDates.filter((date) =>
-      Object.values(userAvailability).some((dates) => Array.isArray(dates) && dates.includes(date))
-    );
-  }, [displayedDates, userAvailability]);
+    return displayedDates.filter((date) => (availabilityData[date] || 0) >= effectiveMemberAvailabilityThreshold);
+  }, [availabilityData, displayedDates, effectiveMemberAvailabilityThreshold]);
   const dateShadeByColumn = useMemo(() => {
     const shadeMap = {};
     let shade = "light";
@@ -266,6 +271,10 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       ...commentAuthorNamesById
     };
   }, [allUsers, commentAuthorNamesById]);
+
+  useEffect(() => {
+    setMemberAvailabilityThreshold((current) => Math.min(current, maxMemberAvailabilityThreshold));
+  }, [maxMemberAvailabilityThreshold]);
 
   useEffect(() => {
     const stopDrag = () => {
@@ -850,6 +859,18 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
               >
                 →
               </button>
+              <div className="w-[18rem] shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                <div className="mb-1.5 flex items-center justify-between text-[11px] font-medium text-slate-600">
+                  <span>Fewer people available</span>
+                  <span>More people available</span>
+                </div>
+                <div
+                  className="h-1.5 w-full rounded-full border border-slate-200"
+                  style={{
+                    background: `linear-gradient(90deg, rgba(${availabilityGreenRgb}, ${availabilityMinAlpha}) 0%, rgba(${availabilityGreenRgb}, ${availabilityMaxAlpha}) 100%)`
+                  }}
+                />
+              </div>
               {canEditAvailability && (
                 <button
                   onClick={handleEdit}
@@ -863,21 +884,31 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
 
           <CalendarMonthLayout />
 
-          <div className="mx-auto mt-4 w-full max-w-xl rounded-lg border border-slate-200 bg-white px-3 py-2">
-            <div className="mb-1.5 flex items-center justify-between text-[11px] font-medium text-slate-600">
-              <span>Fewer people available</span>
-              <span>More people available</span>
-            </div>
-            <div
-              className="h-2 w-full rounded-full border border-slate-200"
-              style={{
-                background: `linear-gradient(90deg, rgba(${availabilityGreenRgb}, ${availabilityMinAlpha}) 0%, rgba(${availabilityGreenRgb}, ${availabilityMaxAlpha}) 100%)`
-              }}
-            />
-          </div>
-
           <div className="mt-8">
-            <h3 className="text-lg font-semibold text-ink mb-4">Member Availability</h3>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-lg font-semibold text-ink">Member Availability</h3>
+              {memberAvailabilityThresholdOptions.length ? (
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-600">
+                  <span>Show dates with</span>
+                  <select
+                    value={effectiveMemberAvailabilityThreshold}
+                    onChange={(event) => setMemberAvailabilityThreshold(Number(event.target.value))}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-ink outline-none transition focus:border-[#1e4840]"
+                  >
+                    {memberAvailabilityThresholdOptions.map((threshold) => (
+                      <option key={threshold} value={threshold}>
+                        {threshold}+ members
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+            </div>
+            {!visibleAvailabilityDates.length ? (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                No dates currently have {effectiveMemberAvailabilityThreshold}+ members available.
+              </div>
+            ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-max text-sm">
                 <thead className="border-b border-slate-300">
@@ -941,6 +972,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
                 </tbody>
               </table>
             </div>
+            )}
           </div>
 
           <div className="mt-8 rounded-2xl border border-slate-200 bg-[#F0F2F5] p-4">
@@ -995,7 +1027,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
             <h2 className="text-lg font-semibold text-ink">
               {isEditing ? "Select Your Available Dates" : "Your Availability"}
             </h2>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <button
                 onClick={() => setStartMonth(addMonths(startMonth, -1))}
                 className="hidden"

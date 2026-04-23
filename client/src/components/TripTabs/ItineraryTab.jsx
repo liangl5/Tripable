@@ -1070,6 +1070,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
         )}
         </div>
       )}
+      </div>
 
       {activityBankFilterOpen ? (
         <div
@@ -1187,7 +1188,6 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
           </button>
         </div>
       )}
-      </div>
     </div>
   );
 }
