@@ -145,9 +145,9 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
         if (nextDates.length > 0) {
           setDateRangeStart(nextDates[0]);
           setDateRangeEnd(nextDates[nextDates.length - 1]);
-        } else if (trip?.startDate && trip?.endDate) {
-          setDateRangeStart(String(trip.startDate).slice(0, 10));
-          setDateRangeEnd(String(trip.endDate).slice(0, 10));
+        } else {
+          setDateRangeStart("");
+          setDateRangeEnd("");
         }
         const hasDays = (daysData || []).length > 0;
         setIsEditMode(canManageItinerary && (!hasDays || nextItems.length === 0));
@@ -164,7 +164,7 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
     };
 
     loadItinerary();
-  }, [tab.id, tripId, canManageItinerary, trip?.startDate, trip?.endDate]);
+  }, [tab.id, tripId, canManageItinerary]);
 
   useEffect(() => {
     const loadLists = async () => {
@@ -781,7 +781,14 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
               <input
                 type="date"
                 value={dateRangeStart}
-                onChange={(event) => setDateRangeStart(event.target.value)}
+                onChange={(event) => {
+                  const nextStart = event.target.value;
+                  setDateRangeStart(nextStart);
+                  setDateRangeError("");
+                  if (dateRangeEnd && nextStart && dateRangeEnd < nextStart) {
+                    setDateRangeEnd(nextStart);
+                  }
+                }}
                 className="mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-ink"
               />
             </div>
@@ -790,7 +797,11 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
               <input
                 type="date"
                 value={dateRangeEnd}
-                onChange={(event) => setDateRangeEnd(event.target.value)}
+                min={dateRangeStart || undefined}
+                onChange={(event) => {
+                  setDateRangeEnd(event.target.value);
+                  setDateRangeError("");
+                }}
                 className="mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-ink"
               />
             </div>
