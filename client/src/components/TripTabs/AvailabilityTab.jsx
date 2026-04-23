@@ -5,6 +5,9 @@ import { isDeletedUserProfile } from "../../lib/userProfile.js";
 import { buildUserNamesById, fetchUserProfilesByIds } from "../../lib/userProfiles.js";
 
 export default function AvailabilityTab({ tab, tripId, userId, userRole, isActive, onReadyChange }) {
+  const availabilityGreenRgb = "34, 197, 94";
+  const availabilityMinAlpha = 0.16;
+  const availabilityMaxAlpha = 0.78;
   const [startMonth, setStartMonth] = useState(new Date());
   const [selectedDates, setSelectedDates] = useState(new Set());
   const [isDragging, setIsDragging] = useState(false);
@@ -15,7 +18,6 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
   const [userAvailability, setUserAvailability] = useState({});
   const [allUsers, setAllUsers] = useState([]);
   const [availableUsersByDate, setAvailableUsersByDate] = useState({});
-  const [showAvailabilityHints, setShowAvailabilityHints] = useState(false);
   const [hoverTooltip, setHoverTooltip] = useState({ visible: false, text: "", x: 0, y: 0 });
   const [comments, setComments] = useState([]);
   const [commentDraft, setCommentDraft] = useState("");
@@ -72,7 +74,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
 
   // Load member-scoped availability data (trip members only)
   useEffect(() => {
-    if (!showHeatmap && !showAvailabilityHints) return;
+    if (!showHeatmap) return;
 
     const loadAvailabilityData = async () => {
       try {
@@ -154,7 +156,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
     };
 
     loadAvailabilityData();
-  }, [showHeatmap, showAvailabilityHints, tab.id, tripId]);
+  }, [showHeatmap, tab.id, tripId]);
 
   useEffect(() => {
     const loadComments = async () => {
@@ -208,6 +210,14 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
 
   const month1 = startOfMonth(startMonth);
   const month2 = addMonths(startMonth, 1);
+  const month1Label = useMemo(
+    () => month1.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+    [month1]
+  );
+  const month2Label = useMemo(
+    () => month2.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+    [month2]
+  );
   const displayedDates = useMemo(() => {
     const dates = [];
     const cursor = new Date(startOfMonth(startMonth));
@@ -302,17 +312,24 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
 
   const showAvailabilityTooltip = (event, dateStr) => {
     if (!dateStr || isDragging || Boolean(dragMode)) return;
-    if (!showHeatmap && !showAvailabilityHints) return;
+    if (!showHeatmap) return;
 
     const names = availableUsersByDate[dateStr] || [];
-    const text = names.length > 0 ? `Available: ${names.join(", ")}` : "No one available";
+    if (!names.length) {
+      hideAvailabilityTooltip();
+      return;
+    }
+
+    const text = names.join(", ");
     const rect = event.currentTarget.getBoundingClientRect();
+    const tooltipOffset = 12;
+    const y = Math.min(window.innerHeight - 24, Math.max(24, rect.top + rect.height / 2));
 
     setHoverTooltip({
       visible: true,
       text,
-      x: rect.right + 10,
-      y: rect.top + rect.height / 2
+      x: rect.right + tooltipOffset,
+      y
     });
   };
 
@@ -321,6 +338,14 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       if (!current.visible) return current;
       return { ...current, visible: false };
     });
+  };
+
+  const handleAvailabilityCellMouseLeave = (event) => {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof HTMLElement && nextTarget.closest("[data-availability-date-cell='true']")) {
+      return;
+    }
+    hideAvailabilityTooltip();
   };
 
   const handleSave = async () => {
@@ -673,7 +698,15 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
     });
   };
 
-  const CalendarMonth = ({ month, isFirst }) => {
+  const handlePreviousMonth = () => {
+    setStartMonth(addMonths(startMonth, -1));
+  };
+
+  const handleNextMonth = () => {
+    setStartMonth(addMonths(startMonth, 1));
+  };
+
+  const CalendarMonth = ({ month }) => {
     const monthStart = startOfMonth(month);
     const monthEnd = addMonths(month, 1);
     const firstDayOfWeek = monthStart.getDay();
@@ -687,14 +720,8 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       days.push(new Date(monthStart.getFullYear(), monthStart.getMonth(), i));
     }
 
-    const monthLabel = month.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-
     return (
-      <div
-        className={`flex-1 select-none ${!isFirst && "border-l border-slate-200 pl-4"}`}
-        onMouseLeave={hideAvailabilityTooltip}
-      >
-        <h3 className="font-semibold text-ink mb-4">{monthLabel}</h3>
+      <div className="select-none" onMouseLeave={hideAvailabilityTooltip}>
         <div className="grid grid-cols-7 gap-2">
           {DAY_NAMES.map((day) => (
             <div key={day} className="text-center text-xs font-semibold text-slate-600 h-8">
@@ -702,21 +729,25 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
             </div>
           ))}
           {days.map((day, index) => {
-              const dateStr = day ? formatISO(day) : null;
-              const isSelected = dateStr && selectedDates.has(dateStr);
+            const dateStr = day ? formatISO(day) : null;
+            const isSelected = dateStr && selectedDates.has(dateStr);
             const count = dateStr ? availabilityData[dateStr] || 0 : 0;
+            const isInteractiveDate = Boolean(dateStr) && canEditCells;
 
             let bgColor = "bg-white";
             let inlineStyle;
             if (showHeatmap && count > 0) {
               const intensity = maxAvailabilityCount > 0 ? count / maxAvailabilityCount : 0;
-              const alpha = 0.16 + intensity * 0.62;
+              const alpha = availabilityMinAlpha + intensity * (availabilityMaxAlpha - availabilityMinAlpha);
               bgColor = "text-ink";
               inlineStyle = {
-                backgroundColor: `rgba(34, 197, 94, ${alpha})`
+                backgroundColor: `rgba(${availabilityGreenRgb}, ${alpha})`
               };
             } else if (isSelected && !showHeatmap) {
-              bgColor = "bg-ocean text-white";
+              bgColor = "border-emerald-600 text-ink";
+              inlineStyle = {
+                backgroundColor: `rgba(${availabilityGreenRgb}, ${availabilityMaxAlpha})`
+              };
             }
 
               return (
@@ -728,24 +759,23 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
                     setIsDragging(false);
                     setDragMode(null);
                   }}
-                  onPointerLeave={hideAvailabilityTooltip}
                   onPointerCancel={hideAvailabilityTooltip}
                   onMouseDown={hideAvailabilityTooltip}
                   onClick={(event) => {
                     event.preventDefault();
                   }}
                   onMouseEnter={(event) => showAvailabilityTooltip(event, dateStr)}
-                  onMouseLeave={hideAvailabilityTooltip}
-                  disabled={!dateStr || (showHeatmap && !isEditing)}
+                  onMouseLeave={handleAvailabilityCellMouseLeave}
+                  disabled={!dateStr}
+                  tabIndex={isInteractiveDate ? 0 : -1}
+                  aria-disabled={dateStr && !canEditCells ? "true" : undefined}
+                  data-availability-date-cell={dateStr ? "true" : undefined}
                   className={`relative h-8 rounded text-xs font-medium border border-slate-300 ${bgColor} ${
-                    canEditCells && dateStr ? "cursor-pointer hover:bg-slate-100 select-none" : "cursor-default"
+                    isInteractiveDate ? "cursor-pointer hover:bg-slate-100 select-none" : "cursor-default"
                   }`}
                   style={inlineStyle}
                 >
                   {day && day.getDate()}
-                  {!showHeatmap && showAvailabilityHints && dateStr && (availabilityData[dateStr] || 0) > 0 ? (
-                    <span className="pointer-events-none absolute bottom-0 left-1 right-1 h-0.5 rounded-full bg-emerald-500" />
-                  ) : null}
                 </button>
               );
           })}
@@ -753,6 +783,39 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       </div>
     );
   };
+
+  const CalendarMonthLayout = () => (
+    <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-4" onMouseLeave={hideAvailabilityTooltip}>
+      <button
+        onClick={handlePreviousMonth}
+        className="mt-0.5 h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+        aria-label="Previous month"
+      >
+        <svg viewBox="0 0 20 20" fill="none" className="mx-auto h-4 w-4" aria-hidden="true">
+          <path d="M11.5 5.5 7 10l4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      </button>
+      <div className="grid min-w-0 grid-cols-2 gap-6">
+        <div className="min-w-0">
+          <h3 className="mb-4 text-center font-semibold text-ink">{month1Label}</h3>
+          <CalendarMonth month={month1} />
+        </div>
+        <div className="min-w-0 border-l border-slate-200 pl-4">
+          <h3 className="mb-4 text-center font-semibold text-ink">{month2Label}</h3>
+          <CalendarMonth month={month2} />
+        </div>
+      </div>
+      <button
+        onClick={handleNextMonth}
+        className="mt-0.5 h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+        aria-label="Next month"
+      >
+        <svg viewBox="0 0 20 20" fill="none" className="mx-auto h-4 w-4" aria-hidden="true">
+          <path d="M8.5 5.5 13 10l-4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
+  );
 
   if (loading) {
     return <div className="p-6" />;
@@ -762,7 +825,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
     <div className="p-6">
       {hoverTooltip.visible ? (
         <div
-          className="pointer-events-none fixed z-50 -translate-y-1/2 rounded-md bg-slate-800 px-2 py-1 text-xs font-medium text-white shadow-lg"
+          className="pointer-events-none fixed z-50 max-w-[18rem] -translate-y-1/2 rounded-md bg-slate-800 px-2 py-1 text-xs font-medium text-white shadow-lg"
           style={{ left: hoverTooltip.x, top: hoverTooltip.y }}
         >
           {hoverTooltip.text}
@@ -775,14 +838,14 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setStartMonth(addMonths(startMonth, -1))}
-                className="h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+                className="hidden"
                 aria-label="Previous month"
               >
                 ←
               </button>
               <button
                 onClick={() => setStartMonth(addMonths(startMonth, 1))}
-                className="h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+                className="hidden"
                 aria-label="Next month"
               >
                 →
@@ -798,23 +861,19 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
             </div>
           </div>
 
-          <div className="mb-6 rounded-lg border border-slate-200 bg-white p-3">
-            <div className="mb-2 flex items-center justify-between text-xs font-medium text-slate-600">
+          <CalendarMonthLayout />
+
+          <div className="mx-auto mt-4 w-full max-w-xl rounded-lg border border-slate-200 bg-white px-3 py-2">
+            <div className="mb-1.5 flex items-center justify-between text-[11px] font-medium text-slate-600">
               <span>Fewer people available</span>
               <span>More people available</span>
             </div>
             <div
-              className="h-3 w-full rounded-full border border-slate-200"
-              style={{ background: "linear-gradient(90deg, rgba(34,197,94,0.16) 0%, rgba(34,197,94,0.78) 100%)" }}
+              className="h-2 w-full rounded-full border border-slate-200"
+              style={{
+                background: `linear-gradient(90deg, rgba(${availabilityGreenRgb}, ${availabilityMinAlpha}) 0%, rgba(${availabilityGreenRgb}, ${availabilityMaxAlpha}) 100%)`
+              }}
             />
-            <div className="mt-2 text-xs text-slate-500">
-              Continuous scale (max overlap: {maxAvailabilityCount || 0})
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-6" onMouseLeave={hideAvailabilityTooltip}>
-            <CalendarMonth month={month1} isFirst={true} />
-            <CalendarMonth month={month2} isFirst={false} />
           </div>
 
           <div className="mt-8">
@@ -937,33 +996,16 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
               {isEditing ? "Select Your Available Dates" : "Your Availability"}
             </h2>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-600">View others</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={showAvailabilityHints}
-                aria-label="View others"
-                onClick={() => setShowAvailabilityHints((current) => !current)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
-                  showAvailabilityHints ? "bg-ocean" : "bg-slate-300"
-                }`}
-              >
-                <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
-                    showAvailabilityHints ? "translate-x-5" : "translate-x-1"
-                  }`}
-                />
-              </button>
               <button
                 onClick={() => setStartMonth(addMonths(startMonth, -1))}
-                className="h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+                className="hidden"
                 aria-label="Previous month"
               >
                 ←
               </button>
               <button
                 onClick={() => setStartMonth(addMonths(startMonth, 1))}
-                className="h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+                className="hidden"
                 aria-label="Next month"
               >
                 →
@@ -971,16 +1013,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
             </div>
           </div>
 
-          {showAvailabilityHints ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-800">
-              Hover a date to see who is available.
-            </div>
-          ) : null}
-
-          <div className="grid grid-cols-2 gap-6" onMouseLeave={hideAvailabilityTooltip}>
-            <CalendarMonth month={month1} isFirst={true} />
-            <CalendarMonth month={month2} isFirst={false} />
-          </div>
+          <CalendarMonthLayout />
 
           {canEditAvailability && (!showHeatmap || isEditing) && (
             <div className="flex gap-3 mt-4">

@@ -3,6 +3,7 @@ import { supabase } from "../../lib/supabase";
 import { clearGeneratedItinerary, slugify } from "../../lib/tripPlanning";
 import ThreadedComments from "../ThreadedComments.jsx";
 import ConfirmModal from "../ConfirmModal.jsx";
+import DateFieldPicker from "../DateFieldPicker.jsx";
 
 function ThumbUpIcon({ className }) {
   return (
@@ -776,35 +777,26 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
         ) : null}
         {isEditMode && canManageItinerary && (
           <div className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div className="flex flex-col">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Start date</label>
-              <input
-                type="date"
-                value={dateRangeStart}
-                onChange={(event) => {
-                  const nextStart = event.target.value;
-                  setDateRangeStart(nextStart);
-                  setDateRangeError("");
-                  if (dateRangeEnd && nextStart && dateRangeEnd < nextStart) {
-                    setDateRangeEnd(nextStart);
-                  }
-                }}
-                className="mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-ink"
-              />
-            </div>
-            <div className="flex flex-col">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">End date</label>
-              <input
-                type="date"
-                value={dateRangeEnd}
-                min={dateRangeStart || undefined}
-                onChange={(event) => {
-                  setDateRangeEnd(event.target.value);
-                  setDateRangeError("");
-                }}
-                className="mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-ink"
-              />
-            </div>
+            <DateFieldPicker
+              label="Start date"
+              value={dateRangeStart}
+              onChange={(nextStart) => {
+                setDateRangeStart(nextStart);
+                setDateRangeError("");
+                if (dateRangeEnd && nextStart && dateRangeEnd < nextStart) {
+                  setDateRangeEnd(nextStart);
+                }
+              }}
+            />
+            <DateFieldPicker
+              label="End date"
+              value={dateRangeEnd}
+              minDate={dateRangeStart || undefined}
+              onChange={(nextEnd) => {
+                setDateRangeEnd(nextEnd);
+                setDateRangeError("");
+              }}
+            />
             <button
               onClick={handleApplyDateRange}
               className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
