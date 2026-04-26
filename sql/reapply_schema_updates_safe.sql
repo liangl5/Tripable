@@ -246,6 +246,13 @@ FOR UPDATE USING (auth.uid()::text = "userId")
 WITH CHECK (auth.uid()::text = "userId");
 
 -- ============================================================
+-- Add editable itinerary day notes
+-- Source: sql/add_itinerary_day_notes.sql
+-- ============================================================
+ALTER TABLE "ItineraryDay"
+  ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT '';
+
+-- ============================================================
 -- Add comments for transactions, ideas, itinerary days
 -- Source: sql/add_trip_feature_comments.sql
 -- ============================================================

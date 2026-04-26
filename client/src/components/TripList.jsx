@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useUserProfile } from "../App";
-import { formatDateRange } from "../lib/timeFormat.js";
+import { formatDateRange, formatRoundedRelativeTime } from "../lib/timeFormat.js";
 import {
   DEFAULT_TRIP_BACKGROUND_IMAGE,
   TRIP_BACKGROUND_OPTIONS,
@@ -31,6 +31,7 @@ const getInitials = (name) => {
 export default function TripList({
   trips,
   selectionMode = false,
+  selectionAnchorRef = null,
   openOnCardClick = false,
   onCardClick = null,
   starredTripIds = new Set(),
@@ -68,6 +69,7 @@ export default function TripList({
   const [shareMenuOpenId, setShareMenuOpenId] = useState(null);
   const [shareMenuPinnedId, setShareMenuPinnedId] = useState(null);
   const [lastShareTrip, setLastShareTrip] = useState(null);
+  const [selectionPopoverPosition, setSelectionPopoverPosition] = useState(null);
   const menuRef = useRef(null);
   const toastTsRef = useRef(0);
 
@@ -142,6 +144,51 @@ export default function TripList({
     setSelectedTripIds(new Set());
     return undefined;
   }, [selectionMode]);
+
+  useEffect(() => {
+    if (!selectionMode || !selectionAnchorRef?.current) {
+      setSelectionPopoverPosition(null);
+      return undefined;
+    }
+
+    const updateSelectionPopoverPosition = () => {
+      const anchor = selectionAnchorRef.current;
+      if (!anchor) {
+        setSelectionPopoverPosition(null);
+        return;
+      }
+
+      const rect = anchor.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const viewportPadding = 16;
+      const gap = 12;
+      const estimatedWidth = viewportWidth >= 768 ? 440 : Math.min(viewportWidth - viewportPadding * 2, 320);
+      const hasRoomOnLeft = rect.left - gap - estimatedWidth >= viewportPadding;
+
+      if (hasRoomOnLeft) {
+        setSelectionPopoverPosition({
+          placement: "left",
+          top: rect.top + rect.height / 2,
+          left: rect.left - gap
+        });
+        return;
+      }
+
+      setSelectionPopoverPosition({
+        placement: "below",
+        top: rect.bottom + gap,
+        left: Math.min(rect.right, viewportWidth - viewportPadding)
+      });
+    };
+
+    updateSelectionPopoverPosition();
+    window.addEventListener("resize", updateSelectionPopoverPosition);
+    window.addEventListener("scroll", updateSelectionPopoverPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateSelectionPopoverPosition);
+      window.removeEventListener("scroll", updateSelectionPopoverPosition, true);
+    };
+  }, [selectionMode, selectionAnchorRef]);
 
   const handleRenameSave = async () => {
     if (!renameTrip?.id) return;
@@ -379,35 +426,47 @@ export default function TripList({
 
   return (
     <>
-      {selectionMode ? (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-[#1e4840]">
-          <span>{selectedTripIds.size} selected</span>
-          <button
-            type="button"
-            onClick={toggleSelectAll}
-            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-[#1e4840] hover:border-[#1e4840] hover:text-[#1e4840]"
-          >
-            {selectedTripIds.size === visibleTrips.length ? "Deselect all" : "Select all"}
-          </button>
-          <button
-            type="button"
-            onClick={handleBulkCopy}
-            disabled={!selectedTripIds.size || duplicateLoading}
-            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-[#1e4840] hover:border-[#1e4840] hover:text-[#1e4840] disabled:opacity-60"
-          >
-            {duplicateLoading ? "Making copy..." : "Make copy"}
-          </button>
-          <button
-            type="button"
-            onClick={handleBulkDelete}
-            disabled={!selectedOwnedTripCount}
-            className="rounded-full border border-[#baf59c] bg-[#baf59c] px-4 py-2 text-xs font-semibold text-[#1e4840] hover:bg-[#a7ee84] disabled:opacity-60"
-          >
-            {selectedOwnedTripCount ? "Delete selected" : "No owned trips selected"}
-          </button>
+      {selectionMode && selectionPopoverPosition ? (
+        <div
+          className={`fixed z-[85] rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-card backdrop-blur-sm ${
+            selectionPopoverPosition.placement === "left"
+              ? "-translate-x-full -translate-y-1/2"
+              : "-translate-x-full"
+          }`}
+          style={{
+            top: selectionPopoverPosition.top,
+            left: selectionPopoverPosition.left
+          }}
+        >
+          <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-[#1e4840]">
+            <span className="mr-1">{selectedTripIds.size} selected</span>
+            <button
+              type="button"
+              onClick={toggleSelectAll}
+              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-[#1e4840] hover:border-[#1e4840] hover:text-[#1e4840]"
+            >
+              {selectedTripIds.size === visibleTrips.length ? "Deselect all" : "Select all"}
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkCopy}
+              disabled={!selectedTripIds.size || duplicateLoading}
+              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-[#1e4840] hover:border-[#1e4840] hover:text-[#1e4840] disabled:opacity-60"
+            >
+              {duplicateLoading ? "Making copy..." : "Make copy"}
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkDelete}
+              disabled={!selectedOwnedTripCount}
+              className="rounded-full border border-[#baf59c] bg-[#baf59c] px-4 py-2 text-xs font-semibold text-[#1e4840] hover:bg-[#a7ee84] disabled:opacity-60"
+            >
+              {selectedOwnedTripCount ? "Delete selected" : "No owned trips selected"}
+            </button>
+          </div>
         </div>
       ) : null}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {visibleTrips.map((trip) => (
           (() => {
             const isStarred = starredTripIds?.has(trip.id);
@@ -720,7 +779,7 @@ export default function TripList({
               <div className="flex items-center justify-between gap-3">
                 <div className="text-sm font-semibold text-[#1e4840]/75">
                   {trip.createdAt || trip.created_at
-                    ? new Date(trip.createdAt || trip.created_at).toLocaleDateString()
+                    ? `Created ${formatRoundedRelativeTime(trip.createdAt || trip.created_at)}`
                     : ""}
                 </div>
                 <div className="relative flex items-center">

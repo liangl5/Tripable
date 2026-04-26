@@ -37,6 +37,7 @@ export default function HomePage() {
   const [localSession, setLocalSession] = useState(null);
   const [tripNavigationLoading, setTripNavigationLoading] = useState(false);
   const [navigationProgress, setNavigationProgress] = useState(0);
+  const selectionButtonRef = useRef(null);
 
   const effectiveSession = session || localSession;
   const currentUserId = effectiveSession?.user?.id;
@@ -546,6 +547,7 @@ export default function HomePage() {
                     : "All trips"}
             </h2>
             <button
+              ref={selectionButtonRef}
               type="button"
               onClick={() => setSelectionMode((current) => !current)}
               className="rounded-full border border-transparent bg-white px-5 py-3 text-sm font-semibold text-[#1e4840] hover:border-[#1e4840] hover:text-[#1e4840] disabled:opacity-60"
@@ -586,6 +588,7 @@ export default function HomePage() {
             <TripList
               trips={filteredTrips}
               selectionMode={selectionMode}
+              selectionAnchorRef={selectionButtonRef}
               onCardClick={handleTripCardClick}
               starredTripIds={starredTripIds}
               onToggleStar={starsSupported ? toggleTripStar : null}

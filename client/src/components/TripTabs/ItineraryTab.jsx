@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { clearGeneratedItinerary, slugify } from "../../lib/tripPlanning";
-import ThreadedComments from "../ThreadedComments.jsx";
 import ConfirmModal from "../ConfirmModal.jsx";
 import DateFieldPicker from "../DateFieldPicker.jsx";
 
@@ -63,6 +62,9 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
   const [unsavedChanges, setUnsavedChanges] = useState(false);
   const [loading, setLoading] = useState(true);
   const [expandedDescriptions, setExpandedDescriptions] = useState({});
+  const [dayNoteDrafts, setDayNoteDrafts] = useState({});
+  const [dayNotesSavingId, setDayNotesSavingId] = useState("");
+  const [dayNotesErrorById, setDayNotesErrorById] = useState({});
   const [confirmDateRangeShrinkOpen, setConfirmDateRangeShrinkOpen] = useState(false);
   const [pendingDeletedDayIds, setPendingDeletedDayIds] = useState([]);
   const [pendingCreatedDayIds, setPendingCreatedDayIds] = useState([]);
@@ -105,7 +107,14 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
           .eq("tabId", tab.id)
           .order("dayNumber", { ascending: true });
 
-        setDays(daysData || []);
+        const loadedDays = daysData || [];
+        setDays(loadedDays);
+        setDayNoteDrafts(
+          loadedDays.reduce((acc, day) => {
+            acc[day.id] = day.notes || "";
+            return acc;
+          }, {})
+        );
 
         // Load itinerary items for all days
         const dayIds = (daysData || []).map((d) => d.id);
@@ -248,6 +257,12 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
     setItineraryItems((snapshot.itineraryItems || []).map((item) => ({ ...item })));
     setPendingDeletedDayIds([...(snapshot.pendingDeletedDayIds || [])]);
     setPendingCreatedDayIds([...(snapshot.pendingCreatedDayIds || [])]);
+    setDayNoteDrafts(
+      (snapshot.days || []).reduce((acc, day) => {
+        acc[day.id] = day.notes || "";
+        return acc;
+      }, {})
+    );
     setDateRangeStart(snapshot.dateRangeStart || "");
     setDateRangeEnd(snapshot.dateRangeEnd || "");
     setUnsavedChanges(true);
@@ -319,10 +334,12 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
         tripId,
         tabId: tab.id,
         dayNumber: nextDayNumber,
-        date: nextDate
+        date: nextDate,
+        notes: ""
       };
 
       setDays([...days, localDay].sort((a, b) => a.dayNumber - b.dayNumber));
+      setDayNoteDrafts((current) => ({ ...current, [localDay.id]: "" }));
       setPendingCreatedDayIds((current) => [...current, localDay.id]);
       if (nextDateKey) {
         if (!dateRangeStart || nextDateKey < dateRangeStart) setDateRangeStart(nextDateKey);
@@ -338,6 +355,11 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
     if (!canManageItinerary || !dayId) return;
     pushUndoSnapshot();
     setDays(days.filter((d) => d.id !== dayId));
+    setDayNoteDrafts((current) => {
+      const next = { ...current };
+      delete next[dayId];
+      return next;
+    });
     setItineraryItems(itineraryItems.filter((item) => item.itineraryDayId !== dayId));
     if (pendingCreatedDayIds.includes(dayId)) {
       setPendingCreatedDayIds((current) => current.filter((id) => id !== dayId));
@@ -472,7 +494,8 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
           tripId,
           tabId: tab.id,
           dayNumber: day.dayNumber,
-          date: day.date || null
+          date: day.date || null,
+          notes: day.notes || ""
         }));
         await supabase.from("ItineraryDay").insert(createdDayRows);
       }
@@ -558,7 +581,8 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
           tripId,
           tabId: tab.id,
           dayNumber: sortedDays.length + index + 1,
-          date: toDateStorageValue(dateStr)
+          date: toDateStorageValue(dateStr),
+          notes: ""
         }));
         const { data, error } = await supabase.from("ItineraryDay").insert(inserts).select();
         if (error) throw error;
@@ -568,6 +592,16 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
       const nextItems = itineraryItems.filter((item) => !extraDayIds.has(item.itineraryDayId));
       setItineraryItems(nextItems);
       setDays([...nextDays, ...insertedDays].sort((a, b) => a.dayNumber - b.dayNumber));
+      setDayNoteDrafts((current) => {
+        const next = { ...current };
+        insertedDays.forEach((day) => {
+          next[day.id] = day.notes || "";
+        });
+        extraDays.forEach((day) => {
+          delete next[day.id];
+        });
+        return next;
+      });
       setUnsavedChanges(true);
     } catch (error) {
       console.error("Failed to apply date range:", error);
@@ -710,10 +744,42 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
     const idea = ideas.find((candidate) => candidate.id === ideaId);
     return getVoteSummary(idea?.votes);
   };
-  const memberNamesById = (tripMembers || []).reduce((acc, member) => {
-    acc[member.id] = member.name || member.email || "Traveler";
-    return acc;
-  }, {});
+
+  const updateDayNoteDraft = (dayId, value) => {
+    setDayNoteDrafts((current) => ({ ...current, [dayId]: value }));
+    setDayNotesErrorById((current) => ({ ...current, [dayId]: "" }));
+  };
+
+  const handleCancelDayNote = (day) => {
+    if (!day?.id) return;
+    setDayNoteDrafts((current) => ({ ...current, [day.id]: day.notes || "" }));
+    setDayNotesErrorById((current) => ({ ...current, [day.id]: "" }));
+  };
+
+  const handleSaveDayNote = async (day) => {
+    if (!day?.id || dayNotesSavingId) return;
+    const notes = String(dayNoteDrafts[day.id] || "").trim();
+
+    setDayNotesSavingId(day.id);
+    setDayNotesErrorById((current) => ({ ...current, [day.id]: "" }));
+
+    try {
+      if (pendingCreatedDayIds.includes(day.id)) {
+        setDays((current) => current.map((candidate) => (candidate.id === day.id ? { ...candidate, notes } : candidate)));
+        setUnsavedChanges(true);
+        return;
+      }
+
+      const { error } = await supabase.from("ItineraryDay").update({ notes }).eq("id", day.id);
+      if (error) throw error;
+      setDays((current) => current.map((candidate) => (candidate.id === day.id ? { ...candidate, notes } : candidate)));
+    } catch (error) {
+      console.error("Failed to save itinerary day notes:", error);
+      setDayNotesErrorById((current) => ({ ...current, [day.id]: "Could not save notes." }));
+    } finally {
+      setDayNotesSavingId("");
+    }
+  };
 
   if (loading) {
     return <div className="p-6" />;
@@ -937,15 +1003,50 @@ export default function ItineraryTab({ tab, tripId, userId, userRole, tripMember
                       </div>
                     </div>
                   ))}
-                <ThreadedComments
-                  tableName="ItineraryDayComment"
-                  resourceColumn="itineraryDayId"
-                  resourceId={day.id}
-                  userId={userId}
-                  userNamesById={memberNamesById}
-                  canDeleteAnyComment={userRole === "owner"}
-                  title="Day Comments"
-                />
+                <div className="mt-3 rounded-lg border border-slate-200 bg-white p-2 text-xs">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <h4 className="font-semibold text-ink">Notes</h4>
+                    {dayNotesSavingId === day.id ? (
+                      <span className="text-[11px] font-semibold text-slate-400">Saving...</span>
+                    ) : null}
+                  </div>
+
+                  {canManageItinerary && isEditMode ? (
+                    <>
+                      <textarea
+                        value={dayNoteDrafts[day.id] ?? day.notes ?? ""}
+                        onChange={(event) => updateDayNoteDraft(day.id, event.target.value)}
+                        placeholder="Add notes for this day..."
+                        className="min-h-[72px] w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs leading-5 text-slate-600 outline-none transition placeholder:text-slate-400 focus:border-ocean focus:bg-white"
+                      />
+                      {dayNotesErrorById[day.id] ? (
+                        <p className="mt-2 text-xs font-semibold text-coral">{dayNotesErrorById[day.id]}</p>
+                      ) : null}
+                      <div className="mt-2 flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleCancelDayNote(day)}
+                          disabled={dayNotesSavingId === day.id}
+                          className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-300 disabled:opacity-60"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleSaveDayNote(day)}
+                          disabled={dayNotesSavingId === day.id || String(dayNoteDrafts[day.id] ?? day.notes ?? "").trim() === String(day.notes || "").trim()}
+                          className="rounded-full bg-ocean px-3 py-1 text-xs font-semibold text-white transition hover:bg-[#152f2a] disabled:opacity-60"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </>
+                  ) : day.notes ? (
+                    <p className="whitespace-pre-wrap leading-5 text-slate-600">{day.notes}</p>
+                  ) : (
+                    <p className="text-slate-500">No notes yet.</p>
+                  )}
+                </div>
               </div>
             </div>
           ))}

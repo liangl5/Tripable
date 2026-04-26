@@ -644,6 +644,10 @@ export default function ListTab({
     acc[member.id] = member.name || member.email || "Traveler";
     return acc;
   }, {});
+  const memberAvatarColorsById = (tripMembers || []).reduce((acc, member) => {
+    if (member.avatarColor) acc[member.id] = member.avatarColor;
+    return acc;
+  }, {});
   const panelHeightStyle = panelHeight ? { height: `${panelHeight}px`, maxHeight: `${panelHeight}px` } : undefined;
 
   return (
@@ -1013,6 +1017,7 @@ export default function ListTab({
                               resourceId={idea.id}
                               userId={userId}
                               userNamesById={memberNamesById}
+                              userAvatarColorsById={memberAvatarColorsById}
                               canDeleteAnyComment={userRole === "owner"}
                               title="Comments"
                             />

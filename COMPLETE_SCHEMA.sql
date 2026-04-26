@@ -168,6 +168,7 @@ CREATE TABLE "ItineraryDay" (
   "tabId" TEXT,
   "dayNumber" INTEGER NOT NULL,
   date TIMESTAMPTZ,
+  notes TEXT DEFAULT '',
   "isDraft" BOOLEAN DEFAULT false,
   UNIQUE("tripId", "dayNumber")
 );

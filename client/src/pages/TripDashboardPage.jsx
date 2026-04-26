@@ -251,7 +251,7 @@ export default function TripDashboardPage() {
 
         const { data: membersData } = await supabase
           .from("User")
-          .select("id, name, email")
+          .select("id, name, email, avatarColor")
           .in("id", memberIds);
 
         setTripMembers(membersData || []);
@@ -597,7 +597,7 @@ export default function TripDashboardPage() {
       const memberIds = [trip.createdById, ...(memberRelations?.map((m) => m.userId) || [])];
       const { data: membersData } = await supabase
         .from("User")
-        .select("id, name, email")
+        .select("id, name, email, avatarColor")
         .in("id", memberIds);
       setTripMembers(membersData || []);
 

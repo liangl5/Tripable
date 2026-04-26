@@ -1,8 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
+import SentimentSatisfiedAltIcon from "@mui/icons-material/SentimentSatisfiedAlt";
 import { supabase } from "../../lib/supabase";
+import { getAvatarColor } from "../../lib/avatarColors.js";
 import { DAY_NAMES, addMonths, formatISO, monthKey, startOfMonth } from "../../lib/calendarHelpers.js";
+import { formatRelativeTime } from "../../lib/timeFormat.js";
 import { isDeletedUserProfile } from "../../lib/userProfile.js";
-import { buildUserNamesById, fetchUserProfilesByIds } from "../../lib/userProfiles.js";
+import { buildUserAvatarColorsById, buildUserNamesById, fetchUserProfilesByIds } from "../../lib/userProfiles.js";
+
+function hasCommentBeenEdited(comment) {
+  if (!comment?.updatedAt || !comment?.createdAt) return false;
+  const createdAt = new Date(comment.createdAt).getTime();
+  const updatedAt = new Date(comment.updatedAt).getTime();
+  if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt)) return false;
+  return updatedAt - createdAt > 5000;
+}
+
+const COMMENT_EMOJIS = ["😀", "😂", "😍", "🥳", "😎", "😊", "😭", "😅", "👏", "🙌", "👍", "👀", "❤️", "🔥", "✨", "🎉"];
 
 export default function AvailabilityTab({ tab, tripId, userId, userRole, isActive, onReadyChange }) {
   const availabilityGreenRgb = "34, 197, 94";
@@ -21,15 +34,20 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
   const [hoverTooltip, setHoverTooltip] = useState({ visible: false, text: "", x: 0, y: 0 });
   const [comments, setComments] = useState([]);
   const [commentDraft, setCommentDraft] = useState("");
+  const [commentComposerOpen, setCommentComposerOpen] = useState(false);
+  const [emojiMenuOpen, setEmojiMenuOpen] = useState(false);
   const [replyingToId, setReplyingToId] = useState(null);
   const [replyDraft, setReplyDraft] = useState("");
+  const [replyEmojiMenuCommentId, setReplyEmojiMenuCommentId] = useState(null);
   const [editingCommentId, setEditingCommentId] = useState(null);
   const [editDraft, setEditDraft] = useState("");
+  const [editEmojiMenuCommentId, setEditEmojiMenuCommentId] = useState(null);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentsSaving, setCommentsSaving] = useState(false);
   const [commentsError, setCommentsError] = useState("");
   const [commentsTableReady, setCommentsTableReady] = useState(true);
   const [commentAuthorNamesById, setCommentAuthorNamesById] = useState({});
+  const [commentAuthorAvatarColorsById, setCommentAuthorAvatarColorsById] = useState({});
   const [loading, setLoading] = useState(true);
   const [userSubmittedAt, setUserSubmittedAt] = useState(null);
   const [editStartSelectedDates, setEditStartSelectedDates] = useState(new Set());
@@ -188,7 +206,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
           new Set(
             (data || [])
               .map((comment) => comment.userId)
-              .filter((uid) => uid && !commentAuthorNamesById[uid])
+              .filter((uid) => uid && (!commentAuthorNamesById[uid] || !commentAuthorAvatarColorsById[uid]))
           )
         );
         if (missingAuthorIds.length > 0) {
@@ -196,6 +214,10 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
           setCommentAuthorNamesById((current) => ({
             ...current,
             ...buildUserNamesById(profiles)
+          }));
+          setCommentAuthorAvatarColorsById((current) => ({
+            ...current,
+            ...buildUserAvatarColorsById(profiles)
           }));
         }
       } catch (error) {
@@ -207,7 +229,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
     };
 
     loadComments();
-  }, [commentAuthorNamesById, showHeatmap, tab.id]);
+  }, [commentAuthorAvatarColorsById, commentAuthorNamesById, showHeatmap, tab.id]);
 
   const month1 = startOfMonth(startMonth);
   const month2 = addMonths(startMonth, 1);
@@ -271,6 +293,12 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       ...commentAuthorNamesById
     };
   }, [allUsers, commentAuthorNamesById]);
+  const userAvatarColorsById = useMemo(() => {
+    return {
+      ...buildUserAvatarColorsById(allUsers),
+      ...commentAuthorAvatarColorsById
+    };
+  }, [allUsers, commentAuthorAvatarColorsById]);
 
   useEffect(() => {
     setMemberAvailabilityThreshold((current) => Math.min(current, maxMemberAvailabilityThreshold));
@@ -422,12 +450,15 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       userId,
       body,
       parentCommentId: null,
-      createdAt: now
+      createdAt: now,
+      updatedAt: null
     };
 
     try {
       setComments((current) => [optimistic, ...current]);
       setCommentDraft("");
+      setCommentComposerOpen(false);
+      setEmojiMenuOpen(false);
 
       const { error } = await supabase.from("AvailabilityTabComment").insert([
         {
@@ -436,7 +467,8 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
           userId,
           body,
           parentCommentId: null,
-          createdAt: now
+          createdAt: now,
+          updatedAt: null
         }
       ]);
 
@@ -446,6 +478,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       setComments((current) => current.filter((comment) => comment.id !== optimistic.id));
       setCommentsError("Could not post comment.");
       setCommentDraft(body);
+      setCommentComposerOpen(true);
     } finally {
       setCommentsSaving(false);
     }
@@ -464,13 +497,15 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       userId,
       body,
       parentCommentId,
-      createdAt: now
+      createdAt: now,
+      updatedAt: null
     };
 
     try {
       setComments((current) => [...current, optimistic]);
       setReplyDraft("");
       setReplyingToId(null);
+      setReplyEmojiMenuCommentId(null);
 
       const { error } = await supabase.from("AvailabilityTabComment").insert([
         {
@@ -479,7 +514,8 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
           userId,
           body,
           parentCommentId,
-          createdAt: now
+          createdAt: now,
+          updatedAt: null
         }
       ]);
 
@@ -498,16 +534,26 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
   const handleStartEditComment = (comment) => {
     setEditingCommentId(comment.id);
     setEditDraft(comment.body || "");
+    setEditEmojiMenuCommentId(null);
   };
 
   const handleCancelEditComment = () => {
     setEditingCommentId(null);
     setEditDraft("");
+    setEditEmojiMenuCommentId(null);
   };
 
   const handleSaveEditComment = async (commentId) => {
     const body = editDraft.trim();
     if (!body || !commentId || commentsSaving) return;
+
+    const commentToEdit = comments.find((comment) => comment.id === commentId);
+    if (commentToEdit && body === (commentToEdit.body || "").trim()) {
+      setEditingCommentId(null);
+      setEditDraft("");
+      setEditEmojiMenuCommentId(null);
+      return;
+    }
 
     const previous = comments;
     const now = new Date().toISOString();
@@ -526,6 +572,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       if (error) throw error;
       setEditingCommentId(null);
       setEditDraft("");
+      setEditEmojiMenuCommentId(null);
     } catch (error) {
       console.error("Failed to edit comment:", error);
       setComments(previous);
@@ -589,60 +636,98 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
   const renderComments = (parentId = "__root__", depth = 0) => {
     const branch = commentsByParent.get(parentId) || [];
     return branch.map((comment) => {
+      const indentLevel = Math.min(depth, 3);
       const authorName = userNamesById[comment.userId] || "Traveler";
-      const createdLabel = new Date(comment.createdAt).toLocaleString();
+      const authorAvatarColor = userAvatarColorsById[comment.userId] || getAvatarColor(comment.userId);
+      const createdLabel = formatRelativeTime(comment.createdAt);
       const isAuthor = comment.userId === userId;
       const canDeleteComment = isAuthor || canDeleteAnyComment;
       const children = renderComments(comment.id, depth + 1);
 
       return (
-        <div key={comment.id} className={depth > 0 ? "mt-3 ml-8" : "mt-3"}>
+        <div
+          key={comment.id}
+          className={`mt-5 min-w-0 ${depth > 0 ? "relative border-l-2 border-slate-300 pl-5" : ""}`}
+          style={{ marginLeft: depth > 0 ? `${indentLevel * 18}px` : 0 }}
+        >
+          {depth > 0 ? <span className="absolute -left-2 top-4 h-3 w-3 rounded-full border-2 border-white bg-slate-300" /> : null}
           <div className="flex items-start gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-300 text-xs font-semibold text-slate-700">
+            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold ${authorAvatarColor}`}>
               {authorName.slice(0, 1).toUpperCase()}
             </div>
-            <div className="max-w-full rounded-2xl bg-white px-3 py-2 shadow-sm">
-              <p className="text-xs font-semibold text-ink">{authorName}</p>
+            <div className="min-w-0 flex-1 max-w-4xl pr-2 sm:pr-6">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <span className="text-sm font-semibold text-ink">{authorName}</span>
+                <span className="text-xs text-slate-500">{createdLabel}</span>
+                {hasCommentBeenEdited(comment) ? <span className="text-xs text-slate-500">(edited)</span> : null}
+              </div>
               {editingCommentId === comment.id ? (
-                <div className="mt-1">
+                <div className="mt-2 rounded-2xl bg-slate-50 p-3">
                   <textarea
                     value={editDraft}
                     onChange={(event) => setEditDraft(event.target.value)}
-                    className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
+                    className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
                   />
                   <div className="mt-2 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleSaveEditComment(comment.id)}
-                      disabled={!editDraft.trim() || commentsSaving}
-                      className="rounded-full bg-[#1877F2] px-3 py-1 text-xs font-semibold text-white disabled:opacity-60"
-                    >
-                      Save
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCancelEditComment}
-                      className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700"
-                    >
-                      Cancel
-                    </button>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditEmojiMenuCommentId((current) => (current === comment.id ? null : comment.id))
+                        }
+                        className="flex h-7 w-7 items-center justify-center rounded-full text-slate-800 hover:bg-slate-100"
+                        aria-label="Add emoji"
+                        aria-expanded={editEmojiMenuCommentId === comment.id}
+                      >
+                        <SentimentSatisfiedAltIcon fontSize="small" />
+                      </button>
+                      {editEmojiMenuCommentId === comment.id ? (
+                        <div className="absolute left-0 top-9 z-20 grid w-48 grid-cols-4 gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                          {COMMENT_EMOJIS.map((emoji) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              onClick={() => handleAddEditEmoji(emoji)}
+                              className="flex h-9 w-9 items-center justify-center rounded-lg text-lg hover:bg-slate-100"
+                              aria-label={`Add ${emoji}`}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="ml-auto flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSaveEditComment(comment.id)}
+                        disabled={!editDraft.trim() || commentsSaving}
+                        className="rounded-full bg-[#1877F2] px-3 py-1 text-xs font-semibold text-white disabled:opacity-60"
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelEditComment}
+                        className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : (
-                <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{comment.body}</p>
+                <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-5 text-slate-900">{comment.body}</p>
               )}
-              <div className="mt-1 flex items-center gap-3 text-[11px]">
-                <span className="text-slate-400">{createdLabel}</span>
-                {comment.updatedAt && comment.updatedAt !== comment.createdAt ? (
-                  <span className="text-slate-400">(edited)</span>
-                ) : null}
+              <div className="mt-2 flex items-center gap-1 text-xs">
                 <button
                   type="button"
                   onClick={() => {
                     setReplyingToId(comment.id);
                     setReplyDraft("");
+                    setReplyEmojiMenuCommentId(null);
                   }}
-                  className="font-semibold text-[#1877F2] hover:underline"
+                  className="rounded-full px-2 py-1 font-semibold text-slate-800 hover:bg-slate-100"
                 >
                   Reply
                 </button>
@@ -651,7 +736,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
                     <button
                       type="button"
                       onClick={() => handleStartEditComment(comment)}
-                      className="font-semibold text-slate-600 hover:underline"
+                      className="rounded-full px-2 py-1 font-semibold text-slate-700 hover:bg-slate-100"
                     >
                       Edit
                     </button>
@@ -661,7 +746,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
                   <button
                     type="button"
                     onClick={() => handleDeleteComment(comment)}
-                    className="font-semibold text-coral hover:underline"
+                    className="rounded-full px-2 py-1 font-semibold text-coral hover:bg-red-50"
                   >
                     Delete
                   </button>
@@ -671,32 +756,63 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
           </div>
 
           {replyingToId === comment.id ? (
-            <div className="mt-2 ml-11 rounded-xl bg-white p-3 shadow-sm">
+            <div className="mt-2 ml-14 max-w-4xl rounded-2xl bg-slate-50 p-3">
               <textarea
                 value={replyDraft}
                 onChange={(event) => setReplyDraft(event.target.value)}
                 placeholder="Write a reply..."
-                className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
+                className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
               />
-              <div className="mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setReplyingToId(null);
-                    setReplyDraft("");
-                  }}
-                  className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleReplySubmit(comment.id)}
-                  disabled={!replyDraft.trim() || commentsSaving}
-                  className="rounded-full bg-[#1877F2] px-3 py-1 text-xs font-semibold text-white disabled:opacity-60"
-                >
-                  Reply
-                </button>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setReplyEmojiMenuCommentId((current) => (current === comment.id ? null : comment.id))
+                    }
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-slate-800 hover:bg-slate-100"
+                    aria-label="Add emoji"
+                    aria-expanded={replyEmojiMenuCommentId === comment.id}
+                  >
+                    <SentimentSatisfiedAltIcon fontSize="small" />
+                  </button>
+                  {replyEmojiMenuCommentId === comment.id ? (
+                    <div className="absolute left-0 top-9 z-20 grid w-48 grid-cols-4 gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                      {COMMENT_EMOJIS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => handleAddReplyEmoji(emoji)}
+                          className="flex h-9 w-9 items-center justify-center rounded-lg text-lg hover:bg-slate-100"
+                          aria-label={`Add ${emoji}`}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReplyingToId(null);
+                      setReplyDraft("");
+                      setReplyEmojiMenuCommentId(null);
+                    }}
+                    className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleReplySubmit(comment.id)}
+                    disabled={!replyDraft.trim() || commentsSaving}
+                    className="rounded-full bg-[#1877F2] px-3 py-1 text-xs font-semibold text-white disabled:opacity-60"
+                  >
+                    Reply
+                  </button>
+                </div>
               </div>
             </div>
           ) : null}
@@ -709,6 +825,28 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
 
   const handlePreviousMonth = () => {
     setStartMonth(addMonths(startMonth, -1));
+  };
+
+  const handleCancelCommentDraft = () => {
+    setCommentDraft("");
+    setCommentComposerOpen(false);
+    setEmojiMenuOpen(false);
+  };
+
+  const handleAddCommentEmoji = (emoji) => {
+    setCommentDraft((current) => `${current}${emoji}`);
+    setCommentComposerOpen(true);
+    setEmojiMenuOpen(false);
+  };
+
+  const handleAddReplyEmoji = (emoji) => {
+    setReplyDraft((current) => `${current}${emoji}`);
+    setReplyEmojiMenuCommentId(null);
+  };
+
+  const handleAddEditEmoji = (emoji) => {
+    setEditDraft((current) => `${current}${emoji}`);
+    setEditEmojiMenuCommentId(null);
   };
 
   const handleNextMonth = () => {
@@ -975,7 +1113,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
             )}
           </div>
 
-          <div className="mt-8 rounded-2xl border border-slate-200 bg-[#F0F2F5] p-4">
+          <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-4">
             <h3 className="mb-3 text-base font-semibold text-ink">Comments</h3>
 
             {!commentsTableReady ? (
@@ -984,27 +1122,75 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
               </div>
             ) : (
               <>
-                <div className="mb-4 flex items-start gap-3 rounded-xl bg-white p-3 shadow-sm">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#1e4840] text-xs font-semibold text-white">
+                <div className="mb-5 flex items-start gap-3">
+                  <div
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                      userAvatarColorsById[userId] || getAvatarColor(userId)
+                    }`}
+                  >
                     {(userNamesById[userId] || "You").slice(0, 1).toUpperCase()}
                   </div>
-                  <div className="flex-1">
+                  <div className="min-w-0 flex-1 max-w-4xl">
                     <textarea
                       value={commentDraft}
-                      onChange={(event) => setCommentDraft(event.target.value)}
-                      placeholder="Write a comment..."
-                      className="min-h-[72px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
+                      onFocus={() => setCommentComposerOpen(true)}
+                      onChange={(event) => {
+                        setCommentDraft(event.target.value);
+                        if (!commentComposerOpen) setCommentComposerOpen(true);
+                      }}
+                      rows={1}
+                      placeholder="Add a comment..."
+                      className={`block min-h-[28px] w-full resize-none overflow-hidden border-0 border-b bg-transparent px-0 py-0.5 text-sm text-ink outline-none placeholder:text-slate-500 ${
+                        commentComposerOpen ? "border-b-2 border-slate-950" : "border-slate-300"
+                      }`}
                     />
-                    <div className="mt-2 flex justify-end">
-                      <button
-                        type="button"
-                        onClick={handleCommentSubmit}
-                        disabled={!commentDraft.trim() || commentsSaving}
-                        className="rounded-full bg-[#1877F2] px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-[#1665cc] disabled:opacity-60"
-                      >
-                        {commentsSaving ? "Posting..." : "Post"}
-                      </button>
-                    </div>
+                    {commentComposerOpen ? (
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={() => setEmojiMenuOpen((current) => !current)}
+                            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-800 hover:bg-slate-100"
+                            aria-label="Add emoji"
+                            aria-expanded={emojiMenuOpen}
+                          >
+                            <SentimentSatisfiedAltIcon fontSize="small" />
+                          </button>
+                          {emojiMenuOpen ? (
+                            <div className="absolute left-0 top-10 z-20 grid w-48 grid-cols-4 gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                              {COMMENT_EMOJIS.map((emoji) => (
+                                <button
+                                  key={emoji}
+                                  type="button"
+                                  onClick={() => handleAddCommentEmoji(emoji)}
+                                  className="flex h-9 w-9 items-center justify-center rounded-lg text-lg hover:bg-slate-100"
+                                  aria-label={`Add ${emoji}`}
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleCancelCommentDraft}
+                            className="rounded-full px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-slate-100"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCommentSubmit}
+                            disabled={!commentDraft.trim() || commentsSaving}
+                            className="rounded-full bg-slate-950 px-5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:bg-slate-100 disabled:text-slate-400"
+                          >
+                            {commentsSaving ? "Commenting..." : "Comment"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
