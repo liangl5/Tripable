@@ -1613,6 +1613,7 @@ export const api = {
     (transactions || []).forEach((tx) => {
       transactionIdMap.set(tx.id, crypto.randomUUID());
     });
+    const splitIdMap = new Map();
 
     const newTransactions = (transactions || []).map((tx) => ({
       id: transactionIdMap.get(tx.id),
@@ -1637,16 +1638,61 @@ export const api = {
 
       if (splitError) throw splitError;
 
-      const newSplits = (splits || []).map((split) => ({
-        id: crypto.randomUUID(),
+      const newSplits = (splits || []).map((split) => {
+        const nextSplitId = crypto.randomUUID();
+        splitIdMap.set(split.id, nextSplitId);
+        return {
+          id: nextSplitId,
         transactionId: transactionIdMap.get(split.transactionId),
         userId: split.userId,
         amount: split.amount
-      }));
+        };
+      });
 
       if (newSplits.length) {
         const { error } = await supabase.from("TransactionSplit").insert(newSplits);
         if (error) throw error;
+      }
+
+      try {
+        const { data: settlements, error: settlementError } = await supabase
+          .from("TransactionSettlement")
+          .select("*")
+          .in("sourceSplitId", (splits || []).map((split) => split.id));
+
+        if (settlementError) throw settlementError;
+
+        const newSettlements = (settlements || [])
+          .map((settlement) => {
+            const mappedSplitId = settlement.sourceSplitId ? splitIdMap.get(settlement.sourceSplitId) : null;
+            if (settlement.sourceSplitId && !mappedSplitId) return null;
+            return {
+              id: crypto.randomUUID(),
+              tripId: newTripId,
+              sourceSplitId: mappedSplitId,
+              fromUserId: settlement.fromUserId,
+              toUserId: settlement.toUserId,
+              amount: settlement.amount,
+              note: settlement.note,
+              status: settlement.status,
+              createdById: settlement.createdById,
+              markedPaidAt: settlement.markedPaidAt,
+              confirmedByUserId: settlement.confirmedByUserId,
+              confirmedAt: settlement.confirmedAt,
+              createdAt: settlement.createdAt,
+              updatedAt: settlement.updatedAt
+            };
+          })
+          .filter(Boolean);
+
+        if (newSettlements.length) {
+          const { error: insertSettlementError } = await supabase.from("TransactionSettlement").insert(newSettlements);
+          if (insertSettlementError) throw insertSettlementError;
+        }
+      } catch (error) {
+        if (!String(error?.message || "").toLowerCase().includes("relation") && !String(error?.message || "").toLowerCase().includes("does not exist")) {
+          throw error;
+        }
       }
     }
 

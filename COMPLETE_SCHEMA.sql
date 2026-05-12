@@ -30,10 +30,12 @@ ALTER TABLE IF EXISTS "ItineraryDayComment" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "List" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "Transaction" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "TransactionSplit" DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS "TransactionSettlement" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS "ItineraryTabConfiguration" DISABLE ROW LEVEL SECURITY;
 
 -- Drop all tables (CASCADE handles dependencies)
 DROP TABLE IF EXISTS "TransactionSplit" CASCADE;
+DROP TABLE IF EXISTS "TransactionSettlement" CASCADE;
 DROP TABLE IF EXISTS "Transaction" CASCADE;
 DROP TABLE IF EXISTS "ItineraryTabConfiguration" CASCADE;
 DROP TABLE IF EXISTS "ItineraryItem" CASCADE;
@@ -311,7 +313,27 @@ CREATE TABLE "TransactionSplit" (
   UNIQUE("transactionId", "userId")
 );
 
--- 15b. TransactionComment (threaded notes under expense transactions)
+-- 15b. TransactionSettlement (Splitwise-style payment tracking)
+CREATE TABLE "TransactionSettlement" (
+  id TEXT PRIMARY KEY,
+  "tripId" TEXT NOT NULL REFERENCES "Trip"(id) ON DELETE CASCADE,
+  "sourceSplitId" TEXT REFERENCES "TransactionSplit"(id) ON DELETE CASCADE,
+  "fromUserId" TEXT NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
+  "toUserId" TEXT NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
+  amount NUMERIC(12,2) NOT NULL,
+  note TEXT DEFAULT '',
+  status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'rejected', 'void')),
+  "createdById" TEXT NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
+  "markedPaidAt" TIMESTAMPTZ,
+  "confirmedByUserId" TEXT REFERENCES "User"(id) ON DELETE SET NULL,
+  "confirmedAt" TIMESTAMPTZ,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT chk_transaction_settlement_amount CHECK (amount > 0),
+  CONSTRAINT chk_transaction_settlement_users CHECK ("fromUserId" <> "toUserId")
+);
+
+-- 15c. TransactionComment (threaded notes under expense transactions)
 CREATE TABLE "TransactionComment" (
   id TEXT PRIMARY KEY,
   "transactionId" TEXT NOT NULL REFERENCES "Transaction"(id) ON DELETE CASCADE,
@@ -404,6 +426,11 @@ CREATE INDEX idx_transaction_created_at ON "Transaction"("createdAt" DESC);
 CREATE INDEX idx_transaction_split_transaction ON "TransactionSplit"("transactionId");
 CREATE INDEX idx_transaction_split_user ON "TransactionSplit"("userId");
 CREATE INDEX idx_transaction_split_composite ON "TransactionSplit"("transactionId", "userId");
+CREATE INDEX idx_transaction_settlement_trip ON "TransactionSettlement"("tripId");
+CREATE INDEX idx_transaction_settlement_split ON "TransactionSettlement"("sourceSplitId");
+CREATE INDEX idx_transaction_settlement_from_user ON "TransactionSettlement"("fromUserId");
+CREATE INDEX idx_transaction_settlement_to_user ON "TransactionSettlement"("toUserId");
+CREATE INDEX idx_transaction_settlement_status ON "TransactionSettlement"("status");
 
 -- List indexes
 CREATE INDEX idx_list_trip ON "List"("tripId");
@@ -442,6 +469,7 @@ ALTER TABLE "ItineraryDayComment" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "List" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "Transaction" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "TransactionSplit" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "TransactionSettlement" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "ItineraryTabConfiguration" ENABLE ROW LEVEL SECURITY;
 
 -- ============================================
@@ -452,6 +480,86 @@ ALTER TABLE "ItineraryTabConfiguration" ENABLE ROW LEVEL SECURITY;
 -- SUGGESTOR: Read (all), Create (ideas/votes/transactions), Edit own (ideas/transactions)
 -- GUEST (TripMember only): Read (all), no write access
 -- ============================================
+
+-- TransactionSettlement policies
+CREATE POLICY "Trip members can view transaction settlements" ON "TransactionSettlement" FOR SELECT USING (
+  auth.uid() IS NOT NULL AND
+  auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole"
+    WHERE "tripId" = "TransactionSettlement"."tripId"
+    UNION SELECT "userId" FROM "TripMember"
+    WHERE "tripId" = "TransactionSettlement"."tripId"
+    UNION SELECT "createdById" FROM "Trip"
+    WHERE id = "TransactionSettlement"."tripId"
+  )
+);
+CREATE POLICY "Trip members can create transaction settlements" ON "TransactionSettlement" FOR INSERT WITH CHECK (
+  auth.uid() IS NOT NULL AND
+  auth.uid()::text = "createdById" AND
+  auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole"
+    WHERE "tripId" = "TransactionSettlement"."tripId"
+    UNION SELECT "userId" FROM "TripMember"
+    WHERE "tripId" = "TransactionSettlement"."tripId"
+    UNION SELECT "createdById" FROM "Trip"
+    WHERE id = "TransactionSettlement"."tripId"
+  ) AND
+  "fromUserId" IN (
+    SELECT "userId" FROM "UserTripRole"
+    WHERE "tripId" = "TransactionSettlement"."tripId"
+    UNION SELECT "userId" FROM "TripMember"
+    WHERE "tripId" = "TransactionSettlement"."tripId"
+    UNION SELECT "createdById" FROM "Trip"
+    WHERE id = "TransactionSettlement"."tripId"
+  ) AND
+  "toUserId" IN (
+    SELECT "userId" FROM "UserTripRole"
+    WHERE "tripId" = "TransactionSettlement"."tripId"
+    UNION SELECT "userId" FROM "TripMember"
+    WHERE "tripId" = "TransactionSettlement"."tripId"
+    UNION SELECT "createdById" FROM "Trip"
+    WHERE id = "TransactionSettlement"."tripId"
+  )
+);
+CREATE POLICY "Trip members can update transaction settlements" ON "TransactionSettlement" FOR UPDATE USING (
+  auth.uid() IS NOT NULL AND (
+    auth.uid()::text = "createdById" OR
+    auth.uid()::text = "fromUserId" OR
+    auth.uid()::text = "toUserId" OR
+    auth.uid()::text IN (
+      SELECT "createdById" FROM "Trip" WHERE id = "TransactionSettlement"."tripId"
+    ) OR
+    auth.uid()::text IN (
+      SELECT "userId" FROM "UserTripRole"
+      WHERE "tripId" = "TransactionSettlement"."tripId" AND role = 'editor'
+    )
+  )
+) WITH CHECK (
+  auth.uid() IS NOT NULL AND (
+    auth.uid()::text = "createdById" OR
+    auth.uid()::text = "fromUserId" OR
+    auth.uid()::text = "toUserId" OR
+    auth.uid()::text IN (
+      SELECT "createdById" FROM "Trip" WHERE id = "TransactionSettlement"."tripId"
+    ) OR
+    auth.uid()::text IN (
+      SELECT "userId" FROM "UserTripRole"
+      WHERE "tripId" = "TransactionSettlement"."tripId" AND role = 'editor'
+    )
+  )
+);
+CREATE POLICY "Trip members can delete transaction settlements" ON "TransactionSettlement" FOR DELETE USING (
+  auth.uid() IS NOT NULL AND (
+    auth.uid()::text = "createdById" OR
+    auth.uid()::text IN (
+      SELECT "createdById" FROM "Trip" WHERE id = "TransactionSettlement"."tripId"
+    ) OR
+    auth.uid()::text IN (
+      SELECT "userId" FROM "UserTripRole"
+      WHERE "tripId" = "TransactionSettlement"."tripId" AND role = 'editor'
+    )
+  )
+);
 
 -- User policies
 DROP POLICY IF EXISTS "Users can read any profile" ON "User";
@@ -1205,26 +1313,50 @@ CREATE POLICY "Suggestors can create transactions" ON "Transaction" FOR INSERT W
   )
 );
 CREATE POLICY "Creator or owner can update transaction" ON "Transaction" FOR UPDATE USING (
-  auth.uid()::text = "createdById" OR
-  auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "Transaction"."tripId") OR
+  auth.uid() IS NOT NULL AND
   auth.uid()::text IN (
-    SELECT "userId" FROM "UserTripRole"
-    WHERE "tripId" = "Transaction"."tripId" AND role = 'editor'
+    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = "Transaction"."tripId"
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = "Transaction"."tripId"
+    UNION SELECT "createdById" FROM "Trip" WHERE id = "Transaction"."tripId"
+  ) AND (
+    "paidByUserId" IS NULL OR
+    auth.uid()::text = "paidByUserId" OR
+    auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "Transaction"."tripId") OR
+    auth.uid()::text IN (
+      SELECT "userId" FROM "UserTripRole"
+      WHERE "tripId" = "Transaction"."tripId" AND role = 'editor'
+    )
   )
 ) WITH CHECK (
-  auth.uid()::text = "createdById" OR
-  auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "Transaction"."tripId") OR
+  auth.uid() IS NOT NULL AND
   auth.uid()::text IN (
-    SELECT "userId" FROM "UserTripRole"
-    WHERE "tripId" = "Transaction"."tripId" AND role = 'editor'
+    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = "Transaction"."tripId"
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = "Transaction"."tripId"
+    UNION SELECT "createdById" FROM "Trip" WHERE id = "Transaction"."tripId"
+  ) AND (
+    "paidByUserId" IS NULL OR
+    auth.uid()::text = "paidByUserId" OR
+    auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "Transaction"."tripId") OR
+    auth.uid()::text IN (
+      SELECT "userId" FROM "UserTripRole"
+      WHERE "tripId" = "Transaction"."tripId" AND role = 'editor'
+    )
   )
 );
 CREATE POLICY "Creator or owner can delete transaction" ON "Transaction" FOR DELETE USING (
-  auth.uid()::text = "createdById" OR
-  auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "Transaction"."tripId")
-  OR auth.uid()::text IN (
-    SELECT "userId" FROM "UserTripRole"
-    WHERE "tripId" = "Transaction"."tripId" AND role = 'editor'
+  auth.uid() IS NOT NULL AND
+  auth.uid()::text IN (
+    SELECT "userId" FROM "UserTripRole" WHERE "tripId" = "Transaction"."tripId"
+    UNION SELECT "userId" FROM "TripMember" WHERE "tripId" = "Transaction"."tripId"
+    UNION SELECT "createdById" FROM "Trip" WHERE id = "Transaction"."tripId"
+  ) AND (
+    "paidByUserId" IS NULL OR
+    auth.uid()::text = "paidByUserId" OR
+    auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = "Transaction"."tripId") OR
+    auth.uid()::text IN (
+      SELECT "userId" FROM "UserTripRole"
+      WHERE "tripId" = "Transaction"."tripId" AND role = 'editor'
+    )
   )
 );
 
@@ -1237,50 +1369,82 @@ CREATE POLICY "Trip members can view splits" ON "TransactionSplit" FOR SELECT US
   )
 );
 CREATE POLICY "Creator or owner can create splits" ON "TransactionSplit" FOR INSERT WITH CHECK (
-  auth.uid()::text IN (SELECT "createdById" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId") OR
-  auth.uid()::text IN (
-    SELECT "createdById" FROM "Trip"
-    WHERE id = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
-  ) OR
+  auth.uid() IS NOT NULL AND
   auth.uid()::text IN (
     SELECT "userId" FROM "UserTripRole"
     WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
-      AND role = 'editor'
+    UNION SELECT "userId" FROM "TripMember"
+    WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
+    UNION SELECT "createdById" FROM "Trip"
+    WHERE id = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
+  ) AND (
+    (SELECT "paidByUserId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId") IS NULL OR
+    auth.uid()::text = (SELECT "paidByUserId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId") OR
+    auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")) OR
+    auth.uid()::text IN (
+      SELECT "userId" FROM "UserTripRole"
+      WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
+        AND role = 'editor'
+    )
   )
 );
 CREATE POLICY "Creator or owner can update splits" ON "TransactionSplit" FOR UPDATE USING (
-  auth.uid()::text IN (SELECT "createdById" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId") OR
-  auth.uid()::text IN (
-    SELECT "createdById" FROM "Trip"
-    WHERE id = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
-  ) OR
+  auth.uid() IS NOT NULL AND
   auth.uid()::text IN (
     SELECT "userId" FROM "UserTripRole"
     WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
-      AND role = 'editor'
+    UNION SELECT "userId" FROM "TripMember"
+    WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
+    UNION SELECT "createdById" FROM "Trip"
+    WHERE id = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
+  ) AND (
+    (SELECT "paidByUserId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId") IS NULL OR
+    auth.uid()::text = (SELECT "paidByUserId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId") OR
+    auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")) OR
+    auth.uid()::text IN (
+      SELECT "userId" FROM "UserTripRole"
+      WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
+        AND role = 'editor'
+    )
   )
 ) WITH CHECK (
-  auth.uid()::text IN (SELECT "createdById" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId") OR
-  auth.uid()::text IN (
-    SELECT "createdById" FROM "Trip"
-    WHERE id = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
-  ) OR
+  auth.uid() IS NOT NULL AND
   auth.uid()::text IN (
     SELECT "userId" FROM "UserTripRole"
     WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
-      AND role = 'editor'
+    UNION SELECT "userId" FROM "TripMember"
+    WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
+    UNION SELECT "createdById" FROM "Trip"
+    WHERE id = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
+  ) AND (
+    (SELECT "paidByUserId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId") IS NULL OR
+    auth.uid()::text = (SELECT "paidByUserId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId") OR
+    auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")) OR
+    auth.uid()::text IN (
+      SELECT "userId" FROM "UserTripRole"
+      WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
+        AND role = 'editor'
+    )
   )
 );
 CREATE POLICY "Creator or owner can delete splits" ON "TransactionSplit" FOR DELETE USING (
-  auth.uid()::text IN (SELECT "createdById" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId") OR
+  auth.uid() IS NOT NULL AND
   auth.uid()::text IN (
-    SELECT "createdById" FROM "Trip"
-    WHERE id = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
-  )
-  OR auth.uid()::text IN (
     SELECT "userId" FROM "UserTripRole"
     WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
-      AND role = 'editor'
+    UNION SELECT "userId" FROM "TripMember"
+    WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
+    UNION SELECT "createdById" FROM "Trip"
+    WHERE id = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
+  ) AND (
+    (SELECT "paidByUserId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId") IS NULL OR
+    auth.uid()::text = (SELECT "paidByUserId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId") OR
+    auth.uid()::text IN (SELECT "createdById" FROM "Trip" WHERE id = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")) OR
+    auth.uid()::text IN (
+      SELECT "userId" FROM "UserTripRole"
+      WHERE "tripId" = (SELECT "tripId" FROM "Transaction" WHERE id = "TransactionSplit"."transactionId")
+        AND role = 'editor'
+    )
   )
 );
 

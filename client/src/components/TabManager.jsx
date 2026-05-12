@@ -10,7 +10,7 @@ import AddIcon from "@mui/icons-material/Add";
 import AvailabilityTab from "./TripTabs/AvailabilityTab.jsx";
 import ListTab from "./TripTabs/ListTab.jsx";
 import ItineraryTab from "./TripTabs/ItineraryTab.jsx";
-import TransactionTab from "./TripTabs/TransactionTab.jsx";
+import TransactionTab from "./TripTabs/TransactionTabV2.jsx";
 
 const TAB_TYPE_OPTIONS = [
   { type: "availability", label: "Availability", aliases: ["1", "availability"] },
