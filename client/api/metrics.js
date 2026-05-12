@@ -37,7 +37,12 @@ export default async function handler(req, res) {
     const supabase = getSupabaseAdminClient();
     const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
 
-    const [activeUsers, pageViews] = await Promise.all([
+    const [signups, activeUsers, pageViews] = await Promise.all([
+      countRows(
+        supabase
+          .from("User")
+          .select("id", { count: "exact", head: true })
+      ),
       countRows(
         supabase
           .from("User")
@@ -53,7 +58,7 @@ export default async function handler(req, res) {
     ]);
 
     return res.status(200).json({
-      signups: 0,
+      signups,
       active_users: activeUsers,
       waitlist: 0,
       page_views: pageViews
