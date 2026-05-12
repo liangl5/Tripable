@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import ThreadedComments from "../ThreadedComments.jsx";
-import { buildUserNamesById, fetchUserProfilesByIds } from "../../lib/userProfiles.js";
+import { buildUserAvatarColorsById, buildUserNamesById, fetchUserProfilesByIds } from "../../lib/userProfiles.js";
 
 const DEFAULT_FORM = {
   name: "",
@@ -76,6 +76,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
     }),
     [historicalUserNamesById, tripMembers]
   );
+  const memberAvatarColorsById = useMemo(() => buildUserAvatarColorsById(tripMembers), [tripMembers]);
 
   const validateTransaction = (candidate) => {
     if (!String(candidate.name || "").trim()) {
@@ -735,6 +736,7 @@ export default function TransactionTab({ tab, tripId, userId, userRole, tripMemb
                 resourceId={transaction.id}
                 userId={userId}
                 userNamesById={memberNamesById}
+                userAvatarColorsById={memberAvatarColorsById}
                 canDeleteAnyComment={userRole === "owner"}
                 title="Comments"
               />

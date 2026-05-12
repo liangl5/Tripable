@@ -33,7 +33,26 @@
         }
       });
     </script>
-    <link rel="icon" type="image/png" href="/imgs/favicon.ico">
+    <link id="app-favicon" rel="icon" type="image/x-icon" href="/imgs/logo/green_favicon.ico">
+    <script>
+      (function () {
+        const favicon = document.getElementById("app-favicon");
+        if (!favicon || !window.matchMedia) return;
+
+        const darkModeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+        const updateFavicon = function () {
+          favicon.href = darkModeQuery.matches ? "/imgs/logo/white_favicon.ico" : "/imgs/logo/green_favicon.ico";
+        };
+
+        updateFavicon();
+
+        if (typeof darkModeQuery.addEventListener === "function") {
+          darkModeQuery.addEventListener("change", updateFavicon);
+        } else if (typeof darkModeQuery.addListener === "function") {
+          darkModeQuery.addListener(updateFavicon);
+        }
+      })();
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tripable</title>

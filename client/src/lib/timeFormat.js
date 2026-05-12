@@ -21,6 +21,33 @@ export function formatRelativeTime(dateString) {
   return `${diffYears} year${diffYears !== 1 ? 's' : ''} ago`;
 }
 
+export function formatRoundedRelativeTime(dateString) {
+  if (!dateString) return "";
+
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const diffMs = Date.now() - date.getTime();
+  const isPast = diffMs >= 0;
+  const diffSeconds = Math.abs(diffMs) / 1000;
+  const diffMinutes = diffSeconds / 60;
+  const diffHours = diffMinutes / 60;
+  const diffDays = diffHours / 24;
+
+  const formatUnit = (value, unit) => {
+    const label = `${value} ${unit}${value !== 1 ? "s" : ""}`;
+    return isPast ? `${label} ago` : `in ${label}`;
+  };
+
+  if (diffSeconds < 45) return "just now";
+  if (diffMinutes < 45) return formatUnit(Math.max(1, Math.round(diffMinutes)), "minute");
+  if (diffHours < 22) return formatUnit(Math.max(1, Math.round(diffHours)), "hour");
+  if (diffDays < 7) return formatUnit(Math.max(1, Math.round(diffDays)), "day");
+  if (diffDays < 30) return formatUnit(Math.max(1, Math.round(diffDays / 7)), "week");
+  if (diffDays < 365) return formatUnit(Math.max(1, Math.round(diffDays / 30)), "month");
+  return formatUnit(Math.max(1, Math.round(diffDays / 365)), "year");
+}
+
 export function formatDateRange(startDate, endDate) {
   if (!startDate || !endDate) return '';
   

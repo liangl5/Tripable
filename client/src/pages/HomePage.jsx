@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useSession } from "../App";
 import { supabase } from "../lib/supabase.js";
+import { isDeletedUserProfile } from "../lib/userProfile.js";
 import Header from "../components/Header.jsx";
 import TripList from "../components/TripList.jsx";
 import Hero from "../components/Hero.jsx";
@@ -36,6 +37,7 @@ export default function HomePage() {
   const [localSession, setLocalSession] = useState(null);
   const [tripNavigationLoading, setTripNavigationLoading] = useState(false);
   const [navigationProgress, setNavigationProgress] = useState(0);
+  const selectionButtonRef = useRef(null);
 
   const effectiveSession = session || localSession;
   const currentUserId = effectiveSession?.user?.id;
@@ -145,12 +147,13 @@ export default function HomePage() {
         let userMap = new Map();
         if (ownerIds.length > 0) {
           const { data: ownerRows, error: ownerError } = await supabase
-          .from("User")
-          .select("id, name, avatarColor")
+            .from("User")
+            .select("id, name, email, avatarColor")
             .in("id", ownerIds);
           if (ownerError) throw ownerError;
-          ownerMap = new Map((ownerRows || []).map((owner) => [owner.id, owner.name || "Trip owner"]));
-          userMap = new Map((ownerRows || []).map((owner) => [owner.id, owner]));
+          const activeOwners = (ownerRows || []).filter((owner) => !isDeletedUserProfile(owner));
+          ownerMap = new Map(activeOwners.map((owner) => [owner.id, owner.name || "Trip owner"]));
+          userMap = new Map(activeOwners.map((owner) => [owner.id, owner]));
         }
 
         const { data: memberRows, error: memberError } = await supabase
@@ -166,10 +169,11 @@ export default function HomePage() {
         if (memberIds.length > 0) {
           const { data: memberUsers, error: memberUsersError } = await supabase
             .from("User")
-            .select("id, name, avatarColor")
+            .select("id, name, email, avatarColor")
             .in("id", memberIds);
           if (memberUsersError) throw memberUsersError;
-          userMap = new Map((memberUsers || []).map((user) => [user.id, user]));
+          const activeMemberUsers = (memberUsers || []).filter((user) => !isDeletedUserProfile(user));
+          userMap = new Map(activeMemberUsers.map((user) => [user.id, user]));
         }
 
         const membersByTrip = new Map();
@@ -543,6 +547,7 @@ export default function HomePage() {
                     : "All trips"}
             </h2>
             <button
+              ref={selectionButtonRef}
               type="button"
               onClick={() => setSelectionMode((current) => !current)}
               className="rounded-full border border-transparent bg-white px-5 py-3 text-sm font-semibold text-[#1e4840] hover:border-[#1e4840] hover:text-[#1e4840] disabled:opacity-60"
@@ -583,6 +588,7 @@ export default function HomePage() {
             <TripList
               trips={filteredTrips}
               selectionMode={selectionMode}
+              selectionAnchorRef={selectionButtonRef}
               onCardClick={handleTripCardClick}
               starredTripIds={starredTripIds}
               onToggleStar={starsSupported ? toggleTripStar : null}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Header from "../components/Header.jsx";
 import TripList from "../components/TripList.jsx";
@@ -12,7 +12,6 @@ export default function TripListPage() {
   const loadTrips = useTripStore((state) => state.loadTrips);
   const tripsLoading = useTripStore((state) => state.tripsLoading);
   const error = useTripStore((state) => state.error);
-  const currentUserId = session?.user?.id;
   const [selectionMode, setSelectionMode] = useState(false);
 
   useEffect(() => {
@@ -23,16 +22,6 @@ export default function TripListPage() {
 
     loadTrips();
   }, [loadTrips, session, navigate]);
-
-  const tripsWithOwnership = useMemo(
-    () =>
-      trips.map((trip) => ({
-        ...trip,
-        createdById: trip.createdById === currentUserId ? trip.createdById : null
-      })),
-    [currentUserId, trips]
-  );
-
 
   return (
     <div className="min-h-screen bg-[#ecf5e9]">
@@ -69,7 +58,7 @@ export default function TripListPage() {
 
         {tripsLoading ? <p className="text-sm">Loading trips...</p> : null}
         {error ? <p className="text-sm text-coral">{error}</p> : null}
-        <TripList trips={tripsWithOwnership} selectionMode={selectionMode} />
+        <TripList trips={trips} selectionMode={selectionMode} />
       </div>
     </div>
   );

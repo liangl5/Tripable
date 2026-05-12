@@ -2,13 +2,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTripStore } from "../hooks/useTripStore.js";
 import { useUserProfile } from "../App";
-import { formatDateRange } from "../lib/timeFormat.js";
+import { formatDateRange, formatRoundedRelativeTime } from "../lib/timeFormat.js";
+import {
+  DEFAULT_TRIP_BACKGROUND_IMAGE,
+  TRIP_BACKGROUND_OPTIONS,
+  getTripBackgroundOption
+} from "../lib/tripBackgrounds.js";
 import { getAvatarColor } from "../lib/avatarColors.js";
+import { isDeletedUserProfile } from "../lib/userProfile.js";
 import LoadingProgressBar from "./LoadingProgressBar.jsx";
 import ConfirmModal from "./ConfirmModal.jsx";
 import ShareTripModal from "./ShareTripModal.jsx";
 import ToastNotification from "./ToastNotification.jsx";
-import planeImage from "../../imgs/plane.png";
 
 const ROLE_LABELS = {
   owner: "Owner",
@@ -26,6 +31,7 @@ const getInitials = (name) => {
 export default function TripList({
   trips,
   selectionMode = false,
+  selectionAnchorRef = null,
   openOnCardClick = false,
   onCardClick = null,
   starredTripIds = new Set(),
@@ -47,6 +53,9 @@ export default function TripList({
   const [renameNoticeAt, setRenameNoticeAt] = useState(0);
   const [renameSaving, setRenameSaving] = useState(false);
   const [shareTrip, setShareTrip] = useState(null);
+  const [backgroundTrip, setBackgroundTrip] = useState(null);
+  const [backgroundDraft, setBackgroundDraft] = useState(DEFAULT_TRIP_BACKGROUND_IMAGE || "");
+  const [backgroundSaving, setBackgroundSaving] = useState(false);
   const [inviteStatus, setInviteStatus] = useState("");
   const [inviteStatusAt, setInviteStatusAt] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
@@ -60,6 +69,7 @@ export default function TripList({
   const [shareMenuOpenId, setShareMenuOpenId] = useState(null);
   const [shareMenuPinnedId, setShareMenuPinnedId] = useState(null);
   const [lastShareTrip, setLastShareTrip] = useState(null);
+  const [selectionPopoverPosition, setSelectionPopoverPosition] = useState(null);
   const menuRef = useRef(null);
   const toastTsRef = useRef(0);
 
@@ -95,6 +105,17 @@ export default function TripList({
   }, [menuOpenId]);
 
   useEffect(() => {
+    if (!backgroundTrip) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !backgroundSaving) {
+        setBackgroundTrip(null);
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [backgroundSaving, backgroundTrip]);
+
+  useEffect(() => {
     if (!inviteStatus) return undefined;
     const timer = setTimeout(() => setInviteStatus(""), 5000);
     return () => clearTimeout(timer);
@@ -124,6 +145,51 @@ export default function TripList({
     return undefined;
   }, [selectionMode]);
 
+  useEffect(() => {
+    if (!selectionMode || !selectionAnchorRef?.current) {
+      setSelectionPopoverPosition(null);
+      return undefined;
+    }
+
+    const updateSelectionPopoverPosition = () => {
+      const anchor = selectionAnchorRef.current;
+      if (!anchor) {
+        setSelectionPopoverPosition(null);
+        return;
+      }
+
+      const rect = anchor.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const viewportPadding = 16;
+      const gap = 12;
+      const estimatedWidth = viewportWidth >= 768 ? 440 : Math.min(viewportWidth - viewportPadding * 2, 320);
+      const hasRoomOnLeft = rect.left - gap - estimatedWidth >= viewportPadding;
+
+      if (hasRoomOnLeft) {
+        setSelectionPopoverPosition({
+          placement: "left",
+          top: rect.top + rect.height / 2,
+          left: rect.left - gap
+        });
+        return;
+      }
+
+      setSelectionPopoverPosition({
+        placement: "below",
+        top: rect.bottom + gap,
+        left: Math.min(rect.right, viewportWidth - viewportPadding)
+      });
+    };
+
+    updateSelectionPopoverPosition();
+    window.addEventListener("resize", updateSelectionPopoverPosition);
+    window.addEventListener("scroll", updateSelectionPopoverPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateSelectionPopoverPosition);
+      window.removeEventListener("scroll", updateSelectionPopoverPosition, true);
+    };
+  }, [selectionMode, selectionAnchorRef]);
+
   const handleRenameSave = async () => {
     if (!renameTrip?.id) return;
     const nextName = String(renameValue || "").trim();
@@ -148,6 +214,30 @@ export default function TripList({
       console.error("Failed to rename trip", error);
     } finally {
       setRenameSaving(false);
+    }
+  };
+
+  const openBackgroundPicker = (trip) => {
+    const currentBackground = getTripBackgroundOption(trip?.backgroundImage);
+    setMenuOpenId(null);
+    setShareMenuOpenId(null);
+    setShareMenuPinnedId(null);
+    setBackgroundTrip(trip);
+    setBackgroundDraft(currentBackground?.id || DEFAULT_TRIP_BACKGROUND_IMAGE || "");
+  };
+
+  const handleBackgroundSave = async () => {
+    if (!backgroundTrip?.id || !backgroundDraft) return;
+    try {
+      setBackgroundSaving(true);
+      await updateTripMeta(backgroundTrip.id, { backgroundImage: backgroundDraft });
+      setBackgroundTrip(null);
+      showInviteStatus("Trip background updated.");
+    } catch (error) {
+      console.error("Failed to update trip background", error);
+      showInviteStatus("Unable to update trip background.");
+    } finally {
+      setBackgroundSaving(false);
     }
   };
 
@@ -261,6 +351,10 @@ export default function TripList({
   };
 
   const visibleTrips = useMemo(() => trips, [trips]);
+  const selectedOwnedTripCount = useMemo(
+    () => visibleTrips.filter((trip) => selectedTripIds.has(trip.id) && trip.canDelete !== false).length,
+    [selectedTripIds, visibleTrips]
+  );
 
   const toggleTripSelection = (tripId) => {
     setSelectedTripIds((current) => {
@@ -298,7 +392,10 @@ export default function TripList({
   };
 
   const handleBulkDelete = () => {
-    const ids = Array.from(selectedTripIds);
+    const ids = Array.from(selectedTripIds).filter((tripId) => {
+      const trip = trips.find((item) => item.id === tripId);
+      return trip && trip.canDelete !== false;
+    });
     if (!ids.length) return;
     setDeleteConfirm({
       actionType: "delete",
@@ -329,38 +426,51 @@ export default function TripList({
 
   return (
     <>
-      {selectionMode ? (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-[#1e4840]">
-          <span>{selectedTripIds.size} selected</span>
-          <button
-            type="button"
-            onClick={toggleSelectAll}
-            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-[#1e4840] hover:border-[#1e4840] hover:text-[#1e4840]"
-          >
-            {selectedTripIds.size === visibleTrips.length ? "Deselect all" : "Select all"}
-          </button>
-          <button
-            type="button"
-            onClick={handleBulkCopy}
-            disabled={!selectedTripIds.size || duplicateLoading}
-            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-[#1e4840] hover:border-[#1e4840] hover:text-[#1e4840] disabled:opacity-60"
-          >
-            {duplicateLoading ? "Making copy..." : "Make copy"}
-          </button>
-          <button
-            type="button"
-            onClick={handleBulkDelete}
-            disabled={!selectedTripIds.size}
-            className="rounded-full border border-[#baf59c] bg-[#baf59c] px-4 py-2 text-xs font-semibold text-[#1e4840] hover:bg-[#a7ee84] disabled:opacity-60"
-          >
-            Delete selected
-          </button>
+      {selectionMode && selectionPopoverPosition ? (
+        <div
+          className={`fixed z-[85] rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-card backdrop-blur-sm ${
+            selectionPopoverPosition.placement === "left"
+              ? "-translate-x-full -translate-y-1/2"
+              : "-translate-x-full"
+          }`}
+          style={{
+            top: selectionPopoverPosition.top,
+            left: selectionPopoverPosition.left
+          }}
+        >
+          <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-[#1e4840]">
+            <span className="mr-1">{selectedTripIds.size} selected</span>
+            <button
+              type="button"
+              onClick={toggleSelectAll}
+              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-[#1e4840] hover:border-[#1e4840] hover:text-[#1e4840]"
+            >
+              {selectedTripIds.size === visibleTrips.length ? "Deselect all" : "Select all"}
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkCopy}
+              disabled={!selectedTripIds.size || duplicateLoading}
+              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-[#1e4840] hover:border-[#1e4840] hover:text-[#1e4840] disabled:opacity-60"
+            >
+              {duplicateLoading ? "Making copy..." : "Make copy"}
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkDelete}
+              disabled={!selectedOwnedTripCount}
+              className="rounded-full border border-[#baf59c] bg-[#baf59c] px-4 py-2 text-xs font-semibold text-[#1e4840] hover:bg-[#a7ee84] disabled:opacity-60"
+            >
+              {selectedOwnedTripCount ? "Delete selected" : "No owned trips selected"}
+            </button>
+          </div>
         </div>
       ) : null}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {visibleTrips.map((trip) => (
           (() => {
             const isStarred = starredTripIds?.has(trip.id);
+            const backgroundOption = getTripBackgroundOption(trip.backgroundImage);
             return (
           <div
             key={trip.id}
@@ -396,7 +506,14 @@ export default function TripList({
             aria-pressed={selectionMode ? selectedTripIds.has(trip.id) : undefined}
           >
             <div className="h-40 overflow-hidden rounded-t-3xl bg-[#dcead7]">
-              <img src={planeImage} alt="" className="h-full w-full object-cover object-right" aria-hidden="true" />
+              {backgroundOption ? (
+                <img
+                  src={backgroundOption.src}
+                  alt=""
+                  className="h-full w-full object-cover object-center"
+                  aria-hidden="true"
+                />
+              ) : null}
             </div>
             <div className="pointer-events-none absolute left-0 right-0 top-0 h-20 rounded-t-3xl bg-gradient-to-b from-[#1e4840]/20 via-[#1e4840]/10 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
             {selectionMode ? (
@@ -531,6 +648,20 @@ export default function TripList({
                     </svg>
                     {duplicateLoading ? "Making copy..." : "Make a copy"}
                   </button>
+                  {trip.userRole === "owner" ? (
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[#1e4840] hover:bg-slate-100"
+                      onClick={() => openBackgroundPicker(trip)}
+                    >
+                      <svg className="h-4 w-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="5" width="18" height="14" rx="2" />
+                        <circle cx="8.5" cy="10" r="1.5" />
+                        <path d="m21 15-5-5L5 19" />
+                      </svg>
+                      Change background
+                    </button>
+                  ) : null}
                   {trip.userRole === "owner" || trip.userRole === "editor" ? (
                     <div
                       className="group relative"
@@ -648,14 +779,15 @@ export default function TripList({
               <div className="flex items-center justify-between gap-3">
                 <div className="text-sm font-semibold text-[#1e4840]/75">
                   {trip.createdAt || trip.created_at
-                    ? new Date(trip.createdAt || trip.created_at).toLocaleDateString()
+                    ? `Created ${formatRoundedRelativeTime(trip.createdAt || trip.created_at)}`
                     : ""}
                 </div>
                 <div className="relative flex items-center">
                   {(() => {
-                    const allMembers = trip.members && trip.members.length
+                    const rawMembers = trip.members && trip.members.length
                       ? trip.members
                       : [{ id: trip.createdById || "owner", name: trip.ownerDisplayName || "Trip owner" }];
+                    const allMembers = rawMembers.filter((member) => !isDeletedUserProfile(member));
                     const sortedMembers = [...allMembers].sort((a, b) =>
                       String(a.name || "Traveler").localeCompare(String(b.name || "Traveler"), undefined, {
                         sensitivity: "base"
@@ -769,6 +901,105 @@ export default function TripList({
         }}
       />
 
+      {backgroundTrip ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-[#1e4840]/40 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !backgroundSaving) {
+              setBackgroundTrip(null);
+            }
+          }}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white p-5 text-[#1e4840] shadow-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="trip-background-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 id="trip-background-title" className="text-lg font-semibold">
+                  Change trip background
+                </h2>
+                <p className="mt-1 text-sm text-[#1e4840]/70">{backgroundTrip.name || "Trip"}</p>
+              </div>
+              <button
+                type="button"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#1e4840] hover:bg-slate-100"
+                aria-label="Close background picker"
+                onClick={() => setBackgroundTrip(null)}
+                disabled={backgroundSaving}
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {TRIP_BACKGROUND_OPTIONS.length ? (
+              <div className="mt-4 grid max-h-[58vh] grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3 md:grid-cols-4">
+                {TRIP_BACKGROUND_OPTIONS.map((option) => {
+                  const isSelected = backgroundDraft === option.id;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={`overflow-hidden rounded-xl border bg-white text-left transition ${
+                        isSelected
+                          ? "border-[#1e4840] ring-2 ring-[#baf59c]"
+                          : "border-slate-200 hover:border-[#1e4840]"
+                      }`}
+                      onClick={() => setBackgroundDraft(option.id)}
+                      aria-pressed={isSelected}
+                    >
+                      <span className="block aspect-[4/3] overflow-hidden bg-slate-100">
+                        <img src={option.src} alt="" className="h-full w-full object-cover" aria-hidden="true" />
+                      </span>
+                      <span className="flex min-h-10 items-center justify-between gap-2 px-3 py-2">
+                        <span className="truncate text-xs font-semibold text-[#1e4840]">{option.label}</span>
+                        {isSelected ? (
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#1e4840] text-white">
+                            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true">
+                              <path d="m5 12 4 4 10-10" />
+                            </svg>
+                          </span>
+                        ) : null}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="mt-4 rounded-xl border border-dashed border-slate-300 p-4 text-sm text-[#1e4840]/70">
+                No background images were found in imgs/trip_bg.
+              </p>
+            )}
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setBackgroundTrip(null)}
+                className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100"
+                disabled={backgroundSaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleBackgroundSave}
+                className="rounded-xl bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-[#152f2a] disabled:opacity-70"
+                disabled={backgroundSaving || !backgroundDraft || !TRIP_BACKGROUND_OPTIONS.length}
+              >
+                {backgroundSaving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {deleteConfirm ? (
         <ConfirmModal
           open={Boolean(deleteConfirm)}
@@ -776,17 +1007,17 @@ export default function TripList({
             deleteConfirm.actionType === "leave"
               ? "Leave trip?"
               : deleteConfirm.ids?.length
-                ? `Delete ${deleteConfirm.ids.length} selected trips?`
-                : "Delete trip?"
+                ? `Permanently delete ${deleteConfirm.ids.length} selected trips?`
+                : "Permanently delete trip?"
           }
           message={
             deleteConfirm.actionType === "leave"
               ? `Leave \"${deleteConfirm.name || "this trip"}\"? You will need a new invite link to rejoin.`
               : deleteConfirm.ids?.length
-                ? `Delete these ${deleteConfirm.ids.length} selected trips? This cannot be undone.`
-                : `Delete \"${deleteConfirm.name || "this trip"}\"? This cannot be undone.`
+                ? `These ${deleteConfirm.ids.length} trips will be permanently deleted for everyone. This cannot be undone.`
+                : `\"${deleteConfirm.name || "This trip"}\" will be permanently deleted for everyone. This cannot be undone.`
           }
-          confirmText={deleteConfirm.actionType === "leave" ? "Leave" : "Delete"}
+          confirmText={deleteConfirm.actionType === "leave" ? "Leave" : "Delete permanently"}
           tone={deleteConfirm.actionType === "leave" ? "warning" : "danger"}
           loading={deleteLoading}
           showLoadingBar

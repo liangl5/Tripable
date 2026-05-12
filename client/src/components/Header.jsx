@@ -7,7 +7,7 @@ import { getDisplayName } from "../lib/userProfile.js";
 import { trackEvent } from "../lib/analytics.js";
 import { AVATAR_COLOR_CHOICES, getAvatarColor } from "../lib/avatarColors.js";
 import LoadingProgressBar from "./LoadingProgressBar.jsx";
-import duckIcon from "../../imgs/duck.png";
+import TripableLogo from "./TripableLogo.jsx";
 
 export default function Header() {
   const session = useSession();
@@ -274,12 +274,14 @@ export default function Header() {
     <>
       <header className="relative z-[70] bg-[#1e4840]">
       <div className="flex items-center justify-between gap-4 px-10 py-4">
-        <span
-          className="inline-flex h-12 items-center gap-2 text-2xl font-extrabold tracking-tight text-[#ecf5e9]"
+        <button
+          type="button"
+          onClick={() => void handleNavigateHome()}
+          className="inline-flex items-center transition hover:opacity-90"
+          aria-label="Go to home"
         >
-          <img src={duckIcon} alt="" aria-hidden="true" className="h-full w-auto object-contain" />
-          <span>Tripable</span>
-        </span>
+          <TripableLogo alt="" surface="dark" size="sm" />
+        </button>
 
         {session ? (
           <div className="relative flex items-center gap-2" ref={menuRef}>

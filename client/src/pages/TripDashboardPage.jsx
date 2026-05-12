@@ -81,6 +81,7 @@ export default function TripDashboardPage() {
   const tripNameInputRef = useRef(null);
   const ideas = useTripStore((state) => state.ideas);
   const loadIdeas = useTripStore((state) => state.loadIdeas);
+  const deleteTrip = useTripStore((state) => state.deleteTrip);
   const leaveTrip = useTripStore((state) => state.leaveTrip);
   const leaveTripLoading = useTripStore((state) => state.leaveTripLoading);
   const sendTripInvites = useTripStore((state) => state.sendTripInvites);
@@ -250,7 +251,7 @@ export default function TripDashboardPage() {
 
         const { data: membersData } = await supabase
           .from("User")
-          .select("id, name, email")
+          .select("id, name, email, avatarColor")
           .in("id", memberIds);
 
         setTripMembers(membersData || []);
@@ -596,7 +597,7 @@ export default function TripDashboardPage() {
       const memberIds = [trip.createdById, ...(memberRelations?.map((m) => m.userId) || [])];
       const { data: membersData } = await supabase
         .from("User")
-        .select("id, name, email")
+        .select("id, name, email, avatarColor")
         .in("id", memberIds);
       setTripMembers(membersData || []);
 
@@ -635,7 +636,7 @@ export default function TripDashboardPage() {
     try {
       setActionLoading(true);
       const deletedTripName = String(trip?.name || "Trip");
-      await supabase.from("Trip").delete().eq("id", tripId);
+      await deleteTrip(tripId);
       void trackEvent("trip_deleted_dashboard", { trip_id: tripId });
       setFlashNotice({
         kind: "trip_deleted",
@@ -654,11 +655,12 @@ export default function TripDashboardPage() {
 
   const handleDeleteTrip = () => {
     if (userRole !== "owner") return;
+    const tripName = String(trip?.name || "This trip");
     setConfirmDialog({
       kind: "delete",
-      title: "Delete trip?",
-      message: "Delete this trip? This cannot be undone.",
-      confirmText: "Delete",
+      title: "Permanently delete trip?",
+      message: `${tripName} will be permanently deleted for everyone. This cannot be undone.`,
+      confirmText: "Delete permanently",
       tone: "danger"
     });
   };
@@ -783,15 +785,18 @@ export default function TripDashboardPage() {
               </div>
 
               <div className="flex items-center gap-3">
-                {userRole === "owner" ? (
+                {userRole ? (
                   <button
                     onClick={() => {
                       setShareOpen(true);
-                      void trackEvent("trip_share_opened", { trip_id: tripId });
+                      void trackEvent(userRole === "owner" ? "trip_share_opened" : "trip_people_opened", {
+                        trip_id: tripId,
+                        role: userRole
+                      });
                     }}
                     className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-300"
                   >
-                    Invite
+                    {userRole === "owner" ? "Invite" : "People"}
                   </button>
                 ) : null}
 
@@ -832,8 +837,10 @@ export default function TripDashboardPage() {
       </div>
 
       <ShareTripModal
-        open={shareOpen && userRole === "owner"}
+        open={shareOpen}
         trip={trip}
+        readOnly={userRole !== "owner"}
+        viewerRole={userRole}
         onClose={() => setShareOpen(false)}
       />
 

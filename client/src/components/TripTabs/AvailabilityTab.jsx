@@ -1,9 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
+import SentimentSatisfiedAltIcon from "@mui/icons-material/SentimentSatisfiedAlt";
 import { supabase } from "../../lib/supabase";
+import { getAvatarColor } from "../../lib/avatarColors.js";
 import { DAY_NAMES, addMonths, formatISO, monthKey, startOfMonth } from "../../lib/calendarHelpers.js";
-import { buildUserNamesById, fetchUserProfilesByIds } from "../../lib/userProfiles.js";
+import { formatRelativeTime } from "../../lib/timeFormat.js";
+import { isDeletedUserProfile } from "../../lib/userProfile.js";
+import { buildUserAvatarColorsById, buildUserNamesById, fetchUserProfilesByIds } from "../../lib/userProfiles.js";
+
+function hasCommentBeenEdited(comment) {
+  if (!comment?.updatedAt || !comment?.createdAt) return false;
+  const createdAt = new Date(comment.createdAt).getTime();
+  const updatedAt = new Date(comment.updatedAt).getTime();
+  if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt)) return false;
+  return updatedAt - createdAt > 5000;
+}
+
+const COMMENT_EMOJIS = ["😀", "😂", "😍", "🥳", "😎", "😊", "😭", "😅", "👏", "🙌", "👍", "👀", "❤️", "🔥", "✨", "🎉"];
 
 export default function AvailabilityTab({ tab, tripId, userId, userRole, isActive, onReadyChange }) {
+  const availabilityGreenRgb = "34, 197, 94";
+  const availabilityMinAlpha = 0.16;
+  const availabilityMaxAlpha = 0.78;
   const [startMonth, setStartMonth] = useState(new Date());
   const [selectedDates, setSelectedDates] = useState(new Set());
   const [isDragging, setIsDragging] = useState(false);
@@ -14,22 +31,27 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
   const [userAvailability, setUserAvailability] = useState({});
   const [allUsers, setAllUsers] = useState([]);
   const [availableUsersByDate, setAvailableUsersByDate] = useState({});
-  const [showAvailabilityHints, setShowAvailabilityHints] = useState(false);
   const [hoverTooltip, setHoverTooltip] = useState({ visible: false, text: "", x: 0, y: 0 });
   const [comments, setComments] = useState([]);
   const [commentDraft, setCommentDraft] = useState("");
+  const [commentComposerOpen, setCommentComposerOpen] = useState(false);
+  const [emojiMenuOpen, setEmojiMenuOpen] = useState(false);
   const [replyingToId, setReplyingToId] = useState(null);
   const [replyDraft, setReplyDraft] = useState("");
+  const [replyEmojiMenuCommentId, setReplyEmojiMenuCommentId] = useState(null);
   const [editingCommentId, setEditingCommentId] = useState(null);
   const [editDraft, setEditDraft] = useState("");
+  const [editEmojiMenuCommentId, setEditEmojiMenuCommentId] = useState(null);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentsSaving, setCommentsSaving] = useState(false);
   const [commentsError, setCommentsError] = useState("");
   const [commentsTableReady, setCommentsTableReady] = useState(true);
   const [commentAuthorNamesById, setCommentAuthorNamesById] = useState({});
+  const [commentAuthorAvatarColorsById, setCommentAuthorAvatarColorsById] = useState({});
   const [loading, setLoading] = useState(true);
   const [userSubmittedAt, setUserSubmittedAt] = useState(null);
   const [editStartSelectedDates, setEditStartSelectedDates] = useState(new Set());
+  const [memberAvailabilityThreshold, setMemberAvailabilityThreshold] = useState(2);
   const canEditAvailability = true;
   const canEditCells = canEditAvailability && (!showHeatmap || isEditing);
   const canDeleteAnyComment = userRole === "owner";
@@ -71,7 +93,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
 
   // Load member-scoped availability data (trip members only)
   useEffect(() => {
-    if (!showHeatmap && !showAvailabilityHints) return;
+    if (!showHeatmap) return;
 
     const loadAvailabilityData = async () => {
       try {
@@ -114,34 +136,35 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
           ].filter(Boolean))
         );
         const userProfiles = await fetchUserProfilesByIds(participantIds);
-        const sortedProfiles = [...userProfiles].sort((left, right) =>
+        const activeProfiles = userProfiles.filter((profile) => !isDeletedUserProfile(profile));
+        const activeUserIds = new Set(activeProfiles.map((profile) => profile.id));
+        const availabilityRows = (data || []).filter((entry) => activeUserIds.has(entry.userId));
+        const sortedProfiles = [...activeProfiles].sort((left, right) =>
           String(left.name || left.email || "").localeCompare(String(right.name || right.email || ""))
         );
         const userNameById = buildUserNamesById(sortedProfiles);
         setAllUsers(sortedProfiles);
 
-        if (data) {
-          const counts = {};
-          const byDateUserIds = {};
-          data.forEach(({ date, userId: uid }) => {
-            const dateStr = date.split("T")[0];
-            counts[dateStr] = (counts[dateStr] || 0) + 1;
-            if (!byDateUserIds[dateStr]) byDateUserIds[dateStr] = [];
-            byDateUserIds[dateStr].push(uid);
-          });
-          setAvailabilityData(counts);
+        const counts = {};
+        const byDateUserIds = {};
+        availabilityRows.forEach(({ date, userId: uid }) => {
+          const dateStr = date.split("T")[0];
+          counts[dateStr] = (counts[dateStr] || 0) + 1;
+          if (!byDateUserIds[dateStr]) byDateUserIds[dateStr] = [];
+          byDateUserIds[dateStr].push(uid);
+        });
+        setAvailabilityData(counts);
 
-          const byDateNames = {};
-          Object.entries(byDateUserIds).forEach(([date, ids]) => {
-            byDateNames[date] = ids
-              .map((id) => userNameById[id] || "Traveler")
-              .sort((a, b) => a.localeCompare(b));
-          });
-          setAvailableUsersByDate(byDateNames);
-        }
+        const byDateNames = {};
+        Object.entries(byDateUserIds).forEach(([date, ids]) => {
+          byDateNames[date] = ids
+            .map((id) => userNameById[id] || "Traveler")
+            .sort((a, b) => a.localeCompare(b));
+        });
+        setAvailableUsersByDate(byDateNames);
 
         const byUser = {};
-        (data || []).forEach(({ userId: uid, date }) => {
+        availabilityRows.forEach(({ userId: uid, date }) => {
           if (!byUser[uid]) byUser[uid] = [];
           byUser[uid].push(date.split("T")[0]);
         });
@@ -152,7 +175,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
     };
 
     loadAvailabilityData();
-  }, [showHeatmap, showAvailabilityHints, tab.id, tripId]);
+  }, [showHeatmap, tab.id, tripId]);
 
   useEffect(() => {
     const loadComments = async () => {
@@ -183,7 +206,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
           new Set(
             (data || [])
               .map((comment) => comment.userId)
-              .filter((uid) => uid && !commentAuthorNamesById[uid])
+              .filter((uid) => uid && (!commentAuthorNamesById[uid] || !commentAuthorAvatarColorsById[uid]))
           )
         );
         if (missingAuthorIds.length > 0) {
@@ -191,6 +214,10 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
           setCommentAuthorNamesById((current) => ({
             ...current,
             ...buildUserNamesById(profiles)
+          }));
+          setCommentAuthorAvatarColorsById((current) => ({
+            ...current,
+            ...buildUserAvatarColorsById(profiles)
           }));
         }
       } catch (error) {
@@ -202,10 +229,18 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
     };
 
     loadComments();
-  }, [commentAuthorNamesById, showHeatmap, tab.id]);
+  }, [commentAuthorAvatarColorsById, commentAuthorNamesById, showHeatmap, tab.id]);
 
   const month1 = startOfMonth(startMonth);
   const month2 = addMonths(startMonth, 1);
+  const month1Label = useMemo(
+    () => month1.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+    [month1]
+  );
+  const month2Label = useMemo(
+    () => month2.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+    [month2]
+  );
   const displayedDates = useMemo(() => {
     const dates = [];
     const cursor = new Date(startOfMonth(startMonth));
@@ -219,11 +254,15 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
 
     return dates;
   }, [startMonth]);
+  const maxMemberAvailabilityThreshold = Math.max(2, allUsers.length || 2);
+  const effectiveMemberAvailabilityThreshold = Math.min(memberAvailabilityThreshold, maxMemberAvailabilityThreshold);
+  const memberAvailabilityThresholdOptions = useMemo(() => {
+    if (allUsers.length < 2) return [];
+    return Array.from({ length: allUsers.length - 1 }, (_, index) => index + 2);
+  }, [allUsers.length]);
   const visibleAvailabilityDates = useMemo(() => {
-    return displayedDates.filter((date) =>
-      Object.values(userAvailability).some((dates) => Array.isArray(dates) && dates.includes(date))
-    );
-  }, [displayedDates, userAvailability]);
+    return displayedDates.filter((date) => (availabilityData[date] || 0) >= effectiveMemberAvailabilityThreshold);
+  }, [availabilityData, displayedDates, effectiveMemberAvailabilityThreshold]);
   const dateShadeByColumn = useMemo(() => {
     const shadeMap = {};
     let shade = "light";
@@ -254,6 +293,16 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       ...commentAuthorNamesById
     };
   }, [allUsers, commentAuthorNamesById]);
+  const userAvatarColorsById = useMemo(() => {
+    return {
+      ...buildUserAvatarColorsById(allUsers),
+      ...commentAuthorAvatarColorsById
+    };
+  }, [allUsers, commentAuthorAvatarColorsById]);
+
+  useEffect(() => {
+    setMemberAvailabilityThreshold((current) => Math.min(current, maxMemberAvailabilityThreshold));
+  }, [maxMemberAvailabilityThreshold]);
 
   useEffect(() => {
     const stopDrag = () => {
@@ -300,17 +349,24 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
 
   const showAvailabilityTooltip = (event, dateStr) => {
     if (!dateStr || isDragging || Boolean(dragMode)) return;
-    if (!showHeatmap && !showAvailabilityHints) return;
+    if (!showHeatmap) return;
 
     const names = availableUsersByDate[dateStr] || [];
-    const text = names.length > 0 ? `Available: ${names.join(", ")}` : "No one available";
+    if (!names.length) {
+      hideAvailabilityTooltip();
+      return;
+    }
+
+    const text = names.join(", ");
     const rect = event.currentTarget.getBoundingClientRect();
+    const tooltipOffset = 12;
+    const y = Math.min(window.innerHeight - 24, Math.max(24, rect.top + rect.height / 2));
 
     setHoverTooltip({
       visible: true,
       text,
-      x: rect.right + 10,
-      y: rect.top + rect.height / 2
+      x: rect.right + tooltipOffset,
+      y
     });
   };
 
@@ -319,6 +375,14 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       if (!current.visible) return current;
       return { ...current, visible: false };
     });
+  };
+
+  const handleAvailabilityCellMouseLeave = (event) => {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof HTMLElement && nextTarget.closest("[data-availability-date-cell='true']")) {
+      return;
+    }
+    hideAvailabilityTooltip();
   };
 
   const handleSave = async () => {
@@ -386,12 +450,15 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       userId,
       body,
       parentCommentId: null,
-      createdAt: now
+      createdAt: now,
+      updatedAt: null
     };
 
     try {
       setComments((current) => [optimistic, ...current]);
       setCommentDraft("");
+      setCommentComposerOpen(false);
+      setEmojiMenuOpen(false);
 
       const { error } = await supabase.from("AvailabilityTabComment").insert([
         {
@@ -400,7 +467,8 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
           userId,
           body,
           parentCommentId: null,
-          createdAt: now
+          createdAt: now,
+          updatedAt: null
         }
       ]);
 
@@ -410,6 +478,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       setComments((current) => current.filter((comment) => comment.id !== optimistic.id));
       setCommentsError("Could not post comment.");
       setCommentDraft(body);
+      setCommentComposerOpen(true);
     } finally {
       setCommentsSaving(false);
     }
@@ -428,13 +497,15 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       userId,
       body,
       parentCommentId,
-      createdAt: now
+      createdAt: now,
+      updatedAt: null
     };
 
     try {
       setComments((current) => [...current, optimistic]);
       setReplyDraft("");
       setReplyingToId(null);
+      setReplyEmojiMenuCommentId(null);
 
       const { error } = await supabase.from("AvailabilityTabComment").insert([
         {
@@ -443,7 +514,8 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
           userId,
           body,
           parentCommentId,
-          createdAt: now
+          createdAt: now,
+          updatedAt: null
         }
       ]);
 
@@ -462,16 +534,26 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
   const handleStartEditComment = (comment) => {
     setEditingCommentId(comment.id);
     setEditDraft(comment.body || "");
+    setEditEmojiMenuCommentId(null);
   };
 
   const handleCancelEditComment = () => {
     setEditingCommentId(null);
     setEditDraft("");
+    setEditEmojiMenuCommentId(null);
   };
 
   const handleSaveEditComment = async (commentId) => {
     const body = editDraft.trim();
     if (!body || !commentId || commentsSaving) return;
+
+    const commentToEdit = comments.find((comment) => comment.id === commentId);
+    if (commentToEdit && body === (commentToEdit.body || "").trim()) {
+      setEditingCommentId(null);
+      setEditDraft("");
+      setEditEmojiMenuCommentId(null);
+      return;
+    }
 
     const previous = comments;
     const now = new Date().toISOString();
@@ -490,6 +572,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       if (error) throw error;
       setEditingCommentId(null);
       setEditDraft("");
+      setEditEmojiMenuCommentId(null);
     } catch (error) {
       console.error("Failed to edit comment:", error);
       setComments(previous);
@@ -553,60 +636,98 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
   const renderComments = (parentId = "__root__", depth = 0) => {
     const branch = commentsByParent.get(parentId) || [];
     return branch.map((comment) => {
+      const indentLevel = Math.min(depth, 3);
       const authorName = userNamesById[comment.userId] || "Traveler";
-      const createdLabel = new Date(comment.createdAt).toLocaleString();
+      const authorAvatarColor = userAvatarColorsById[comment.userId] || getAvatarColor(comment.userId);
+      const createdLabel = formatRelativeTime(comment.createdAt);
       const isAuthor = comment.userId === userId;
       const canDeleteComment = isAuthor || canDeleteAnyComment;
       const children = renderComments(comment.id, depth + 1);
 
       return (
-        <div key={comment.id} className={depth > 0 ? "mt-3 ml-8" : "mt-3"}>
+        <div
+          key={comment.id}
+          className={`mt-5 min-w-0 ${depth > 0 ? "relative border-l-2 border-slate-300 pl-5" : ""}`}
+          style={{ marginLeft: depth > 0 ? `${indentLevel * 18}px` : 0 }}
+        >
+          {depth > 0 ? <span className="absolute -left-2 top-4 h-3 w-3 rounded-full border-2 border-white bg-slate-300" /> : null}
           <div className="flex items-start gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-300 text-xs font-semibold text-slate-700">
+            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold ${authorAvatarColor}`}>
               {authorName.slice(0, 1).toUpperCase()}
             </div>
-            <div className="max-w-full rounded-2xl bg-white px-3 py-2 shadow-sm">
-              <p className="text-xs font-semibold text-ink">{authorName}</p>
+            <div className="min-w-0 flex-1 max-w-4xl pr-2 sm:pr-6">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <span className="text-sm font-semibold text-ink">{authorName}</span>
+                <span className="text-xs text-slate-500">{createdLabel}</span>
+                {hasCommentBeenEdited(comment) ? <span className="text-xs text-slate-500">(edited)</span> : null}
+              </div>
               {editingCommentId === comment.id ? (
-                <div className="mt-1">
+                <div className="mt-2 rounded-2xl bg-slate-50 p-3">
                   <textarea
                     value={editDraft}
                     onChange={(event) => setEditDraft(event.target.value)}
-                    className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
+                    className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
                   />
                   <div className="mt-2 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleSaveEditComment(comment.id)}
-                      disabled={!editDraft.trim() || commentsSaving}
-                      className="rounded-full bg-[#1877F2] px-3 py-1 text-xs font-semibold text-white disabled:opacity-60"
-                    >
-                      Save
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCancelEditComment}
-                      className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700"
-                    >
-                      Cancel
-                    </button>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditEmojiMenuCommentId((current) => (current === comment.id ? null : comment.id))
+                        }
+                        className="flex h-7 w-7 items-center justify-center rounded-full text-slate-800 hover:bg-slate-100"
+                        aria-label="Add emoji"
+                        aria-expanded={editEmojiMenuCommentId === comment.id}
+                      >
+                        <SentimentSatisfiedAltIcon fontSize="small" />
+                      </button>
+                      {editEmojiMenuCommentId === comment.id ? (
+                        <div className="absolute left-0 top-9 z-20 grid w-48 grid-cols-4 gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                          {COMMENT_EMOJIS.map((emoji) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              onClick={() => handleAddEditEmoji(emoji)}
+                              className="flex h-9 w-9 items-center justify-center rounded-lg text-lg hover:bg-slate-100"
+                              aria-label={`Add ${emoji}`}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="ml-auto flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSaveEditComment(comment.id)}
+                        disabled={!editDraft.trim() || commentsSaving}
+                        className="rounded-full bg-[#1877F2] px-3 py-1 text-xs font-semibold text-white disabled:opacity-60"
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelEditComment}
+                        className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : (
-                <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{comment.body}</p>
+                <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-5 text-slate-900">{comment.body}</p>
               )}
-              <div className="mt-1 flex items-center gap-3 text-[11px]">
-                <span className="text-slate-400">{createdLabel}</span>
-                {comment.updatedAt && comment.updatedAt !== comment.createdAt ? (
-                  <span className="text-slate-400">(edited)</span>
-                ) : null}
+              <div className="mt-2 flex items-center gap-1 text-xs">
                 <button
                   type="button"
                   onClick={() => {
                     setReplyingToId(comment.id);
                     setReplyDraft("");
+                    setReplyEmojiMenuCommentId(null);
                   }}
-                  className="font-semibold text-[#1877F2] hover:underline"
+                  className="rounded-full px-2 py-1 font-semibold text-slate-800 hover:bg-slate-100"
                 >
                   Reply
                 </button>
@@ -615,7 +736,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
                     <button
                       type="button"
                       onClick={() => handleStartEditComment(comment)}
-                      className="font-semibold text-slate-600 hover:underline"
+                      className="rounded-full px-2 py-1 font-semibold text-slate-700 hover:bg-slate-100"
                     >
                       Edit
                     </button>
@@ -625,7 +746,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
                   <button
                     type="button"
                     onClick={() => handleDeleteComment(comment)}
-                    className="font-semibold text-coral hover:underline"
+                    className="rounded-full px-2 py-1 font-semibold text-coral hover:bg-red-50"
                   >
                     Delete
                   </button>
@@ -635,32 +756,63 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
           </div>
 
           {replyingToId === comment.id ? (
-            <div className="mt-2 ml-11 rounded-xl bg-white p-3 shadow-sm">
+            <div className="mt-2 ml-14 max-w-4xl rounded-2xl bg-slate-50 p-3">
               <textarea
                 value={replyDraft}
                 onChange={(event) => setReplyDraft(event.target.value)}
                 placeholder="Write a reply..."
-                className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
+                className="min-h-[64px] w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
               />
-              <div className="mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setReplyingToId(null);
-                    setReplyDraft("");
-                  }}
-                  className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleReplySubmit(comment.id)}
-                  disabled={!replyDraft.trim() || commentsSaving}
-                  className="rounded-full bg-[#1877F2] px-3 py-1 text-xs font-semibold text-white disabled:opacity-60"
-                >
-                  Reply
-                </button>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setReplyEmojiMenuCommentId((current) => (current === comment.id ? null : comment.id))
+                    }
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-slate-800 hover:bg-slate-100"
+                    aria-label="Add emoji"
+                    aria-expanded={replyEmojiMenuCommentId === comment.id}
+                  >
+                    <SentimentSatisfiedAltIcon fontSize="small" />
+                  </button>
+                  {replyEmojiMenuCommentId === comment.id ? (
+                    <div className="absolute left-0 top-9 z-20 grid w-48 grid-cols-4 gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                      {COMMENT_EMOJIS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => handleAddReplyEmoji(emoji)}
+                          className="flex h-9 w-9 items-center justify-center rounded-lg text-lg hover:bg-slate-100"
+                          aria-label={`Add ${emoji}`}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReplyingToId(null);
+                      setReplyDraft("");
+                      setReplyEmojiMenuCommentId(null);
+                    }}
+                    className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleReplySubmit(comment.id)}
+                    disabled={!replyDraft.trim() || commentsSaving}
+                    className="rounded-full bg-[#1877F2] px-3 py-1 text-xs font-semibold text-white disabled:opacity-60"
+                  >
+                    Reply
+                  </button>
+                </div>
               </div>
             </div>
           ) : null}
@@ -671,7 +823,37 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
     });
   };
 
-  const CalendarMonth = ({ month, isFirst }) => {
+  const handlePreviousMonth = () => {
+    setStartMonth(addMonths(startMonth, -1));
+  };
+
+  const handleCancelCommentDraft = () => {
+    setCommentDraft("");
+    setCommentComposerOpen(false);
+    setEmojiMenuOpen(false);
+  };
+
+  const handleAddCommentEmoji = (emoji) => {
+    setCommentDraft((current) => `${current}${emoji}`);
+    setCommentComposerOpen(true);
+    setEmojiMenuOpen(false);
+  };
+
+  const handleAddReplyEmoji = (emoji) => {
+    setReplyDraft((current) => `${current}${emoji}`);
+    setReplyEmojiMenuCommentId(null);
+  };
+
+  const handleAddEditEmoji = (emoji) => {
+    setEditDraft((current) => `${current}${emoji}`);
+    setEditEmojiMenuCommentId(null);
+  };
+
+  const handleNextMonth = () => {
+    setStartMonth(addMonths(startMonth, 1));
+  };
+
+  const CalendarMonth = ({ month }) => {
     const monthStart = startOfMonth(month);
     const monthEnd = addMonths(month, 1);
     const firstDayOfWeek = monthStart.getDay();
@@ -685,14 +867,8 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       days.push(new Date(monthStart.getFullYear(), monthStart.getMonth(), i));
     }
 
-    const monthLabel = month.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-
     return (
-      <div
-        className={`flex-1 select-none ${!isFirst && "border-l border-slate-200 pl-4"}`}
-        onMouseLeave={hideAvailabilityTooltip}
-      >
-        <h3 className="font-semibold text-ink mb-4">{monthLabel}</h3>
+      <div className="select-none" onMouseLeave={hideAvailabilityTooltip}>
         <div className="grid grid-cols-7 gap-2">
           {DAY_NAMES.map((day) => (
             <div key={day} className="text-center text-xs font-semibold text-slate-600 h-8">
@@ -700,21 +876,25 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
             </div>
           ))}
           {days.map((day, index) => {
-              const dateStr = day ? formatISO(day) : null;
-              const isSelected = dateStr && selectedDates.has(dateStr);
+            const dateStr = day ? formatISO(day) : null;
+            const isSelected = dateStr && selectedDates.has(dateStr);
             const count = dateStr ? availabilityData[dateStr] || 0 : 0;
+            const isInteractiveDate = Boolean(dateStr) && canEditCells;
 
             let bgColor = "bg-white";
             let inlineStyle;
             if (showHeatmap && count > 0) {
               const intensity = maxAvailabilityCount > 0 ? count / maxAvailabilityCount : 0;
-              const alpha = 0.16 + intensity * 0.62;
+              const alpha = availabilityMinAlpha + intensity * (availabilityMaxAlpha - availabilityMinAlpha);
               bgColor = "text-ink";
               inlineStyle = {
-                backgroundColor: `rgba(34, 197, 94, ${alpha})`
+                backgroundColor: `rgba(${availabilityGreenRgb}, ${alpha})`
               };
             } else if (isSelected && !showHeatmap) {
-              bgColor = "bg-ocean text-white";
+              bgColor = "border-emerald-600 text-ink";
+              inlineStyle = {
+                backgroundColor: `rgba(${availabilityGreenRgb}, ${availabilityMaxAlpha})`
+              };
             }
 
               return (
@@ -726,24 +906,23 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
                     setIsDragging(false);
                     setDragMode(null);
                   }}
-                  onPointerLeave={hideAvailabilityTooltip}
                   onPointerCancel={hideAvailabilityTooltip}
                   onMouseDown={hideAvailabilityTooltip}
                   onClick={(event) => {
                     event.preventDefault();
                   }}
                   onMouseEnter={(event) => showAvailabilityTooltip(event, dateStr)}
-                  onMouseLeave={hideAvailabilityTooltip}
-                  disabled={!dateStr || (showHeatmap && !isEditing)}
+                  onMouseLeave={handleAvailabilityCellMouseLeave}
+                  disabled={!dateStr}
+                  tabIndex={isInteractiveDate ? 0 : -1}
+                  aria-disabled={dateStr && !canEditCells ? "true" : undefined}
+                  data-availability-date-cell={dateStr ? "true" : undefined}
                   className={`relative h-8 rounded text-xs font-medium border border-slate-300 ${bgColor} ${
-                    canEditCells && dateStr ? "cursor-pointer hover:bg-slate-100 select-none" : "cursor-default"
+                    isInteractiveDate ? "cursor-pointer hover:bg-slate-100 select-none" : "cursor-default"
                   }`}
                   style={inlineStyle}
                 >
                   {day && day.getDate()}
-                  {!showHeatmap && showAvailabilityHints && dateStr && (availabilityData[dateStr] || 0) > 0 ? (
-                    <span className="pointer-events-none absolute bottom-0 left-1 right-1 h-0.5 rounded-full bg-emerald-500" />
-                  ) : null}
                 </button>
               );
           })}
@@ -751,6 +930,39 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
       </div>
     );
   };
+
+  const CalendarMonthLayout = () => (
+    <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-4" onMouseLeave={hideAvailabilityTooltip}>
+      <button
+        onClick={handlePreviousMonth}
+        className="mt-0.5 h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+        aria-label="Previous month"
+      >
+        <svg viewBox="0 0 20 20" fill="none" className="mx-auto h-4 w-4" aria-hidden="true">
+          <path d="M11.5 5.5 7 10l4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      </button>
+      <div className="grid min-w-0 grid-cols-2 gap-6">
+        <div className="min-w-0">
+          <h3 className="mb-4 text-center font-semibold text-ink">{month1Label}</h3>
+          <CalendarMonth month={month1} />
+        </div>
+        <div className="min-w-0 border-l border-slate-200 pl-4">
+          <h3 className="mb-4 text-center font-semibold text-ink">{month2Label}</h3>
+          <CalendarMonth month={month2} />
+        </div>
+      </div>
+      <button
+        onClick={handleNextMonth}
+        className="mt-0.5 h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+        aria-label="Next month"
+      >
+        <svg viewBox="0 0 20 20" fill="none" className="mx-auto h-4 w-4" aria-hidden="true">
+          <path d="M8.5 5.5 13 10l-4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
+  );
 
   if (loading) {
     return <div className="p-6" />;
@@ -760,7 +972,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
     <div className="p-6">
       {hoverTooltip.visible ? (
         <div
-          className="pointer-events-none fixed z-50 -translate-y-1/2 rounded-md bg-slate-800 px-2 py-1 text-xs font-medium text-white shadow-lg"
+          className="pointer-events-none fixed z-50 max-w-[18rem] -translate-y-1/2 rounded-md bg-slate-800 px-2 py-1 text-xs font-medium text-white shadow-lg"
           style={{ left: hoverTooltip.x, top: hoverTooltip.y }}
         >
           {hoverTooltip.text}
@@ -773,18 +985,30 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setStartMonth(addMonths(startMonth, -1))}
-                className="h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+                className="hidden"
                 aria-label="Previous month"
               >
                 ←
               </button>
               <button
                 onClick={() => setStartMonth(addMonths(startMonth, 1))}
-                className="h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+                className="hidden"
                 aria-label="Next month"
               >
                 →
               </button>
+              <div className="w-[18rem] shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                <div className="mb-1.5 flex items-center justify-between text-[11px] font-medium text-slate-600">
+                  <span>Fewer people available</span>
+                  <span>More people available</span>
+                </div>
+                <div
+                  className="h-1.5 w-full rounded-full border border-slate-200"
+                  style={{
+                    background: `linear-gradient(90deg, rgba(${availabilityGreenRgb}, ${availabilityMinAlpha}) 0%, rgba(${availabilityGreenRgb}, ${availabilityMaxAlpha}) 100%)`
+                  }}
+                />
+              </div>
               {canEditAvailability && (
                 <button
                   onClick={handleEdit}
@@ -796,27 +1020,33 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
             </div>
           </div>
 
-          <div className="mb-6 rounded-lg border border-slate-200 bg-white p-3">
-            <div className="mb-2 flex items-center justify-between text-xs font-medium text-slate-600">
-              <span>Fewer people available</span>
-              <span>More people available</span>
-            </div>
-            <div
-              className="h-3 w-full rounded-full border border-slate-200"
-              style={{ background: "linear-gradient(90deg, rgba(34,197,94,0.16) 0%, rgba(34,197,94,0.78) 100%)" }}
-            />
-            <div className="mt-2 text-xs text-slate-500">
-              Continuous scale (max overlap: {maxAvailabilityCount || 0})
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-6" onMouseLeave={hideAvailabilityTooltip}>
-            <CalendarMonth month={month1} isFirst={true} />
-            <CalendarMonth month={month2} isFirst={false} />
-          </div>
+          <CalendarMonthLayout />
 
           <div className="mt-8">
-            <h3 className="text-lg font-semibold text-ink mb-4">Member Availability</h3>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-lg font-semibold text-ink">Member Availability</h3>
+              {memberAvailabilityThresholdOptions.length ? (
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-600">
+                  <span>Show dates with</span>
+                  <select
+                    value={effectiveMemberAvailabilityThreshold}
+                    onChange={(event) => setMemberAvailabilityThreshold(Number(event.target.value))}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-ink outline-none transition focus:border-[#1e4840]"
+                  >
+                    {memberAvailabilityThresholdOptions.map((threshold) => (
+                      <option key={threshold} value={threshold}>
+                        {threshold}+ members
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+            </div>
+            {!visibleAvailabilityDates.length ? (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                No dates currently have {effectiveMemberAvailabilityThreshold}+ members available.
+              </div>
+            ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-max text-sm">
                 <thead className="border-b border-slate-300">
@@ -880,9 +1110,10 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
                 </tbody>
               </table>
             </div>
+            )}
           </div>
 
-          <div className="mt-8 rounded-2xl border border-slate-200 bg-[#F0F2F5] p-4">
+          <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-4">
             <h3 className="mb-3 text-base font-semibold text-ink">Comments</h3>
 
             {!commentsTableReady ? (
@@ -891,27 +1122,75 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
               </div>
             ) : (
               <>
-                <div className="mb-4 flex items-start gap-3 rounded-xl bg-white p-3 shadow-sm">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#1e4840] text-xs font-semibold text-white">
+                <div className="mb-5 flex items-start gap-3">
+                  <div
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                      userAvatarColorsById[userId] || getAvatarColor(userId)
+                    }`}
+                  >
                     {(userNamesById[userId] || "You").slice(0, 1).toUpperCase()}
                   </div>
-                  <div className="flex-1">
+                  <div className="min-w-0 flex-1 max-w-4xl">
                     <textarea
                       value={commentDraft}
-                      onChange={(event) => setCommentDraft(event.target.value)}
-                      placeholder="Write a comment..."
-                      className="min-h-[72px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink outline-none focus:border-[#1e4840]"
+                      onFocus={() => setCommentComposerOpen(true)}
+                      onChange={(event) => {
+                        setCommentDraft(event.target.value);
+                        if (!commentComposerOpen) setCommentComposerOpen(true);
+                      }}
+                      rows={1}
+                      placeholder="Add a comment..."
+                      className={`block min-h-[28px] w-full resize-none overflow-hidden border-0 border-b bg-transparent px-0 py-0.5 text-sm text-ink outline-none placeholder:text-slate-500 ${
+                        commentComposerOpen ? "border-b-2 border-slate-950" : "border-slate-300"
+                      }`}
                     />
-                    <div className="mt-2 flex justify-end">
-                      <button
-                        type="button"
-                        onClick={handleCommentSubmit}
-                        disabled={!commentDraft.trim() || commentsSaving}
-                        className="rounded-full bg-[#1877F2] px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-[#1665cc] disabled:opacity-60"
-                      >
-                        {commentsSaving ? "Posting..." : "Post"}
-                      </button>
-                    </div>
+                    {commentComposerOpen ? (
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={() => setEmojiMenuOpen((current) => !current)}
+                            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-800 hover:bg-slate-100"
+                            aria-label="Add emoji"
+                            aria-expanded={emojiMenuOpen}
+                          >
+                            <SentimentSatisfiedAltIcon fontSize="small" />
+                          </button>
+                          {emojiMenuOpen ? (
+                            <div className="absolute left-0 top-10 z-20 grid w-48 grid-cols-4 gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                              {COMMENT_EMOJIS.map((emoji) => (
+                                <button
+                                  key={emoji}
+                                  type="button"
+                                  onClick={() => handleAddCommentEmoji(emoji)}
+                                  className="flex h-9 w-9 items-center justify-center rounded-lg text-lg hover:bg-slate-100"
+                                  aria-label={`Add ${emoji}`}
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleCancelCommentDraft}
+                            className="rounded-full px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-slate-100"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCommentSubmit}
+                            disabled={!commentDraft.trim() || commentsSaving}
+                            className="rounded-full bg-slate-950 px-5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:bg-slate-100 disabled:text-slate-400"
+                          >
+                            {commentsSaving ? "Commenting..." : "Comment"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -934,34 +1213,17 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
             <h2 className="text-lg font-semibold text-ink">
               {isEditing ? "Select Your Available Dates" : "Your Availability"}
             </h2>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-600">View others</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={showAvailabilityHints}
-                aria-label="View others"
-                onClick={() => setShowAvailabilityHints((current) => !current)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
-                  showAvailabilityHints ? "bg-ocean" : "bg-slate-300"
-                }`}
-              >
-                <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
-                    showAvailabilityHints ? "translate-x-5" : "translate-x-1"
-                  }`}
-                />
-              </button>
+            <div className="flex items-center gap-3">
               <button
                 onClick={() => setStartMonth(addMonths(startMonth, -1))}
-                className="h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+                className="hidden"
                 aria-label="Previous month"
               >
                 ←
               </button>
               <button
                 onClick={() => setStartMonth(addMonths(startMonth, 1))}
-                className="h-8 w-8 rounded-full bg-slate-200 text-sm font-semibold text-ink transition hover:bg-slate-300"
+                className="hidden"
                 aria-label="Next month"
               >
                 →
@@ -969,16 +1231,7 @@ export default function AvailabilityTab({ tab, tripId, userId, userRole, isActiv
             </div>
           </div>
 
-          {showAvailabilityHints ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-800">
-              Hover a date to see who is available.
-            </div>
-          ) : null}
-
-          <div className="grid grid-cols-2 gap-6" onMouseLeave={hideAvailabilityTooltip}>
-            <CalendarMonth month={month1} isFirst={true} />
-            <CalendarMonth month={month2} isFirst={false} />
-          </div>
+          <CalendarMonthLayout />
 
           {canEditAvailability && (!showHeatmap || isEditing) && (
             <div className="flex gap-3 mt-4">

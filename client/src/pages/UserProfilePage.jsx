@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
+import ConfirmModal from "../components/ConfirmModal.jsx";
 import { useSession, useUserProfile } from "../App";
+import { supabase } from "../lib/supabase.js";
 import { updateUserProfileName } from "../lib/userProfile.js";
 import { trackEvent } from "../lib/analytics.js";
 
@@ -14,8 +16,13 @@ export default function UserProfilePage() {
   const [displayNameError, setDisplayNameError] = useState("");
   const [isUpdatingDisplayName, setIsUpdatingDisplayName] = useState(false);
   const [resetPasswordMessage, setResetPasswordMessage] = useState("");
+  const [resetPasswordError, setResetPasswordError] = useState("");
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [deleteAccountMessage, setDeleteAccountMessage] = useState("");
+  const [deleteAccountError, setDeleteAccountError] = useState("");
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   const handleUpdateDisplayName = async (e) => {
     e.preventDefault();
@@ -47,25 +54,139 @@ export default function UserProfilePage() {
   };
 
   const handleResetPassword = async () => {
+    setResetPasswordMessage("");
+    setResetPasswordError("");
+
+    if (!session?.user?.email) {
+      setResetPasswordError("We could not find an email address for this account.");
+      return;
+    }
+
     void trackEvent("profile_reset_password_clicked", {});
-    // TODO: Implement password reset functionality
-    setResetPasswordMessage("Password reset feature coming soon. Our team will implement this.");
+    setConfirmDialog({
+      type: "resetPassword",
+      title: "Send password reset email?",
+      message: `We will send a secure password reset link to ${session.user.email}. Continue?`,
+      confirmText: "Send reset link",
+      tone: "warning"
+    });
   };
 
   const handleDeleteAccount = async () => {
+    setDeleteAccountMessage("");
+    setDeleteAccountError("");
+
     void trackEvent("profile_delete_account_clicked", {
       confirmed: Boolean(deleteConfirmed)
     });
     if (!deleteConfirmed) {
-      setDeleteAccountMessage("Please confirm you want to delete your account.");
+      setDeleteAccountError("Please confirm you want to delete your account.");
       return;
     }
-    // TODO: Implement account deletion functionality
-    setDeleteAccountMessage("Account deletion feature coming soon. Our team will implement this.");
+
+    setConfirmDialog({
+      type: "deleteAccount",
+      title: "Delete account permanently?",
+      message: "This will delete your Tripable account and owned trips. Contributions in other trips will remain under an anonymized deleted user name. This cannot be undone.",
+      confirmText: "Delete account",
+      tone: "danger"
+    });
   };
 
-  const handleGoToDashboard = () => {
-    navigate("/");
+  const handleConfirmResetPassword = async () => {
+    const email = session?.user?.email;
+    if (!email) {
+      setResetPasswordError("We could not find an email address for this account.");
+      setConfirmDialog(null);
+      return;
+    }
+
+    try {
+      setIsResettingPassword(true);
+      setResetPasswordMessage("");
+      setResetPasswordError("");
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth?mode=reset-password`
+      });
+      if (error) throw error;
+
+      void trackEvent("profile_reset_password_email_sent", {});
+      setConfirmDialog(null);
+      setResetPasswordMessage(`Password reset email sent to ${email}.`);
+    } catch (error) {
+      void trackEvent("profile_reset_password_failed", {
+        reason: error?.message || "unknown"
+      });
+      setResetPasswordError(error?.message || "Unable to send a password reset email.");
+    } finally {
+      setIsResettingPassword(false);
+    }
+  };
+
+  const readJsonResponse = async (response) => {
+    const contentType = response.headers.get("content-type") || "";
+    const rawBody = await response.text();
+    if (!rawBody) return {};
+    if (!contentType.includes("application/json")) {
+      throw new Error("Account service returned an unexpected response.");
+    }
+    return JSON.parse(rawBody);
+  };
+
+  const handleConfirmDeleteAccount = async () => {
+    try {
+      setIsDeletingAccount(true);
+      setDeleteAccountMessage("");
+      setDeleteAccountError("");
+
+      const { data, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+
+      const activeSession = data?.session || session;
+      if (!activeSession?.access_token || !activeSession?.user?.email) {
+        throw new Error("Please sign in again before deleting your account.");
+      }
+
+      const response = await fetch("/api/delete-account", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${activeSession.access_token}`
+        },
+        body: JSON.stringify({
+          email: activeSession.user.email,
+          userId: activeSession.user.id
+        })
+      });
+      const result = await readJsonResponse(response);
+
+      if (!response.ok) {
+        throw new Error(result?.details || result?.error || "Unable to delete your account right now.");
+      }
+
+      void trackEvent("profile_delete_account_succeeded", {});
+      setDeleteAccountMessage("Account deleted.");
+      setConfirmDialog(null);
+      await supabase.auth.signOut();
+      navigate("/");
+    } catch (error) {
+      void trackEvent("profile_delete_account_failed", {
+        reason: error?.message || "unknown"
+      });
+      setDeleteAccountError(error?.message || "Unable to delete your account right now.");
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
+
+  const handleConfirmAction = () => {
+    if (confirmDialog?.type === "resetPassword") {
+      void handleConfirmResetPassword();
+      return;
+    }
+    if (confirmDialog?.type === "deleteAccount") {
+      void handleConfirmDeleteAccount();
+    }
   };
 
   if (!session) {
@@ -77,20 +198,18 @@ export default function UserProfilePage() {
     <div className="min-h-screen bg-[#ecf5e9]">
       <Header />
       <div className="mx-auto flex max-w-2xl flex-col px-6 py-12">
+        <nav aria-label="Breadcrumb" className="mb-4 text-sm font-semibold text-[#1e4840]/70">
+          <Link to="/" className="transition hover:text-[#1e4840]">
+            Home
+          </Link>
+          <span className="mx-2 text-[#1e4840]/40">/</span>
+          <span className="text-[#1e4840]" aria-current="page">
+            Profile
+          </span>
+        </nav>
+
         <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-3xl font-semibold text-ink">Profile Settings</h1>
-          <button
-            type="button"
-            onClick={handleGoToDashboard}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-[#1e4840] hover:bg-slate-50"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <path d="M3 10.5 12 3l9 7.5" />
-              <path d="M5 9.5V21h14V9.5" />
-              <path d="M10 21v-6h4v6" />
-            </svg>
-            Home
-          </button>
         </div>
 
         <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6">
@@ -149,19 +268,23 @@ export default function UserProfilePage() {
           </p>
           <button
             onClick={handleResetPassword}
-            className="rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-[#152f2a]"
+            disabled={isResettingPassword}
+            className="rounded-lg bg-ocean px-4 py-2 text-sm font-semibold text-white hover:bg-[#152f2a] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Reset Password
+            {isResettingPassword ? "Sending..." : "Reset Password"}
           </button>
           {resetPasswordMessage && (
-            <p className="mt-3 text-sm text-slate-600">{resetPasswordMessage}</p>
+            <p className="mt-3 text-sm text-green-600">{resetPasswordMessage}</p>
+          )}
+          {resetPasswordError && (
+            <p className="mt-3 text-sm text-coral">{resetPasswordError}</p>
           )}
         </div>
 
         <div className="bg-white rounded-lg border border-slate-200 p-6">
           <h2 className="text-lg font-semibold text-ink mb-4">Danger Zone</h2>
           <p className="text-sm text-slate-600 mb-4">
-            Delete your account and all associated data. This action cannot be undone.
+            Delete your account and trips you own. Contributions in other trips will stay visible as an anonymized deleted user.
           </p>
           <label className="flex items-center gap-2 mb-4">
             <input
@@ -171,21 +294,36 @@ export default function UserProfilePage() {
               className="h-4 w-4"
             />
             <span className="text-sm text-slate-600">
-              I understand this will delete my account and all my data
+              I understand this will delete my account and owned trips
             </span>
           </label>
           <button
             onClick={handleDeleteAccount}
-            disabled={!deleteConfirmed}
+            disabled={!deleteConfirmed || isDeletingAccount}
             className="rounded-lg bg-coral px-4 py-2 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Delete Account
+            {isDeletingAccount ? "Deleting..." : "Delete Account"}
           </button>
           {deleteAccountMessage && (
-            <p className="mt-3 text-sm text-slate-600">{deleteAccountMessage}</p>
+            <p className="mt-3 text-sm text-green-600">{deleteAccountMessage}</p>
+          )}
+          {deleteAccountError && (
+            <p className="mt-3 text-sm text-coral">{deleteAccountError}</p>
           )}
         </div>
       </div>
+
+      <ConfirmModal
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmText={confirmDialog?.confirmText}
+        tone={confirmDialog?.tone}
+        loading={isResettingPassword || isDeletingAccount}
+        showLoadingBar={confirmDialog?.type === "deleteAccount"}
+        onCancel={() => setConfirmDialog(null)}
+        onConfirm={handleConfirmAction}
+      />
     </div>
   );
 }
