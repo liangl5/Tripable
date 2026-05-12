@@ -34,13 +34,29 @@ export async function fetchUserProfile(session) {
   return data || null;
 }
 
+export async function touchUserActivity(userId) {
+  const trimmedUserId = String(userId || "").trim();
+  if (!trimmedUserId) return null;
+
+  const { error } = await supabase
+    .from("User")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", trimmedUserId);
+
+  if (error) throw error;
+  return true;
+}
+
 export async function ensureUserProfile(session, { name } = {}) {
   const userId = session?.user?.id;
   const email = session?.user?.email || null;
   if (!userId) return null;
 
   const existing = await fetchUserProfile(session);
-  if (existing) return existing;
+  if (existing) {
+    void touchUserActivity(userId).catch(() => {});
+    return existing;
+  }
 
   const nextName = normalizeDisplayName(name) || defaultDisplayNameFromSession(session);
 
@@ -61,6 +77,7 @@ export async function ensureUserProfile(session, { name } = {}) {
     return data;
   } catch (error) {
     if (error?.code === "23505") {
+      void touchUserActivity(userId).catch(() => {});
       return fetchUserProfile(session);
     }
     throw error;

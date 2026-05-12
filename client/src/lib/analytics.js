@@ -128,6 +128,18 @@ export async function trackPageView(pathname, title = "Tripable") {
   if (amplitude?.track) {
     amplitude.track("page_view", { path: pathname, title });
   }
+
+  void fetch("/api/page-view", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      pathname,
+      title
+    }),
+    keepalive: true
+  }).catch(() => {});
 }
 
 export async function getOrCreateAnonymousId() {

@@ -2,7 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState, createContext
 import { Routes, Route, useLocation } from "react-router-dom";
 import { supabase } from "./lib/supabase";
 import { AuthStatus } from "./components/AuthStatus";
-import { ensureUserProfile, isDeletedUserProfile } from "./lib/userProfile.js";
+import { ensureUserProfile, isDeletedUserProfile, touchUserActivity } from "./lib/userProfile.js";
 import { identifyUser, resetAnalytics, trackPageView } from "./lib/analytics.js";
 
 const HomePage = lazy(() => import("./pages/HomePage.jsx"));
@@ -141,7 +141,10 @@ export default function App() {
     if (lastTrackedPathRef.current === path) return;
     lastTrackedPathRef.current = path;
     void trackPageView(path, "Tripable");
-  }, [location.pathname, location.search]);
+    if (session?.user?.id) {
+      void touchUserActivity(session.user.id);
+    }
+  }, [location.pathname, location.search, session?.user?.id]);
 
   if (loading) {
     return <div className="min-h-screen bg-[#ecf5e9]" />;

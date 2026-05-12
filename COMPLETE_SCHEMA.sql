@@ -66,7 +66,30 @@ CREATE TABLE IF NOT EXISTS "User" (
   name VARCHAR(255) NOT NULL,
   email VARCHAR(255) UNIQUE,
   "avatarColor" TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE OR REPLACE FUNCTION set_user_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS user_updated_at_trigger ON "User";
+CREATE TRIGGER user_updated_at_trigger
+BEFORE UPDATE ON "User"
+FOR EACH ROW
+EXECUTE FUNCTION set_user_updated_at();
+
+CREATE TABLE IF NOT EXISTS "AnalyticsEvent" (
+  id TEXT PRIMARY KEY,
+  event_name TEXT NOT NULL,
+  pathname TEXT,
+  title TEXT,
+  "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- 2. Trip (core trip data)
