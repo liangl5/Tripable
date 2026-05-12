@@ -40,7 +40,9 @@ function createApiResponse(res) {
 function localApiPlugin() {
   const routes = new Map([
     ["/api/delete-account", "delete-account.js"],
-    ["/api/send-password-reset", "send-password-reset.js"]
+    ["/api/send-password-reset", "send-password-reset.js"],
+    ["/api/page-view", "page-view.js"],
+    ["/api/metrics", "metrics.js"]
   ]);
 
   return {
