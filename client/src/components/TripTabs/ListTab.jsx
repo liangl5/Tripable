@@ -724,7 +724,7 @@ export default function ListTab({
                 />
               ) : null}
               <div
-                className={`relative overflow-hidden rounded-2xl border bg-white shadow-sm transition ${
+                className={`relative rounded-2xl border bg-white shadow-sm transition ${
                   listDragState.listId && listDragState.overListId === list.id && listDragState.listId !== list.id
                     ? "border-ocean ring-1 ring-ocean/25"
                     : dragState.ideaId && dragState.overListId === list.id && !dragState.overIdeaId
